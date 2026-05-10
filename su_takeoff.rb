@@ -1,0 +1,11 @@
+require 'json'
+require 'csv'
+
+require_relative 'src/data_models'
+require_relative 'src/mapping'
+require_relative 'src/process_library'
+require_relative 'src/calculator'
+require_relative 'src/scanner'
+require_relative 'src/marker'
+require_relative 'src/ui/dialog'
+require_relative 'src/main'
