@@ -1,0 +1,34 @@
+/* src/ui/styles.css */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; background: #1e1e2e; color: #cdd6f4; }
+
+.tab-bar { display: flex; border-bottom: 1px solid #45475a; background: #181825; }
+.tab-btn { padding: 10px 20px; border: none; background: transparent; color: #a6adc8; cursor: pointer; font-size: 14px; }
+.tab-btn.active { background: #1e1e2e; color: #89b4fa; border-bottom: 2px solid #89b4fa; }
+
+.tab-content { display: none; padding: 12px; }
+.tab-content.active { display: block; }
+
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.toolbar button, .view-bar button { padding: 6px 14px; border: 1px solid #45475a; border-radius: 4px; background: #313244; color: #cdd6f4; cursor: pointer; }
+.toolbar button:hover, .view-bar button:hover { background: #45475a; }
+.toolbar input[type=text] { padding: 6px 10px; border: 1px solid #45475a; border-radius: 4px; background: #313244; color: #cdd6f4; flex: 1; }
+
+.view-bar { display: flex; gap: 4px; margin-bottom: 12px; }
+.view-btn { padding: 4px 12px; border: 1px solid #45475a; border-radius: 4px; background: transparent; color: #a6adc8; cursor: pointer; }
+.view-btn.active { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { background: #313244; color: #cdd6f4; padding: 8px 6px; text-align: left; border: 1px solid #45475a; position: sticky; top: 0; }
+td { padding: 6px; border: 1px solid #45475a; }
+tr.unmapped { background: #3b1a1a; }
+tr.unmapped td:first-child { color: #f38ba8; }
+.hint { color: #6c7086; text-align: center; padding: 40px; }
+
+.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; }
+.modal-content { background: #313244; border-radius: 8px; padding: 20px; min-width: 350px; }
+.modal-content label { display: block; margin: 8px 0; }
+.modal-content input, .modal-content select { width: 100%; padding: 6px; border: 1px solid #45475a; border-radius: 4px; background: #1e1e2e; color: #cdd6f4; margin-top: 2px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+.modal-actions button { padding: 6px 14px; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; }
+.modal-actions button:first-child { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }

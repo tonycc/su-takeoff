@@ -1,0 +1,87 @@
+<!-- src/ui/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="statistics">📊 统计</button>
+    <button class="tab-btn" data-tab="mapping">📋 映射</button>
+    <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
+  </div>
+
+  <!-- Tab 1: Statistics -->
+  <div id="tab-statistics" class="tab-content active">
+    <div class="toolbar">
+      <button onclick="scanAll()">扫描全部</button>
+      <button onclick="scanSelected()">仅选中面</button>
+      <button onclick="manualMark()">手动标记面</button>
+    </div>
+    <div class="view-bar">
+      <button class="view-btn active" data-view="by-space" onclick="switchView('by-space')">按空间汇总</button>
+      <button class="view-btn" data-view="by-material" onclick="switchView('by-material')">按材料汇总</button>
+      <button class="view-btn" data-view="detail" onclick="switchView('detail')">展开明细</button>
+    </div>
+    <div id="stats-table-container">
+      <p class="hint">点击「扫描全部」开始统计</p>
+    </div>
+  </div>
+
+  <!-- Tab 2: Mapping -->
+  <div id="tab-mapping" class="tab-content">
+    <div class="toolbar">
+      <input type="text" id="search-mapping" placeholder="搜索SU材质..." oninput="filterMappings()">
+      <button onclick="importCsv()">导入CSV</button>
+      <button onclick="exportCsv()">导出CSV</button>
+      <button onclick="openAddMapping()">+ 新增</button>
+    </div>
+    <div id="mapping-table-container">
+      <table id="mapping-table">
+        <thead>
+          <tr>
+            <th>SU材质名</th>
+            <th>真实材料名</th>
+            <th>分类</th>
+            <th>单位</th>
+            <th>规格</th>
+            <th>默认损耗率</th>
+            <th>工艺</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="mapping-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tab 3: Settings -->
+  <div id="tab-settings" class="tab-content">
+    <p>设置将在后续版本中提供。</p>
+  </div>
+
+  <!-- Marking Dialog (hidden) -->
+  <div id="marking-dialog" class="modal" style="display:none">
+    <div class="modal-content">
+      <h3>手动标记面</h3>
+      <label>材料名称: <input type="text" id="mark-material"></label>
+      <label>部位:
+        <select id="mark-part">
+          <option value="floor">地面</option>
+          <option value="wall">墙面</option>
+          <option value="ceiling">天花</option>
+        </select>
+      </label>
+      <label>所属空间: <input type="text" id="mark-space"></label>
+      <label>损耗率: <input type="number" id="mark-waste" step="0.01" value="0.05"></label>
+      <div class="modal-actions">
+        <button onclick="confirmMark()">确认标记</button>
+        <button onclick="closeMarkDialog()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
