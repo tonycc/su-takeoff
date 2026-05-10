@@ -1,0 +1,23 @@
+{
+  "marble_01": {
+    "material_name": "爵士白大理石",
+    "category": "石材",
+    "unit": "m²",
+    "spec": "大板",
+    "default_waste_rate": 0.08
+  },
+  "tile_302": {
+    "material_name": "马可波罗灰砖",
+    "category": "瓷砖",
+    "unit": "m²",
+    "spec": "600×600",
+    "default_waste_rate": 0.05
+  },
+  "paint_w": {
+    "material_name": "多乐士净味白",
+    "category": "涂料",
+    "unit": "m²",
+    "spec": "18L/桶",
+    "default_waste_rate": 0.05
+  }
+}
