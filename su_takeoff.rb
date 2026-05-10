@@ -1,5 +1,6 @@
 require 'json'
 require 'csv'
+require 'singleton'
 
 require_relative 'src/data_models'
 require_relative 'src/mapping'
