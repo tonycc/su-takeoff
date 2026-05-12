@@ -115,3 +115,82 @@ tr.unmapped td:first-child { color: #f38ba8; }
 .part-badge-wall { background: #3a3148; color: #cba6f7; }
 .part-badge-ceiling { background: #2f3a31; color: #a6e3a1; }
 .part-badge-mixed { background: #3a2f2f; color: #f9e2af; }
+
+/* ---------- Workbench ---------- */
+.empty-state { padding: 80px 20px; text-align: center; color: #6c7086; font-size: 14px; }
+
+.summary-bar {
+  display: flex; gap: 20px; flex-wrap: wrap;
+  background: #181825; border: 1px solid #45475a; border-radius: 6px;
+  padding: 10px 14px; margin-bottom: 12px; font-size: 12px;
+}
+.summary-bar .sum-item { color: #cdd6f4; }
+.summary-bar .sum-item::before { content: '· '; color: #6c7086; }
+.summary-bar .sum-item:first-child::before { content: ''; }
+
+.view-container { min-height: 200px; }
+
+/* ---------- Material view filter bar ---------- */
+.material-filter-bar {
+  display: flex; gap: 6px; margin-bottom: 10px; align-items: center; flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 12px; border: 1px solid #45475a; border-radius: 4px;
+  background: transparent; color: #a6adc8; cursor: pointer; font-size: 12px;
+}
+.filter-btn.active { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
+#material-search {
+  flex: 1; min-width: 160px; padding: 5px 10px; border: 1px solid #45475a;
+  border-radius: 4px; background: #313244; color: #cdd6f4; font-size: 12px;
+}
+
+#material-tbody input[type=text], #material-tbody input[type=number], #material-tbody select {
+  width: 100%; padding: 4px 6px; border: 1px solid #45475a; border-radius: 3px;
+  background: #1e1e2e; color: #cdd6f4; font-size: 12px;
+}
+#material-tbody td { vertical-align: middle; }
+#material-tbody .u-name-row { display: flex; align-items: center; gap: 6px; }
+#material-tbody .u-name {
+  font-weight: 500; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 170px;
+}
+#material-tbody .swatch {
+  display: inline-block; width: 16px; height: 16px; border-radius: 3px;
+  border: 1px solid #45475a; flex-shrink: 0;
+}
+#material-tbody .swatch-empty {
+  background: repeating-linear-gradient(45deg, #313244, #313244 3px, #1e1e2e 3px, #1e1e2e 6px);
+  color: #6c7086; font-size: 10px; text-align: center; line-height: 16px;
+}
+#material-tbody .pill {
+  display: inline-block; padding: 1px 6px; margin: 1px 2px 1px 0;
+  border-radius: 8px; font-size: 10px; background: #313244; color: #cdd6f4;
+}
+#material-tbody .pill-floor { background: #313a4a; color: #89b4fa; }
+#material-tbody .pill-wall { background: #3a3148; color: #cba6f7; }
+#material-tbody .pill-ceiling { background: #2f3a31; color: #a6e3a1; }
+#material-tbody button {
+  padding: 4px 8px; border: 1px solid #45475a; border-radius: 3px;
+  background: #313244; color: #cdd6f4; cursor: pointer;
+}
+#material-tbody button:hover { background: #89b4fa; color: #1e1e2e; }
+#material-tbody tr.row-mapped td { opacity: 0.75; }
+#material-tbody tr.row-ignored td { opacity: 0.5; }
+#material-tbody tr.row-unresolved { background: rgba(243, 139, 168, 0.04); }
+
+/* ---------- Purchase view ---------- */
+.warning-bar {
+  background: #3b1a1a; border: 1px solid #f38ba8; color: #f38ba8;
+  padding: 8px 12px; border-radius: 4px; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 10px; font-size: 12px;
+}
+.warning-bar button {
+  margin-left: auto; padding: 3px 10px; border: 1px solid #f38ba8;
+  border-radius: 3px; background: transparent; color: #f38ba8;
+  cursor: pointer; font-size: 11px;
+}
+.pm-btn {
+  padding: 4px 12px; border: 1px solid #45475a; border-radius: 4px;
+  background: transparent; color: #a6adc8; cursor: pointer;
+}
+.pm-btn.active { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
