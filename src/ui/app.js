@@ -451,8 +451,162 @@ function toggleMaterialIgnore(name, on) {
   if (on) set[name] = true; else delete set[name];
   callSketchUp('set_ignored', JSON.stringify(Object.keys(set)));
 }
+window._purchaseMode = 'by-material';
+
 function renderPurchaseView(data) {
-  document.getElementById('view-purchase').innerHTML = '<p class="hint">采购量视图 (待实现)</p>';
+  var container = document.getElementById('view-purchase');
+  var unresolved = (data.overview && data.overview.unresolved_count) || 0;
+  var warning = unresolved > 0
+    ? '<div class="warning-bar">⚠ 还有 ' + unresolved + ' 种材质未映射，未计入采购量 ' +
+      '<button onclick="jumpToUnresolved()">前往材料视图</button></div>'
+    : '';
+  var toolbar =
+    '<div class="toolbar">' +
+      '<span>汇总方式：</span>' +
+      '<button class="pm-btn' + (window._purchaseMode === 'by-material' ? ' active' : '') + '" onclick="setPurchaseMode(\'by-material\')">按材料</button>' +
+      '<button class="pm-btn' + (window._purchaseMode === 'by-space' ? ' active' : '') + '" onclick="setPurchaseMode(\'by-space\')">按空间</button>' +
+      '<span style="flex:1"></span>' +
+      '<button onclick="exportPurchaseCsv()">导出 CSV</button>' +
+    '</div>';
+  container.innerHTML = warning + toolbar + renderPurchaseTable(data);
+}
+
+function setPurchaseMode(mode) {
+  window._purchaseMode = mode;
+  renderPurchaseView(window._workbench);
+}
+
+function renderPurchaseTable(data) {
+  if (window._purchaseMode === 'by-space') return renderPurchaseBySpace(data);
+  return renderPurchaseByMaterial(data);
+}
+
+function renderPurchaseByMaterial(data) {
+  var usages = data.usages || [];
+  var grouped = {};
+  usages.forEach(function(u) {
+    var key = u.material_name || '—';
+    if (!grouped[key]) grouped[key] = {
+      material_name: u.material_name, category: u.category || '',
+      spec: u.spec || '', unit: u.unit || 'm2',
+      net_area: 0, waste_rate: u.waste_rate || 0, purchase_qty: 0
+    };
+    grouped[key].net_area += u.net_area || 0;
+    grouped[key].purchase_qty += u.purchase_qty || 0;
+  });
+  var rows = Object.values(grouped);
+  var totalPurchase = rows.reduce(function(s, r) { return s + r.purchase_qty; }, 0) || 1;
+  rows.sort(function(a, b) { return b.purchase_qty - a.purchase_qty; });
+
+  if (rows.length === 0) {
+    return '<p class="hint">暂无已映射材质</p>';
+  }
+  var html = '<table><thead><tr>' +
+    '<th>材料</th><th>分类</th><th>规格</th><th>单位</th>' +
+    '<th style="text-align:right">净面积</th><th style="text-align:right">损耗率</th>' +
+    '<th style="text-align:right">采购量</th><th style="text-align:right">占比</th>' +
+    '</tr></thead><tbody>';
+  var totalNet = 0;
+  rows.forEach(function(r) {
+    totalNet += r.net_area;
+    var pct = (r.purchase_qty / totalPurchase * 100).toFixed(0) + '%';
+    html += '<tr>' +
+      '<td>' + esc(r.material_name) + '</td>' +
+      '<td>' + esc(r.category) + '</td>' +
+      '<td>' + esc(r.spec || '-') + '</td>' +
+      '<td>' + esc(r.unit) + '</td>' +
+      '<td style="text-align:right">' + r.net_area.toFixed(2) + '</td>' +
+      '<td style="text-align:right">' + (r.waste_rate * 100).toFixed(0) + '%</td>' +
+      '<td style="text-align:right">' + r.purchase_qty.toFixed(2) + '</td>' +
+      '<td style="text-align:right">' + pct + '</td>' +
+      '</tr>';
+  });
+  html += '<tr style="font-weight:bold;background:#313244">' +
+    '<td>合计</td><td></td><td></td><td></td>' +
+    '<td style="text-align:right">' + totalNet.toFixed(2) + '</td>' +
+    '<td></td>' +
+    '<td style="text-align:right">' + totalPurchase.toFixed(2) + '</td>' +
+    '<td></td>' +
+    '</tr>';
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderPurchaseBySpace(data) {
+  var usages = data.usages || [];
+  if (usages.length === 0) return '<p class="hint">暂无已映射材质</p>';
+  var partLabels = { floor: '地面', wall: '墙面', ceiling: '天花' };
+  var html = '<table><thead><tr>' +
+    '<th>空间</th><th>部位</th><th>材料</th><th>分类</th><th>规格</th><th>单位</th>' +
+    '<th style="text-align:right">净面积</th><th style="text-align:right">损耗率</th>' +
+    '<th style="text-align:right">采购量</th>' +
+    '</tr></thead><tbody>';
+  usages.forEach(function(u) {
+    html += '<tr>' +
+      '<td>' + esc(u.space || '—') + '</td>' +
+      '<td>' + esc(partLabels[u.part] || u.part || '—') + '</td>' +
+      '<td>' + esc(u.material_name) + '</td>' +
+      '<td>' + esc(u.category || '') + '</td>' +
+      '<td>' + esc(u.spec || '-') + '</td>' +
+      '<td>' + esc(u.unit || 'm2') + '</td>' +
+      '<td style="text-align:right">' + (u.net_area || 0) + '</td>' +
+      '<td style="text-align:right">' + ((u.waste_rate || 0) * 100).toFixed(0) + '%</td>' +
+      '<td style="text-align:right">' + (u.purchase_qty || 0) + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function exportPurchaseCsv() {
+  var data = window._workbench;
+  if (!data) return;
+  var lines = [];
+  if (window._purchaseMode === 'by-space') {
+    lines.push(['空间', '部位', '材料', '分类', '规格', '单位', '净面积', '损耗率', '采购量'].join(','));
+    (data.usages || []).forEach(function(u) {
+      lines.push([
+        u.space || '', u.part || '', u.material_name || '', u.category || '',
+        u.spec || '', u.unit || 'm2', u.net_area || 0,
+        ((u.waste_rate || 0) * 100).toFixed(0) + '%', u.purchase_qty || 0
+      ].map(csvEscape).join(','));
+    });
+  } else {
+    lines.push(['材料', '分类', '规格', '单位', '净面积', '损耗率', '采购量'].join(','));
+    var grouped = {};
+    (data.usages || []).forEach(function(u) {
+      var key = u.material_name || '—';
+      if (!grouped[key]) grouped[key] = {
+        material_name: u.material_name, category: u.category || '',
+        spec: u.spec || '', unit: u.unit || 'm2',
+        net_area: 0, waste_rate: u.waste_rate || 0, purchase_qty: 0
+      };
+      grouped[key].net_area += u.net_area || 0;
+      grouped[key].purchase_qty += u.purchase_qty || 0;
+    });
+    Object.values(grouped).forEach(function(r) {
+      lines.push([
+        r.material_name, r.category, r.spec || '', r.unit,
+        r.net_area.toFixed(2), (r.waste_rate * 100).toFixed(0) + '%', r.purchase_qty.toFixed(2)
+      ].map(csvEscape).join(','));
+    });
+  }
+  var csv = '﻿' + lines.join('\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'purchase_' + window._purchaseMode + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(v) {
+  var s = String(v == null ? '' : v);
+  if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
 }
 
 // ---------------- Material categorization helpers ----------------
