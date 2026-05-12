@@ -80,8 +80,205 @@ function jumpToUnresolved() {
 
 // ---------------- View renderers (stubs — replaced in subsequent tasks) ----------------
 function renderComponentView(data) {
-  document.getElementById('view-component').innerHTML = '<p class="hint">组件视图 (待实现)</p>';
+  var tree = buildComponentTree(data.items || []);
+  var purchaseBySu = buildPurchaseBySuMaterial(data.usages || []);
+  var html = renderComponentTable(tree, purchaseBySu);
+  document.getElementById('view-component').innerHTML = html;
+  document.querySelectorAll('#view-component .comp-row').forEach(function(row) {
+    row.addEventListener('click', function() {
+      var toggle = row.querySelector('.comp-toggle');
+      if (toggle) toggleComponent(toggle.id.replace('-toggle', ''));
+    });
+  });
 }
+
+function buildComponentTree(items) {
+  var root = { name: '', path: [], path_ids: [], faces: [], children: [], childrenMap: {} };
+  items.forEach(function(item) {
+    var path = item.component_path || [];
+    var ids = item.component_path_ids || [];
+    var node = root;
+    path.forEach(function(name, idx) {
+      var id = ids[idx];
+      var key = id != null ? String(id) : ('name:' + name + ':' + idx);
+      if (!node.childrenMap[key]) {
+        var child = {
+          name: name, id: id,
+          path: path.slice(0, idx + 1),
+          path_ids: ids.slice(0, idx + 1),
+          faces: [], children: [], childrenMap: {}
+        };
+        node.children.push(child);
+        node.childrenMap[key] = child;
+      }
+      node = node.childrenMap[key];
+    });
+    node.faces.push(item);
+  });
+  aggregateComponentStats(root);
+  return root;
+}
+
+function aggregateComponentStats(node) {
+  var stats = {
+    face_count: 0, total_area: 0.0,
+    by_part: { floor: 0.0, wall: 0.0, ceiling: 0.0 },
+    material_names: {}, material_count: 0
+  };
+  node.children.forEach(function(child) {
+    var cs = aggregateComponentStats(child);
+    stats.face_count += cs.face_count;
+    stats.total_area += cs.total_area;
+    stats.by_part.floor += cs.by_part.floor;
+    stats.by_part.wall += cs.by_part.wall;
+    stats.by_part.ceiling += cs.by_part.ceiling;
+    Object.keys(cs.material_names).forEach(function(m) { stats.material_names[m] = true; });
+  });
+  node.faces.forEach(function(face) {
+    stats.face_count += 1;
+    stats.total_area += face.qty || 0;
+    if (face.part) stats.by_part[face.part] = (stats.by_part[face.part] || 0) + (face.qty || 0);
+    if (face.su_material) stats.material_names[face.su_material] = true;
+  });
+  stats.material_count = Object.keys(stats.material_names).length;
+  stats.total_area = +stats.total_area.toFixed(2);
+  stats.by_part.floor = +stats.by_part.floor.toFixed(2);
+  stats.by_part.wall = +stats.by_part.wall.toFixed(2);
+  stats.by_part.ceiling = +stats.by_part.ceiling.toFixed(2);
+  node.stats = stats;
+  return stats;
+}
+
+function dominantPartBadge(stats) {
+  var total = (stats.by_part.floor || 0) + (stats.by_part.wall || 0) + (stats.by_part.ceiling || 0);
+  if (total <= 0) return '';
+  var threshold = 0.8;
+  var labels = { floor: '地面', wall: '墙面', ceiling: '天花' };
+  var dominant = null;
+  ['floor', 'wall', 'ceiling'].forEach(function(p) {
+    if ((stats.by_part[p] || 0) / total >= threshold) dominant = p;
+  });
+  if (dominant) {
+    return ' <span class="part-badge part-badge-' + dominant + '">' + labels[dominant] + '</span>';
+  }
+  return ' <span class="part-badge part-badge-mixed">混合</span>';
+}
+
+function buildPurchaseBySuMaterial(usages) {
+  var result = {};
+  usages.forEach(function(u) {
+    var su = u.su_material_name;
+    if (!su) return;
+    result[su] = (result[su] || 0) + (u.purchase_qty || 0);
+  });
+  Object.keys(result).forEach(function(k) { result[k] = +result[k].toFixed(2); });
+  return result;
+}
+
+function renderComponentTable(tree, purchaseBySu) {
+  if (tree.faces.length > 0) {
+    var orphan = {
+      name: '模型根层级', path: [], path_ids: [], faces: tree.faces,
+      children: [], childrenMap: {}
+    };
+    aggregateComponentStats(orphan);
+    tree.children.unshift(orphan);
+    tree.faces = [];
+  }
+  var html = '<table><thead><tr>' +
+    '<th>组件 / 面</th>' +
+    '<th style="text-align:right">面数</th>' +
+    '<th style="text-align:right">面积(m²)</th>' +
+    '<th style="text-align:right">地面</th>' +
+    '<th style="text-align:right">墙面</th>' +
+    '<th style="text-align:right">天花</th>' +
+    '<th style="text-align:right">材质数</th>' +
+    '<th>材质</th>' +
+    '<th style="text-align:right">采购量</th>' +
+    '</tr></thead><tbody>';
+  var rootId = 'comp-root';
+  tree.children.forEach(function(child) {
+    html += renderComponentNode(child, 1, rootId, purchaseBySu);
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderComponentNode(node, depth, parentId, purchaseBySu) {
+  var html = '';
+  var idKey = (node.path_ids || []).join('-') || 'noid-' + node.path.join('-');
+  var nodeId = 'comp-' + idKey.replace(/[^a-zA-Z0-9\-]/g, '_');
+  var indent = depth * 18;
+  var hasChildren = node.children.length > 0 || node.faces.length > 0;
+  var hidden = depth > 1 ? ' style="display:none"' : '';
+  var partBadge = dominantPartBadge(node.stats);
+
+  var mats = Object.keys(node.stats.material_names);
+  var purchaseTotal = 0;
+  var anyUnmapped = false;
+  mats.forEach(function(m) {
+    if (purchaseBySu[m] != null) purchaseTotal += purchaseBySu[m];
+    else anyUnmapped = true;
+  });
+  var purchaseCell = mats.length === 0 ? '—' :
+    (anyUnmapped
+      ? '<span style="color:#6c7086" title="含未映射材质">' + purchaseTotal.toFixed(2) + ' *</span>'
+      : purchaseTotal.toFixed(2));
+
+  html += '<tr class="comp-row" data-depth="' + depth + '" data-parent="' + parentId + '"' + hidden + '>' +
+    '<td style="padding-left:' + (indent + 6) + 'px">';
+  if (hasChildren) {
+    html += '<span class="comp-toggle" id="' + nodeId + '-toggle">' + (depth === 1 ? '▾' : '▸') + '</span> ';
+  } else {
+    html += '<span class="comp-toggle-empty"></span> ';
+  }
+  html += esc(node.name) + partBadge + '</td>' +
+    '<td style="text-align:right">' + node.stats.face_count + '</td>' +
+    '<td style="text-align:right">' + node.stats.total_area + '</td>' +
+    '<td style="text-align:right">' + (node.stats.by_part.floor > 0 ? node.stats.by_part.floor : '—') + '</td>' +
+    '<td style="text-align:right">' + (node.stats.by_part.wall > 0 ? node.stats.by_part.wall : '—') + '</td>' +
+    '<td style="text-align:right">' + (node.stats.by_part.ceiling > 0 ? node.stats.by_part.ceiling : '—') + '</td>' +
+    '<td style="text-align:right">' + node.stats.material_count + '</td>' +
+    '<td style="font-size:11px">' + esc(mats.join(', ') || '—') + '</td>' +
+    '<td style="text-align:right">' + purchaseCell + '</td>' +
+    '</tr>';
+
+  node.children.forEach(function(child) {
+    html += renderComponentNode(child, depth + 1, nodeId, purchaseBySu);
+  });
+  node.faces.forEach(function(face) {
+    html += renderFaceRow(face, depth + 1, nodeId, purchaseBySu);
+  });
+  return html;
+}
+
+function renderFaceRow(face, depth, parentId, purchaseBySu) {
+  var indent = depth * 18;
+  var mapped = face.su_material && purchaseBySu[face.su_material] != null;
+  var statusIcon = !face.su_material ? '' :
+    (mapped ? '<span style="color:#a6e3a1">✓</span> ' : '<span style="color:#f38ba8">●</span> ');
+  return '<tr class="face-row" data-depth="' + depth + '" data-parent="' + parentId + '" style="display:none">' +
+    '<td style="padding-left:' + (indent + 6) + 'px; font-size:10px; color:#6c7086;">' + statusIcon + '面 #' + esc(face.face_id) + '</td>' +
+    '<td></td>' +
+    '<td style="text-align:right">' + (face.qty || 0) + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'floor' ? (face.qty || 0) : '—') + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'wall' ? (face.qty || 0) : '—') + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'ceiling' ? (face.qty || 0) : '—') + '</td>' +
+    '<td></td>' +
+    '<td style="font-size:10px">' + esc(face.su_material || '未赋材质') + '</td>' +
+    '<td></td>' +
+    '</tr>';
+}
+
+function toggleComponent(nodeId) {
+  var rows = document.querySelectorAll('[data-parent="' + nodeId + '"]');
+  var toggle = document.getElementById(nodeId + '-toggle');
+  if (!rows.length) return;
+  var isHidden = rows[0].style.display === 'none';
+  rows.forEach(function(row) { row.style.display = isHidden ? '' : 'none'; });
+  if (toggle) toggle.textContent = isHidden ? '▾' : '▸';
+}
+
 function renderMaterialView(data) {
   document.getElementById('view-material').innerHTML = '<p class="hint">材料视图 (待实现)</p>';
 }
