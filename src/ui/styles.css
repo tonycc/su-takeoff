@@ -97,3 +97,13 @@ tr.unmapped td:first-child { color: #f38ba8; }
 #review-body tr.row-mapped td { opacity: 0.7; }
 #review-body tr.row-ignored td { opacity: 0.5; }
 #review-body tr.row-unresolved { background: rgba(243, 139, 168, 0.04); }
+
+/* Component tree table */
+.comp-row { cursor: pointer; }
+.comp-row:hover { background: #1e1e3e; }
+.comp-row td { border: 1px solid #45475a; padding: 6px 8px; }
+.comp-row td:first-child { font-weight: 500; color: #cdd6f4; }
+.comp-toggle { color: #89b4fa; font-size: 12px; font-weight: bold; min-width: 14px; display: inline-block; cursor: pointer; user-select: none; }
+.face-row td { border: 1px solid #2a2a3a; padding: 3px 8px; color: #a6adc8; font-size: 11px; }
+.face-row { background: #16161e; }
+.face-row:hover { background: #1c1c28; }
