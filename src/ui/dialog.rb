@@ -20,7 +20,6 @@ module SuTakeoff
       @dialog.add_action_callback('scan_selected') { |_ctx| do_scan(selection_only: true) }
       @dialog.add_action_callback('save_mappings_batch') { |_ctx, json| save_mappings_batch(json) }
       @dialog.add_action_callback('set_ignored') { |_ctx, json| set_ignored(json) }
-      @dialog.add_action_callback('finalize_compute') { |_ctx| finalize_and_compute }
       @dialog.add_action_callback('get_mappings') { |_ctx| send_mappings }
       @dialog.add_action_callback('save_mapping') { |_ctx, json| save_mapping(json) }
       @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| delete_mapping(su_name) }
@@ -59,105 +58,47 @@ module SuTakeoff
         colors: scanner.material_colors
       }
 
-      send_review_state
+      send_workbench_state
     end
 
-    # Compute the unresolved set and push the review payload to the UI.
-    def send_review_state
+    # Unified state push — called after scan and after any mapping/ignored change.
+    # Computes usages for all mapped materials; unmapped are returned for editing UI.
+    def send_workbench_state
       return unless @last_scan
 
       mapping = PluginState.instance.mapping
       ignored = PluginState.instance.ignored
+      processes = PluginState.instance.processes
       all_items = @last_scan[:items]
 
       used_names = all_items.map(&:su_material).compact.uniq
       unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
+      mapped_names = used_names.select { |n| mapping.get(n) }
+      ignored_names = ignored & used_names
 
-      Debug.subsection "审核状态分析"
-      Debug.log "材质种类: #{used_names.size}"
-      Debug.log "已映射: #{used_names.count { |n| mapping.get(n) }}"
-      Debug.log "已忽略: #{(ignored & used_names).size}"
-      Debug.log "待处理: #{unresolved.size}"
+      Debug.subsection "工作台状态推送"
+      Debug.log "材质种类: #{used_names.size} | 已映射: #{mapped_names.size} | 已忽略: #{ignored_names.size} | 待处理: #{unresolved.size}"
 
-      if unresolved.any?
-        Debug.log "待处理材质:"
-        unresolved.each { |n| Debug.log "  ❓ #{n}" }
-      end
-
-      if (ignored & used_names).any?
-        Debug.log "已忽略材质:"
-        (ignored & used_names).each { |n| Debug.log "  🙈 #{n}" }
-      end
+      # Recompute usages for all mapped materials. Unmapped materials are
+      # filtered by Calculator (no record in mapping → skipped).
+      calc = Calculator.new(mapping, processes)
+      usages = calc.compute(all_items, @last_scan[:openings], {})
+      by_material = calc.group_by_material(usages)
 
       info = build_material_info(used_names, all_items, @last_scan[:colors])
 
       data = {
-        phase: 'review',
         overview: {
           total_faces: all_items.size,
           total_area: all_items.sum(&:qty).round(2),
           total_openings: @last_scan[:openings].size,
           total_opening_area: @last_scan[:openings].sum(&:area).round(2),
           material_count: used_names.size,
-          mapped: used_names.count { |n| mapping.get(n) },
-          ignored_count: (ignored & used_names).size,
+          mapped: mapped_names.size,
+          ignored_count: ignored_names.size,
           unresolved_count: unresolved.size
         },
         items: all_items.map { |it|
-          h = it.to_h
-          h[:normal] = it.normal  # ensure array is serialized properly
-          h[:component_path] = it.component_path
-          h[:component_path_ids] = it.component_path_ids
-          h[:part] = Calculator.face_orientation(it.normal)
-          h
-        },
-        openings: @last_scan[:openings].map(&:to_h),
-        ignored: ignored & used_names,
-        unresolved: unresolved,
-        materials_info: info,
-        categories: PluginState.instance.processes.all_categories
-      }
-      @dialog.execute_script("window.renderReview(#{JSON.generate(data)})")
-    end
-
-    # Phase 2 — user finished resolving. Now compute the stats.
-    def finalize_and_compute
-      unless @last_scan
-        UI.messagebox('请先扫描模型')
-        return
-      end
-
-      mapping = PluginState.instance.mapping
-      ignored = PluginState.instance.ignored
-      processes = PluginState.instance.processes
-
-      used_names = @last_scan[:items].map(&:su_material).compact.uniq
-      unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
-      unless unresolved.empty?
-        UI.messagebox("仍有 #{unresolved.size} 种未处理材质，请先在「未映射」页完成映射或忽略")
-        send_review_state
-        return
-      end
-
-      Debug.section "【阶段二】开始统计计算"
-
-      calc = Calculator.new(mapping, processes)
-      usages = calc.compute(@last_scan[:items], @last_scan[:openings], {})
-      by_material = calc.group_by_material(usages)
-
-      Debug.subsection "按材料汇总"
-      by_material.each do |mat_name, v|
-        Debug.log "  #{mat_name}: 净面积=#{v[:net_area]}m² 采购量=#{v[:purchase_qty]}m²"
-      end
-      Debug.log
-
-      data = {
-        phase: 'done',
-        by_space: usages.map(&:to_h),
-        by_material: by_material.transform_values { |v|
-          { net_area: v[:net_area], purchase_qty: v[:purchase_qty] }
-        },
-        items: @last_scan[:items].map { |it|
           h = it.to_h
           h[:normal] = it.normal
           h[:component_path] = it.component_path
@@ -165,9 +106,17 @@ module SuTakeoff
           h[:part] = Calculator.face_orientation(it.normal)
           h
         },
-        openings: @last_scan[:openings].map(&:to_h)
+        openings: @last_scan[:openings].map(&:to_h),
+        ignored: ignored_names,
+        unresolved: unresolved,
+        materials_info: info,
+        categories: processes.all_categories,
+        usages: usages.map(&:to_h),
+        by_material: by_material.transform_values { |v|
+          { net_area: v[:net_area], purchase_qty: v[:purchase_qty] }
+        }
       }
-      @dialog.execute_script("window.renderResults(#{JSON.generate(data)})")
+      @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
     end
 
     # Build per-material context (faces / area / part breakdown / spaces / color)
@@ -203,14 +152,14 @@ module SuTakeoff
               row['unit'] || 'm²', row['spec'] || '', (row['waste_rate'] || 0.05).to_f)
       end
       m.save_json(PluginState.mapping_path)
-      send_review_state if @last_scan
+      send_workbench_state if @last_scan
       send_mappings
     end
 
     def set_ignored(json)
       names = JSON.parse(json)
       PluginState.instance.ignore!(names)
-      send_review_state if @last_scan
+      send_workbench_state if @last_scan
     end
 
     def locate_material(su_name)
@@ -295,7 +244,7 @@ module SuTakeoff
       if PluginState.instance.load_from_model_dialog
         send_mappings
         send_processes
-        send_review_state if @last_scan
+        send_workbench_state if @last_scan
         UI.messagebox('已从模型属性字典加载规则并同步到本地文件。')
       end
     end
