@@ -32,3 +32,68 @@ tr.unmapped td:first-child { color: #f38ba8; }
 .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
 .modal-actions button { padding: 6px 14px; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; }
 .modal-actions button:first-child { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
+
+.badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 6px; background: #f38ba8; color: #1e1e2e; border-radius: 9px; font-size: 11px; font-weight: bold; text-align: center; line-height: 18px; }
+
+.tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.tag-mapped { background: #203526; color: #a6e3a1; }
+.tag-ignored { background: #2a2a2a; color: #6c7086; }
+.tag-unresolved { background: #3b1a1a; color: #f38ba8; }
+
+.primary-btn { background: #89b4fa !important; color: #1e1e2e !important; border-color: #89b4fa !important; font-weight: 600; }
+.primary-btn:hover { background: #74c7ec !important; }
+
+/* Phase cards — switching layout */
+.phase-card {}
+
+/* Scan results */
+.scan-overview { background: #181825; border: 1px solid #45475a; border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+.scan-overview .ov-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+.scan-overview .ov-item { flex: 1; min-width: 100px; }
+.scan-overview .ov-label { font-size: 11px; color: #6c7086; }
+.scan-overview .ov-value { font-size: 16px; font-weight: 700; color: #89b4fa; }
+
+.section-title { font-size: 13px; color: #a6adc8; margin: 12px 0 6px; padding-left: 4px; border-left: 3px solid #89b4fa; }
+
+.scroll-table { max-height: 300px; overflow-y: auto; border: 1px solid #45475a; border-radius: 4px; }
+.scroll-table table { margin: 0; }
+.scroll-table th { position: sticky; top: 0; z-index: 1; }
+
+/* Collapsible group tree */
+.group-node { margin-bottom: 6px; border: 1px solid #45475a; border-radius: 4px; }
+.group-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #181825; cursor: pointer; border-radius: 4px; }
+.group-header:hover { background: #1e1e3e; }
+.group-toggle { color: #89b4fa; font-size: 14px; font-weight: bold; min-width: 16px; }
+.group-name { font-weight: 600; font-size: 14px; }
+.group-stats { display: flex; gap: 6px; font-size: 11px; color: #a6adc8; }
+.group-stats .pill { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
+.group-stats .pill-floor { background: #313a4a; color: #89b4fa; }
+.group-stats .pill-wall { background: #3a3148; color: #cba6f7; }
+.group-stats .pill-ceiling { background: #2f3a31; color: #a6e3a1; }
+.group-detail { display: none; padding: 0 8px 8px; }
+.group-detail.expanded { display: block; }
+.group-detail table { font-size: 11px; }
+
+/* Review table inside mapping phase */
+#review-body input[type=text], #review-body input[type=number], #review-body select {
+  width: 100%; padding: 4px 6px; border: 1px solid #45475a; border-radius: 3px;
+  background: #1e1e2e; color: #cdd6f4; font-size: 12px;
+}
+#review-body td { vertical-align: middle; }
+#review-body .u-name-row { display: flex; align-items: center; gap: 6px; }
+#review-body .u-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+#review-body .swatch { display: inline-block; width: 18px; height: 18px; border-radius: 3px; border: 1px solid #45475a; flex-shrink: 0; }
+#review-body .swatch-empty { background: repeating-linear-gradient(45deg, #313244, #313244 3px, #1e1e2e 3px, #1e1e2e 6px); color: #6c7086; font-size: 10px; text-align: center; line-height: 18px; }
+#review-body .u-meta { display: flex; gap: 8px; font-size: 11px; color: #a6adc8; margin-top: 2px; }
+#review-body .u-meta span::before { content: '· '; color: #6c7086; }
+#review-body .u-meta span:first-child::before { content: ''; }
+#review-body .pill { display: inline-block; padding: 1px 6px; margin: 1px 2px 1px 0; border-radius: 8px; font-size: 10px; background: #313244; color: #cdd6f4; }
+#review-body .pill-floor { background: #313a4a; color: #89b4fa; }
+#review-body .pill-wall { background: #3a3148; color: #cba6f7; }
+#review-body .pill-ceiling { background: #2f3a31; color: #a6e3a1; }
+#review-body .u-spaces { font-size: 10px; color: #6c7086; margin-top: 2px; }
+#review-body button { padding: 4px 8px; border: 1px solid #45475a; border-radius: 3px; background: #313244; color: #cdd6f4; cursor: pointer; }
+#review-body button:hover { background: #89b4fa; color: #1e1e2e; }
+#review-body tr.row-mapped td { opacity: 0.7; }
+#review-body tr.row-ignored td { opacity: 0.5; }
+#review-body tr.row-unresolved { background: rgba(243, 139, 168, 0.04); }

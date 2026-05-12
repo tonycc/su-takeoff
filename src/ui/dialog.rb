@@ -2,22 +2,35 @@
 module SuTakeoff
   class Dialog
     def initialize
-      @dialog = UI::WebDialog.new('SU Takeoff — 材料统计',
-                                  'su_takeoff_dialog',
-                                  1000, 600, 200, 200, true)
+      @dialog = UI::HtmlDialog.new(
+        dialog_title: 'SU Takeoff — 材料统计',
+        preferences_key: 'su_takeoff_dialog',
+        scrollable: true,
+        resizable: true,
+        width: 1000,
+        height: 600,
+        left: 200,
+        top: 200,
+        style: UI::HtmlDialog::STYLE_DIALOG
+      )
       @dialog.set_file(File.join(__dir__, 'index.html'))
+      @last_scan = nil
 
-      # Bridge callbacks
-      @dialog.add_action_callback('scan_all') { |_, _| execute_scan(selection_only: false) }
-      @dialog.add_action_callback('scan_selected') { |_, _| execute_scan(selection_only: true) }
-      @dialog.add_action_callback('get_mappings') { |_, _| send_mappings }
-      @dialog.add_action_callback('save_mapping') { |_, json| save_mapping(json) }
-      @dialog.add_action_callback('delete_mapping') { |_, su_name| delete_mapping(su_name) }
-      @dialog.add_action_callback('import_csv') { |_, _| import_csv_dialog }
-      @dialog.add_action_callback('export_csv') { |_, _| export_csv_dialog }
-      @dialog.add_action_callback('get_unmapped') { |_, _| send_unmapped }
-      @dialog.add_action_callback('get_processes') { |_, _| send_processes }
-      @dialog.add_action_callback('apply_marking') { |_, json| apply_marking(json) }
+      @dialog.add_action_callback('scan_all') { |_ctx| do_scan(selection_only: false) }
+      @dialog.add_action_callback('scan_selected') { |_ctx| do_scan(selection_only: true) }
+      @dialog.add_action_callback('save_mappings_batch') { |_ctx, json| save_mappings_batch(json) }
+      @dialog.add_action_callback('set_ignored') { |_ctx, json| set_ignored(json) }
+      @dialog.add_action_callback('finalize_compute') { |_ctx| finalize_and_compute }
+      @dialog.add_action_callback('get_mappings') { |_ctx| send_mappings }
+      @dialog.add_action_callback('save_mapping') { |_ctx, json| save_mapping(json) }
+      @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| delete_mapping(su_name) }
+      @dialog.add_action_callback('import_csv') { |_ctx| import_csv_dialog }
+      @dialog.add_action_callback('export_csv') { |_ctx| export_csv_dialog }
+      @dialog.add_action_callback('get_processes') { |_ctx| send_processes }
+      @dialog.add_action_callback('apply_marking') { |_ctx, json| apply_marking(json) }
+      @dialog.add_action_callback('locate_material') { |_ctx, su_name| locate_material(su_name) }
+      @dialog.add_action_callback('snapshot_to_model') { |_ctx| snapshot_to_model }
+      @dialog.add_action_callback('load_from_model') { |_ctx| load_from_model }
     end
 
     def show
@@ -26,27 +39,202 @@ module SuTakeoff
 
     private
 
-    def execute_scan(selection_only:)
+    # Phase 1 — scan only. Reports unmapped materials; does NOT compute stats yet.
+    def do_scan(selection_only:)
+      Debug.section "【阶段一】扫描开始"
+
       scanner = Scanner.new
       result = scanner.scan(selection_only: selection_only)
+
+      Debug.subsection "人工标注面采集"
       marker_items = Marker.to_scan_items
       all_items = result[:items] + marker_items
 
+      Debug.log
+      Debug.log "合并后总面数: #{all_items.size} (扫描: #{result[:items].size} + 标注: #{marker_items.size})"
+
+      @last_scan = {
+        items: all_items,
+        openings: result[:openings],
+        colors: scanner.material_colors
+      }
+
+      send_review_state
+    end
+
+    # Compute the unresolved set and push the review payload to the UI.
+    def send_review_state
+      return unless @last_scan
+
       mapping = PluginState.instance.mapping
-      processes = PluginState.instance.processes
-      calc = Calculator.new(mapping, processes)
-      usages = calc.compute(all_items, result[:openings], {})
-      by_material = calc.group_by_material(usages)
-      unmapped = calc.unmapped_materials(all_items)
+      ignored = PluginState.instance.ignored
+      all_items = @last_scan[:items]
+
+      used_names = all_items.map(&:su_material).compact.uniq
+      unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
+
+      Debug.subsection "审核状态分析"
+      Debug.log "材质种类: #{used_names.size}"
+      Debug.log "已映射: #{used_names.count { |n| mapping.get(n) }}"
+      Debug.log "已忽略: #{(ignored & used_names).size}"
+      Debug.log "待处理: #{unresolved.size}"
+
+      if unresolved.any?
+        Debug.log "待处理材质:"
+        unresolved.each { |n| Debug.log "  ❓ #{n}" }
+      end
+
+      if (ignored & used_names).any?
+        Debug.log "已忽略材质:"
+        (ignored & used_names).each { |n| Debug.log "  🙈 #{n}" }
+      end
+
+      info = build_material_info(used_names, all_items, @last_scan[:colors])
 
       data = {
+        phase: 'review',
+        overview: {
+          total_faces: all_items.size,
+          total_area: all_items.sum(&:qty).round(2),
+          total_openings: @last_scan[:openings].size,
+          total_opening_area: @last_scan[:openings].sum(&:area).round(2),
+          material_count: used_names.size,
+          mapped: used_names.count { |n| mapping.get(n) },
+          ignored_count: (ignored & used_names).size,
+          unresolved_count: unresolved.size
+        },
+        items: all_items.map { |it|
+          h = it.to_h
+          h[:normal] = it.normal  # ensure array is serialized properly
+          h[:component_path] = it.component_path
+          h[:part] = Calculator.face_orientation(it.normal)
+          h
+        },
+        openings: @last_scan[:openings].map(&:to_h),
+        ignored: ignored & used_names,
+        unresolved: unresolved,
+        materials_info: info,
+        categories: PluginState.instance.processes.all_categories
+      }
+      @dialog.execute_script("window.renderReview(#{JSON.generate(data)})")
+    end
+
+    # Phase 2 — user finished resolving. Now compute the stats.
+    def finalize_and_compute
+      unless @last_scan
+        UI.messagebox('请先扫描模型')
+        return
+      end
+
+      mapping = PluginState.instance.mapping
+      ignored = PluginState.instance.ignored
+      processes = PluginState.instance.processes
+
+      used_names = @last_scan[:items].map(&:su_material).compact.uniq
+      unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
+      unless unresolved.empty?
+        UI.messagebox("仍有 #{unresolved.size} 种未处理材质，请先在「未映射」页完成映射或忽略")
+        send_review_state
+        return
+      end
+
+      Debug.section "【阶段二】开始统计计算"
+
+      calc = Calculator.new(mapping, processes)
+      usages = calc.compute(@last_scan[:items], @last_scan[:openings], {})
+      by_material = calc.group_by_material(usages)
+
+      Debug.subsection "按材料汇总"
+      by_material.each do |mat_name, v|
+        Debug.log "  #{mat_name}: 净面积=#{v[:net_area]}m² 采购量=#{v[:purchase_qty]}m²"
+      end
+      Debug.log
+
+      data = {
+        phase: 'done',
         by_space: usages.map(&:to_h),
         by_material: by_material.transform_values { |v|
           { net_area: v[:net_area], purchase_qty: v[:purchase_qty] }
         },
-        unmapped: unmapped
+        items: @last_scan[:items].map { |it|
+          h = it.to_h
+          h[:normal] = it.normal
+          h[:component_path] = it.component_path
+          h[:part] = Calculator.face_orientation(it.normal)
+          h
+        },
+        openings: @last_scan[:openings].map(&:to_h)
       }
       @dialog.execute_script("window.renderResults(#{JSON.generate(data)})")
+    end
+
+    # Build per-material context (faces / area / part breakdown / spaces / color)
+    def build_material_info(names, items, colors)
+      by_name = Hash.new { |h, k| h[k] = [] }
+      items.each { |it| by_name[it.su_material] << it if it.su_material }
+
+      names.map do |name|
+        group = by_name[name] || []
+        parts = Hash.new(0.0)
+        spaces = Hash.new(0.0)
+        group.each do |it|
+          parts[Calculator.face_orientation(it.normal)] += it.qty
+          spaces[it.component_path.last || '未分组'] += it.qty
+        end
+        {
+          su_name: name,
+          face_count: group.size,
+          total_area: group.sum(&:qty).round(2),
+          parts: parts.transform_values { |a| a.round(2) },
+          spaces: spaces.sort_by { |_, a| -a }.first(3).map { |s, a| { name: s, area: a.round(2) } },
+          color: colors[name]
+        }
+      end
+    end
+
+    def save_mappings_batch(json)
+      rows = JSON.parse(json)
+      m = PluginState.instance.mapping
+      rows.each do |row|
+        next if row['material_name'].to_s.strip.empty?
+        m.add(row['su_name'], row['material_name'], row['category'] || '其他',
+              row['unit'] || 'm²', row['spec'] || '', (row['waste_rate'] || 0.05).to_f)
+      end
+      m.save_json(PluginState.mapping_path)
+      send_review_state if @last_scan
+      send_mappings
+    end
+
+    def set_ignored(json)
+      names = JSON.parse(json)
+      PluginState.instance.ignore!(names)
+      send_review_state if @last_scan
+    end
+
+    def locate_material(su_name)
+      model = Sketchup.active_model
+      faces = []
+      collect_faces_with_material(model.entities, su_name, faces)
+      if faces.empty?
+        UI.messagebox("未找到材质 \"#{su_name}\" 的面")
+        return
+      end
+      model.selection.clear
+      model.selection.add(faces)
+      model.active_view.zoom(faces)
+    end
+
+    def collect_faces_with_material(entities, su_name, result)
+      entities.each do |e|
+        case e
+        when Sketchup::Face
+          result << e if (e.material&.name == su_name) || (e.back_material&.name == su_name)
+        when Sketchup::ComponentInstance
+          collect_faces_with_material(e.definition.entities, su_name, result)
+        when Sketchup::Group
+          collect_faces_with_material(e.entities, su_name, result)
+        end
+      end
     end
 
     def send_mappings
@@ -84,10 +272,6 @@ module SuTakeoff
       PluginState.instance.mapping.export_csv(path)
     end
 
-    def send_unmapped
-      # Stub — requires scan context
-    end
-
     def send_processes
       data = PluginState.instance.processes.all_categories.map { |cat|
         { category: cat, processes: PluginState.instance.processes.processes_for(cat) }
@@ -98,6 +282,20 @@ module SuTakeoff
     def apply_marking(json)
       data = JSON.parse(json)
       Marker.apply(data)
+    end
+
+    def snapshot_to_model
+      PluginState.instance.snapshot_to_model
+      UI.messagebox('规则已保存到模型属性字典。下次打开此模型时将自动加载。')
+    end
+
+    def load_from_model
+      if PluginState.instance.load_from_model_dialog
+        send_mappings
+        send_processes
+        send_review_state if @last_scan
+        UI.messagebox('已从模型属性字典加载规则并同步到本地文件。')
+      end
     end
   end
 end

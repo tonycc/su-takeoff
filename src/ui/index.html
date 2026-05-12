@@ -12,24 +12,106 @@
     <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
   </div>
 
-  <!-- Tab 1: Statistics -->
+  <!-- Tab 1: Statistics — three-phase card switching -->
   <div id="tab-statistics" class="tab-content active">
-    <div class="toolbar">
-      <button onclick="scanAll()">扫描全部</button>
-      <button onclick="scanSelected()">仅选中面</button>
-      <button onclick="manualMark()">手动标记面</button>
+
+    <!-- Phase 1: Scan -->
+    <div id="phase-scan" class="phase-card">
+      <div id="scan-controls" class="toolbar">
+        <button onclick="scanAll()">扫描全部</button>
+        <button onclick="scanSelected()">仅选中面</button>
+        <button onclick="manualMark()">手动标记面</button>
+      </div>
+      <div id="scan-results" style="display:none">
+        <div id="scan-overview" class="scan-overview"></div>
+        <h4 class="section-title">容器汇总</h4>
+        <div id="container-table-container" class="scroll-table">
+          <table id="container-table">
+            <thead>
+              <tr>
+                <th>容器名称</th>
+                <th>路径</th>
+                <th>面数</th>
+                <th>总面积(m²)</th>
+                <th>地面(m²)</th>
+                <th>墙面(m²)</th>
+                <th>天花(m²)</th>
+                <th>材质数</th>
+                <th>材质列表</th>
+              </tr>
+            </thead>
+            <tbody id="container-body"></tbody>
+          </table>
+        </div>
+        <h4 class="section-title">展开明细（点击展开查看面详情）</h4>
+        <div id="scan-tree-container"></div>
+        <h4 class="section-title">洞口列表</h4>
+        <div id="opening-table-container" class="scroll-table">
+          <table id="opening-table">
+            <thead>
+              <tr>
+                <th>实体ID</th>
+                <th>面积(m²)</th>
+                <th>关联母面ID</th>
+              </tr>
+            </thead>
+            <tbody id="opening-body"></tbody>
+          </table>
+        </div>
+        <div class="toolbar" style="justify-content:center; margin-top:12px">
+          <button onclick="goToMapping()" class="primary-btn">下一步 → 处理映射</button>
+        </div>
+      </div>
     </div>
-    <div class="view-bar">
-      <button class="view-btn active" data-view="by-space" onclick="switchView('by-space')">按空间汇总</button>
-      <button class="view-btn" data-view="by-material" onclick="switchView('by-material')">按材料汇总</button>
-      <button class="view-btn" data-view="detail" onclick="switchView('detail')">展开明细</button>
+
+    <!-- Phase 2: Mapping -->
+    <div id="phase-mapping" class="phase-card" style="display:none">
+      <div class="toolbar">
+        <button onclick="goToScan()">← 返回扫描结果</button>
+        <span class="hint" id="mapping-summary">待处理材质</span>
+        <button onclick="fillCommonDefaults()">一键填默认</button>
+        <button onclick="saveUnmappedBatch()">保存映射</button>
+        <button onclick="ignoreAllUnresolved()">全部忽略</button>
+      </div>
+      <table id="review-table">
+        <thead>
+          <tr>
+            <th style="width:4%">状态</th>
+            <th style="width:22%">SU材质（色/面数/面积）</th>
+            <th style="width:18%">部位/空间</th>
+            <th>真实材料名</th>
+            <th>分类</th>
+            <th>规格</th>
+            <th>损耗率</th>
+            <th>忽略</th>
+            <th>定位</th>
+          </tr>
+        </thead>
+        <tbody id="review-body"></tbody>
+      </table>
+      <div id="mapping-proceed" style="display:none">
+        <div class="toolbar" style="justify-content:center; margin-top:12px">
+          <button onclick="finalizeCompute()" class="primary-btn">确认并统计 →</button>
+        </div>
+      </div>
     </div>
-    <div id="stats-table-container">
-      <p class="hint">点击「扫描全部」开始统计</p>
+
+    <!-- Phase 3: Statistics -->
+    <div id="phase-stats" class="phase-card" style="display:none">
+      <div class="toolbar">
+        <button onclick="goToMapping()">← 返回映射</button>
+      </div>
+      <div class="view-bar">
+        <button class="view-btn active" data-view="by-space" onclick="switchView('by-space')">按空间汇总</button>
+        <button class="view-btn" data-view="by-material" onclick="switchView('by-material')">按材料汇总</button>
+        <button class="view-btn" data-view="detail" onclick="switchView('detail')">展开明细</button>
+      </div>
+      <div id="stats-table-container"></div>
     </div>
+
   </div>
 
-  <!-- Tab 2: Mapping -->
+  <!-- Tab 2: Mapping management -->
   <div id="tab-mapping" class="tab-content">
     <div class="toolbar">
       <input type="text" id="search-mapping" placeholder="搜索SU材质..." oninput="filterMappings()">
@@ -58,7 +140,12 @@
 
   <!-- Tab 3: Settings -->
   <div id="tab-settings" class="tab-content">
-    <p>设置将在后续版本中提供。</p>
+    <h3>模型属性字典</h3>
+    <p class="hint">将映射规则、工艺做法、忽略列表保存到当前 SU 模型中。打开模型时自动加载，实现「规则随模型走」。</p>
+    <div class="toolbar">
+      <button onclick="snapshotToModel()" class="primary-btn">保存规则到模型</button>
+      <button onclick="loadFromModel()">从模型加载规则</button>
+    </div>
   </div>
 
   <!-- Marking Dialog (hidden) -->
