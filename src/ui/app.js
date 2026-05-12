@@ -280,7 +280,176 @@ function toggleComponent(nodeId) {
 }
 
 function renderMaterialView(data) {
-  document.getElementById('view-material').innerHTML = '<p class="hint">材料视图 (待实现)</p>';
+  var container = document.getElementById('view-material');
+  var counts = computeMaterialCounts(data);
+
+  var html = '<div class="material-filter-bar">' +
+    filterButton('all', '全部', counts.all) +
+    filterButton('unresolved', '待映射', counts.unresolved) +
+    filterButton('mapped', '已映射', counts.mapped) +
+    filterButton('ignored', '已忽略', counts.ignored) +
+    '<input type="text" id="material-search" placeholder="🔍 搜索..." value="' + esc(window._materialSearch || '') + '" oninput="onMaterialSearch(this.value)">' +
+    '</div>' +
+    '<table id="material-table"><thead><tr>' +
+      '<th style="width:4%">状态</th>' +
+      '<th style="width:20%">SU材质</th>' +
+      '<th style="width:12%">面数/面积</th>' +
+      '<th style="width:14%">部位分布</th>' +
+      '<th>真实材料名</th>' +
+      '<th>分类</th>' +
+      '<th>规格</th>' +
+      '<th>损耗率</th>' +
+      '<th style="width:5%">忽略</th>' +
+      '<th style="width:5%">定位</th>' +
+    '</tr></thead><tbody id="material-tbody"></tbody></table>' +
+    '<div class="toolbar" style="margin-top:12px">' +
+      '<button onclick="fillDefaultMaterialNames()">一键填默认</button>' +
+      '<button onclick="saveMaterialMappings()" class="primary-btn">保存映射</button>' +
+      '<button onclick="ignoreAllUnresolved()">全部忽略</button>' +
+    '</div>';
+  container.innerHTML = html;
+  renderMaterialTableBody(data);
+}
+
+function computeMaterialCounts(data) {
+  var all = (data.materials_info || []).length;
+  var unresolvedSet = {}; (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
+  var ignoredSet = {}; (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
+  var unresolved = (data.materials_info || []).filter(function(i) { return unresolvedSet[i.su_name]; }).length;
+  var ignored = (data.materials_info || []).filter(function(i) { return ignoredSet[i.su_name]; }).length;
+  return { all: all, unresolved: unresolved, ignored: ignored, mapped: all - unresolved - ignored };
+}
+
+function filterButton(key, label, count) {
+  var active = window._materialFilter === key ? ' active' : '';
+  return '<button class="filter-btn' + active + '" onclick="setMaterialFilter(\'' + key + '\')">' + label + ' (' + count + ')</button>';
+}
+
+function setMaterialFilter(key) {
+  window._materialFilter = key;
+  renderMaterialView(window._workbench);
+}
+
+function onMaterialSearch(value) {
+  window._materialSearch = value;
+  renderMaterialTableBody(window._workbench);
+}
+
+function renderMaterialTableBody(data) {
+  var tbody = document.getElementById('material-tbody');
+  if (!tbody) return;
+  var unresolvedSet = {}; (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
+  var ignoredSet = {}; (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
+  var filter = window._materialFilter || 'all';
+  var q = (window._materialSearch || '').toLowerCase();
+  var partLabels = { floor: '地', wall: '墙', ceiling: '顶' };
+
+  tbody.innerHTML = '';
+  (data.materials_info || []).forEach(function(info) {
+    var name = info.su_name;
+    var isIgnored = !!ignoredSet[name];
+    var isUnresolved = !!unresolvedSet[name];
+    var isMapped = !isIgnored && !isUnresolved;
+
+    if (filter === 'unresolved' && !isUnresolved) return;
+    if (filter === 'mapped' && !isMapped) return;
+    if (filter === 'ignored' && !isIgnored) return;
+    if (q && name.toLowerCase().indexOf(q) === -1) return;
+
+    var status = isMapped
+      ? '<span class="tag tag-mapped">✓</span>'
+      : (isIgnored ? '<span class="tag tag-ignored">○</span>' : '<span class="tag tag-unresolved">●</span>');
+
+    var c = info.color || {};
+    var swatch = info.color
+      ? '<span class="swatch" style="background:rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (c.a || 1) + ')"></span>'
+      : '<span class="swatch swatch-empty">?</span>';
+
+    var partsHtml = '';
+    if (info.parts) {
+      Object.keys(info.parts).forEach(function(p) {
+        partsHtml += '<span class="pill pill-' + p + '">' + (partLabels[p] || p) + ' ' + info.parts[p] + '</span>';
+      });
+    }
+
+    var editable = !isMapped;
+    var dis = editable ? '' : ' disabled';
+    var cats = (window._workbench.categories && window._workbench.categories.length)
+      ? window._workbench.categories : DEFAULT_CATEGORIES;
+    var catOptions = cats.map(function(cat) {
+      var sel = cat === guessCategory(name) ? ' selected' : '';
+      return '<option value="' + esc(cat) + '"' + sel + '>' + esc(cat) + '</option>';
+    }).join('');
+
+    var tr = document.createElement('tr');
+    tr.className = 'row-' + (isMapped ? 'mapped' : (isIgnored ? 'ignored' : 'unresolved'));
+    tr.innerHTML =
+      '<td>' + status + '</td>' +
+      '<td><div class="u-name-row">' + swatch +
+        '<span class="u-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+      '</div><input type="hidden" class="u-su" value="' + esc(name) + '"></td>' +
+      '<td>' + (info.face_count || 0) + ' 面 / ' + (info.total_area || 0) + ' m²</td>' +
+      '<td>' + partsHtml + '</td>' +
+      '<td><input type="text" class="u-mat" placeholder="留空跳过"' + dis + '></td>' +
+      '<td><select class="u-cat"' + dis + '>' + catOptions + '</select></td>' +
+      '<td><input type="text" class="u-spec" placeholder="可选"' + dis + '></td>' +
+      '<td><input type="number" class="u-waste" step="0.01" value="0.05" style="width:60px"' + dis + '></td>' +
+      '<td><input type="checkbox" class="u-ignore"' + (isIgnored ? ' checked' : '') +
+         ' onchange="toggleMaterialIgnore(\'' + escAttr(name) + '\', this.checked)"></td>' +
+      '<td><button onclick="locateMaterial(\'' + escAttr(name) + '\')">🎯</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function fillDefaultMaterialNames() {
+  document.querySelectorAll('#material-tbody tr.row-unresolved').forEach(function(tr) {
+    var mat = tr.querySelector('.u-mat');
+    if (mat && !mat.value) mat.value = tr.querySelector('.u-su').value;
+  });
+}
+
+function saveMaterialMappings() {
+  var rows = [];
+  document.querySelectorAll('#material-tbody tr.row-unresolved').forEach(function(tr) {
+    if (tr.querySelector('.u-ignore').checked) return;
+    var mat = tr.querySelector('.u-mat').value.trim();
+    if (!mat) return;
+    rows.push({
+      su_name: tr.querySelector('.u-su').value,
+      material_name: mat,
+      category: tr.querySelector('.u-cat').value,
+      spec: tr.querySelector('.u-spec').value,
+      unit: 'm²',
+      waste_rate: parseFloat(tr.querySelector('.u-waste').value) || 0.05
+    });
+  });
+  if (rows.length === 0) {
+    alert('没有可保存的映射 — 请先填写"真实材料名"');
+    return;
+  }
+  callSketchUp('save_mappings_batch', JSON.stringify(rows));
+}
+
+function ignoreAllUnresolved() {
+  var names = [];
+  document.querySelectorAll('#material-tbody tr.row-unresolved').forEach(function(tr) {
+    names.push(tr.querySelector('.u-su').value);
+  });
+  if (names.length === 0) return;
+  if (!confirm('将忽略 ' + names.length + ' 种待处理材质，确认？')) return;
+  var current = (window._workbench && window._workbench.ignored) || [];
+  var set = {};
+  current.forEach(function(n) { set[n] = true; });
+  names.forEach(function(n) { set[n] = true; });
+  callSketchUp('set_ignored', JSON.stringify(Object.keys(set)));
+}
+
+function toggleMaterialIgnore(name, on) {
+  var current = (window._workbench && window._workbench.ignored) || [];
+  var set = {};
+  current.forEach(function(n) { set[n] = true; });
+  if (on) set[name] = true; else delete set[name];
+  callSketchUp('set_ignored', JSON.stringify(Object.keys(set)));
 }
 function renderPurchaseView(data) {
   document.getElementById('view-purchase').innerHTML = '<p class="hint">采购量视图 (待实现)</p>';
