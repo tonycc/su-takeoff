@@ -389,13 +389,183 @@ goToMapping = function() {
 };
 
 // ---------------- Phase 3: Statistics results ----------------
+
+// ---------------- Component tree builder ----------------
+function buildComponentTree(items) {
+  var root = { name: '', path: [], faces: [], children: [], childrenMap: {} };
+
+  items.forEach(function(item) {
+    var path = item.component_path || [];
+    var node = root;
+    path.forEach(function(name, idx) {
+      if (!node.childrenMap[name]) {
+        var child = {
+          name: name,
+          path: path.slice(0, idx + 1),
+          faces: [],
+          children: [],
+          childrenMap: {}
+        };
+        node.children.push(child);
+        node.childrenMap[name] = child;
+      }
+      node = node.childrenMap[name];
+    });
+    node.faces.push(item);
+  });
+
+  aggregateComponentStats(root);
+  return root;
+}
+
+function aggregateComponentStats(node) {
+  var stats = {
+    face_count: 0, total_area: 0.0,
+    by_part: { floor: 0.0, wall: 0.0, ceiling: 0.0 },
+    material_names: {}, material_count: 0
+  };
+
+  node.children.forEach(function(child) {
+    var cs = aggregateComponentStats(child);
+    stats.face_count += cs.face_count;
+    stats.total_area += cs.total_area;
+    stats.by_part.floor += cs.by_part.floor;
+    stats.by_part.wall += cs.by_part.wall;
+    stats.by_part.ceiling += cs.by_part.ceiling;
+    Object.keys(cs.material_names).forEach(function(m) { stats.material_names[m] = true; });
+  });
+
+  node.faces.forEach(function(face) {
+    stats.face_count += 1;
+    stats.total_area += face.qty || 0;
+    if (face.part) stats.by_part[face.part] = (stats.by_part[face.part] || 0) + (face.qty || 0);
+    if (face.su_material) stats.material_names[face.su_material] = true;
+  });
+
+  stats.material_count = Object.keys(stats.material_names).length;
+  stats.total_area = +stats.total_area.toFixed(2);
+  stats.by_part.floor = +stats.by_part.floor.toFixed(2);
+  stats.by_part.wall = +stats.by_part.wall.toFixed(2);
+  stats.by_part.ceiling = +stats.by_part.ceiling.toFixed(2);
+  node.stats = stats;
+  return stats;
+}
+
+// ---------------- Component tree renderer ----------------
+function renderComponentView(tree) {
+  if (tree.faces.length > 0) {
+    var orphanNode = {
+      name: '模型根层级', path: [], faces: tree.faces,
+      children: [], childrenMap: {}
+    };
+    aggregateComponentStats(orphanNode);
+    tree.children.unshift(orphanNode);
+    tree.faces = [];
+  }
+
+  var html = '<table><thead><tr>' +
+    '<th>组件 / 面</th>' +
+    '<th style="text-align:right">面数</th>' +
+    '<th style="text-align:right">面积(m²)</th>' +
+    '<th style="text-align:right">地面</th>' +
+    '<th style="text-align:right">墙面</th>' +
+    '<th style="text-align:right">天花</th>' +
+    '<th style="text-align:right">材质数</th>' +
+    '<th>材质</th>' +
+    '</tr></thead><tbody>';
+
+  var rootId = 'comp-root';
+  tree.children.forEach(function(child) {
+    html += renderComponentNode(child, 1, rootId);
+  });
+
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderComponentNode(node, depth, parentId) {
+  var html = '';
+  var nodeId = 'comp-' + node.path.map(function(s) {
+    return String(s).replace(/[^a-zA-Z0-9一-鿿]/g, '_');
+  }).join('-');
+  var indent = depth * 18;
+  var hasChildren = node.children.length > 0 || node.faces.length > 0;
+  var hidden = depth > 1 ? ' style="display:none"' : '';
+
+  html += '<tr class="comp-row" data-depth="' + depth + '" data-parent="' + parentId + '"' + hidden + '>' +
+    '<td style="padding-left:' + (indent + 6) + 'px">';
+  if (hasChildren) {
+    html += '<span class="comp-toggle" id="' + nodeId + '-toggle">' + (depth === 1 ? '▾' : '▸') + '</span> ';
+  }
+  html += esc(node.name) + '</td>' +
+    '<td style="text-align:right">' + node.stats.face_count + '</td>' +
+    '<td style="text-align:right">' + node.stats.total_area + '</td>' +
+    '<td style="text-align:right">' + (node.stats.by_part.floor > 0 ? node.stats.by_part.floor : '—') + '</td>' +
+    '<td style="text-align:right">' + (node.stats.by_part.wall > 0 ? node.stats.by_part.wall : '—') + '</td>' +
+    '<td style="text-align:right">' + (node.stats.by_part.ceiling > 0 ? node.stats.by_part.ceiling : '—') + '</td>' +
+    '<td style="text-align:right">' + node.stats.material_count + '</td>' +
+    '<td style="font-size:11px">' + esc(Object.keys(node.stats.material_names).join(', ') || '—') + '</td>' +
+    '</tr>';
+
+  node.children.forEach(function(child) {
+    html += renderComponentNode(child, depth + 1, nodeId);
+  });
+  node.faces.forEach(function(face) {
+    html += renderFaceRow(face, depth + 1, nodeId);
+  });
+
+  return html;
+}
+
+function renderFaceRow(face, depth, parentId) {
+  var indent = depth * 18;
+  return '<tr class="face-row" data-depth="' + depth + '" data-parent="' + parentId + '" style="display:none">' +
+    '<td style="padding-left:' + (indent + 6) + 'px; font-size:10px; color:#6c7086;">面 #' + esc(face.face_id) + '</td>' +
+    '<td></td>' +
+    '<td style="text-align:right">' + (face.qty || 0) + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'floor' ? (face.qty || 0) : '—') + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'wall' ? (face.qty || 0) : '—') + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'ceiling' ? (face.qty || 0) : '—') + '</td>' +
+    '<td></td>' +
+    '<td style="font-size:10px">' + esc(face.su_material || '未赋材质') + '</td>' +
+    '</tr>';
+}
+
+function toggleComponent(nodeId) {
+  var rows = document.querySelectorAll('[data-parent="' + nodeId + '"]');
+  var toggle = document.getElementById(nodeId + '-toggle');
+  if (!rows.length) return;
+  var isHidden = rows[0].style.display === 'none';
+  rows.forEach(function(row) {
+    row.style.display = isHidden ? '' : 'none';
+  });
+  if (toggle) {
+    toggle.textContent = isHidden ? '▾' : '▸';
+  }
+}
+
 function renderResults(data, view) {
   window._lastStats = data;
 
   var container = document.getElementById('stats-table-container');
-  var activeView = view || document.querySelector('.view-btn.active')?.dataset.view || 'by-space';
+  var activeView = view || document.querySelector('.view-btn.active')?.dataset.view || 'by-component';
 
   container.innerHTML = '';
+
+  if (activeView === 'by-component' && data.items) {
+    var tree = buildComponentTree(data.items);
+    container.innerHTML = renderComponentView(tree);
+    container.querySelectorAll('.comp-row').forEach(function(row) {
+      row.addEventListener('click', function() {
+        var toggle = row.querySelector('.comp-toggle');
+        if (toggle) {
+          toggleComponent(toggle.id.replace('-toggle', ''));
+        }
+      });
+    });
+    showPhase('stats');
+    return;
+  }
 
   var tableHtml = '<table><thead><tr>';
   if (activeView === 'by-space') {
