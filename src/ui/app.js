@@ -63,19 +63,20 @@ function renderReview(data) {
     '</div>';
   document.getElementById('scan-overview').innerHTML = ovHtml;
 
-  // Group items by container path
+  // Group items by container path IDs (distinguishes same-named instances)
   var groups = {};
   (data.items || []).forEach(function(it) {
-    var key = (it.component_path || []).join('/') || '_root';
-    if (!groups[key]) groups[key] = { path: it.component_path || [], items: [] };
+    var ids = it.component_path_ids || [];
+    var key = ids.join('/') || '_root';
+    if (!groups[key]) groups[key] = { path: it.component_path || [], path_ids: ids, items: [] };
     groups[key].items.push(it);
   });
 
-  // Sort groups: root first, then alphabetically by path
+  // Sort groups: root first, then alphabetically by name path
   var groupKeys = Object.keys(groups).sort(function(a, b) {
     if (a === '_root') return -1;
     if (b === '_root') return 1;
-    return a.localeCompare(b);
+    return groups[a].path.join('/').localeCompare(groups[b].path.join('/'));
   });
 
   var partLabels = { floor: '地面', wall: '墙面', ceiling: '天花' };
@@ -392,24 +393,29 @@ goToMapping = function() {
 
 // ---------------- Component tree builder ----------------
 function buildComponentTree(items) {
-  var root = { name: '', path: [], faces: [], children: [], childrenMap: {} };
+  var root = { name: '', path: [], path_ids: [], faces: [], children: [], childrenMap: {} };
 
   items.forEach(function(item) {
     var path = item.component_path || [];
+    var ids = item.component_path_ids || [];
     var node = root;
     path.forEach(function(name, idx) {
-      if (!node.childrenMap[name]) {
+      var id = ids[idx];
+      var key = id != null ? String(id) : ('name:' + name + ':' + idx);
+      if (!node.childrenMap[key]) {
         var child = {
           name: name,
+          id: id,
           path: path.slice(0, idx + 1),
+          path_ids: ids.slice(0, idx + 1),
           faces: [],
           children: [],
           childrenMap: {}
         };
         node.children.push(child);
-        node.childrenMap[name] = child;
+        node.childrenMap[key] = child;
       }
-      node = node.childrenMap[name];
+      node = node.childrenMap[key];
     });
     node.faces.push(item);
   });
@@ -451,11 +457,28 @@ function aggregateComponentStats(node) {
   return stats;
 }
 
+// Determine dominant part for a node (≥80% of area in one part).
+// Returns HTML for a badge, or empty string if no faces.
+function dominantPartBadge(stats) {
+  var total = (stats.by_part.floor || 0) + (stats.by_part.wall || 0) + (stats.by_part.ceiling || 0);
+  if (total <= 0) return '';
+  var threshold = 0.8;
+  var labels = { floor: '地面', wall: '墙面', ceiling: '天花' };
+  var dominant = null;
+  ['floor', 'wall', 'ceiling'].forEach(function(p) {
+    if ((stats.by_part[p] || 0) / total >= threshold) dominant = p;
+  });
+  if (dominant) {
+    return ' <span class="part-badge part-badge-' + dominant + '">' + labels[dominant] + '</span>';
+  }
+  return ' <span class="part-badge part-badge-mixed">混合</span>';
+}
+
 // ---------------- Component tree renderer ----------------
 function renderComponentView(tree) {
   if (tree.faces.length > 0) {
     var orphanNode = {
-      name: '模型根层级', path: [], faces: tree.faces,
+      name: '模型根层级', path: [], path_ids: [], faces: tree.faces,
       children: [], childrenMap: {}
     };
     aggregateComponentStats(orphanNode);
@@ -485,19 +508,21 @@ function renderComponentView(tree) {
 
 function renderComponentNode(node, depth, parentId) {
   var html = '';
-  var nodeId = 'comp-' + node.path.map(function(s) {
-    return String(s).replace(/[^a-zA-Z0-9一-鿿]/g, '_');
-  }).join('-');
+  var idKey = (node.path_ids || []).join('-') || 'noid-' + node.path.join('-');
+  var nodeId = 'comp-' + idKey.replace(/[^a-zA-Z0-9\-]/g, '_');
   var indent = depth * 18;
   var hasChildren = node.children.length > 0 || node.faces.length > 0;
   var hidden = depth > 1 ? ' style="display:none"' : '';
+  var partBadge = dominantPartBadge(node.stats);
 
   html += '<tr class="comp-row" data-depth="' + depth + '" data-parent="' + parentId + '"' + hidden + '>' +
     '<td style="padding-left:' + (indent + 6) + 'px">';
   if (hasChildren) {
     html += '<span class="comp-toggle" id="' + nodeId + '-toggle">' + (depth === 1 ? '▾' : '▸') + '</span> ';
+  } else {
+    html += '<span class="comp-toggle-empty"></span> ';
   }
-  html += esc(node.name) + '</td>' +
+  html += esc(node.name) + partBadge + '</td>' +
     '<td style="text-align:right">' + node.stats.face_count + '</td>' +
     '<td style="text-align:right">' + node.stats.total_area + '</td>' +
     '<td style="text-align:right">' + (node.stats.by_part.floor > 0 ? node.stats.by_part.floor : '—') + '</td>' +

@@ -10,7 +10,8 @@ module SuTakeoff
     :width,         # Float estimated width in m
     :height,        # Float estimated height in m
     :layer_name,    # String SU layer name
-    :component_path,# Array of ancestor component names
+    :component_path,    # Array of ancestor component names (for display)
+    :component_path_ids,# Array of ancestor entityIDs (for identity — distinguishes same-named instances)
     :z_center       # Float bounds center Z in meters (world space)
   )
 

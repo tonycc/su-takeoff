@@ -104,6 +104,14 @@ tr.unmapped td:first-child { color: #f38ba8; }
 .comp-row td { border: 1px solid #45475a; padding: 6px 8px; }
 .comp-row td:first-child { font-weight: 500; color: #cdd6f4; }
 .comp-toggle { color: #89b4fa; font-size: 12px; font-weight: bold; min-width: 14px; display: inline-block; cursor: pointer; user-select: none; }
+.comp-toggle-empty { min-width: 14px; display: inline-block; }
 .face-row td { border: 1px solid #2a2a3a; padding: 3px 8px; color: #a6adc8; font-size: 11px; }
 .face-row { background: #16161e; }
 .face-row:hover { background: #1c1c28; }
+
+/* Part badges on component rows */
+.part-badge { display: inline-block; padding: 1px 7px; margin-left: 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+.part-badge-floor { background: #313a4a; color: #89b4fa; }
+.part-badge-wall { background: #3a3148; color: #cba6f7; }
+.part-badge-ceiling { background: #2f3a31; color: #a6e3a1; }
+.part-badge-mixed { background: #3a2f2f; color: #f9e2af; }

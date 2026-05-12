@@ -49,10 +49,14 @@ module SuTakeoff
           face.entity_id,
           mat_name,
           face.area * 0.00064516,
+          'm2',
+          :face,
           [face.normal.x, face.normal.y, face.normal.z],
           0, 0,
           face.layer.name,
-          [data['space'] || '未分组']
+          [data['space'] || '未分组'],
+          [],
+          0.0
         )
       end
       items

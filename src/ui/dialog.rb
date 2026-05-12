@@ -107,6 +107,7 @@ module SuTakeoff
           h = it.to_h
           h[:normal] = it.normal  # ensure array is serialized properly
           h[:component_path] = it.component_path
+          h[:component_path_ids] = it.component_path_ids
           h[:part] = Calculator.face_orientation(it.normal)
           h
         },
@@ -160,6 +161,7 @@ module SuTakeoff
           h = it.to_h
           h[:normal] = it.normal
           h[:component_path] = it.component_path
+          h[:component_path_ids] = it.component_path_ids
           h[:part] = Calculator.face_orientation(it.normal)
           h
         },

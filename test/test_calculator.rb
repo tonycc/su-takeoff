@@ -20,9 +20,9 @@ module SuTakeoff
 
     def test_group_by_space_and_part
       items = [
-        ScanItem.new(1, 'tile_302', 15.0, 'm2', :face, [0,0,1], 3, 5, 'Layer0', ['客厅'], 0),
-        ScanItem.new(2, 'tile_302', 12.0, 'm2', :face, [0,0,1], 3, 4, 'Layer0', ['客厅'], 0),
-        ScanItem.new(3, 'paint_w', 48.5, 'm2', :face, [0,1,0], 3, 5, 'Layer0', ['客厅'], 1),
+        ScanItem.new(1, 'tile_302', 15.0, 'm2', :face, [0,0,1], 3, 5, 'Layer0', ['客厅'], [101], 0),
+        ScanItem.new(2, 'tile_302', 12.0, 'm2', :face, [0,0,1], 3, 4, 'Layer0', ['客厅'], [101], 0),
+        ScanItem.new(3, 'paint_w', 48.5, 'm2', :face, [0,1,0], 3, 5, 'Layer0', ['客厅'], [101], 1),
       ]
       result = @calc.compute(items, [], {})
 
@@ -34,7 +34,7 @@ module SuTakeoff
 
     def test_apply_waste_rate_from_process
       items = [
-        ScanItem.new(1, 'tile_302', 100.0, 'm2', :face, [0,0,1], 10, 10, 'Layer0', ['客厅'], 0),
+        ScanItem.new(1, 'tile_302', 100.0, 'm2', :face, [0,0,1], 10, 10, 'Layer0', ['客厅'], [101], 0),
       ]
       result = @calc.compute(items, [], { 'tile_302' => '斜铺' })
       # 斜铺 not found in process library for 瓷砖 (only 密缝铺贴/干挂 exist)
@@ -44,7 +44,7 @@ module SuTakeoff
 
     def test_deduct_openings
       items = [
-        ScanItem.new(1, 'paint_w', 50.0, 'm2', :face, [0,1,0], 5, 10, 'Layer0', ['客厅'], 1.5),
+        ScanItem.new(1, 'paint_w', 50.0, 'm2', :face, [0,1,0], 5, 10, 'Layer0', ['客厅'], [101], 1.5),
       ]
       openings = [Opening.new(10, 2.0, [1])]  # 2m² opening on face 1
       result = @calc.compute(items, openings, {})
@@ -55,7 +55,7 @@ module SuTakeoff
 
     def test_unmapped_materials_excluded
       items = [
-        ScanItem.new(1, 'unknown_mat', 10.0, 'm2', :face, [0,0,1], 2, 5, 'Layer0', ['客厅'], 0),
+        ScanItem.new(1, 'unknown_mat', 10.0, 'm2', :face, [0,0,1], 2, 5, 'Layer0', ['客厅'], [101], 0),
       ]
       result = @calc.compute(items, [], {})
       assert result.empty?  # unmapped materials excluded from stats
@@ -63,8 +63,8 @@ module SuTakeoff
 
     def test_group_by_material
       items = [
-        ScanItem.new(1, 'tile_302', 27.0, 'm2', :face, [0,0,1], 3, 9, 'Layer0', ['客厅'], 0),
-        ScanItem.new(2, 'tile_302', 20.0, 'm2', :face, [0,0,1], 4, 5, 'Layer0', ['主卧'], 0),
+        ScanItem.new(1, 'tile_302', 27.0, 'm2', :face, [0,0,1], 3, 9, 'Layer0', ['客厅'], [101], 0),
+        ScanItem.new(2, 'tile_302', 20.0, 'm2', :face, [0,0,1], 4, 5, 'Layer0', ['主卧'], [102], 0),
       ]
       result = @calc.compute(items, [], {})
       material_groups = @calc.group_by_material(result)

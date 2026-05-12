@@ -148,6 +148,7 @@ module SuTakeoff
         end
 
         comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+        comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 }
 
         area_m2 = compute_area(entity, transform)
         world_normal = entity.normal.transform(transform)
@@ -196,6 +197,7 @@ module SuTakeoff
           h.round(4),
           entity.layer.name,
           comp_path,
+          comp_path_ids,
           z_center_m.round(4)
         )
 
