@@ -1,0 +1,98 @@
+<h2>统计页面重构：组件维度统计</h2>
+<p class="subtitle">当前「展开明细」视图 vs 新的「按组件」树形可展开视图</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">当前：展开明细（平面表格）</div>
+    <div class="mockup-body">
+      <div style="background:#313244; border-radius:6px; padding:12px; font-size:12px; font-family:monospace;">
+        <div style="margin-bottom:8px; color:#a6adc8;">视图切换： [按空间汇总] [按材料汇总] [展开明细]</div>
+        <table style="width:100%; border-collapse:collapse; color:#cdd6f4;">
+          <tr style="background:#45475a;"><th style="padding:4px 6px; text-align:left;">空间</th><th>部位</th><th>材料</th><th>数量</th></tr>
+          <tr><td style="padding:3px 6px;">客厅</td><td>地面</td><td>瓷砖</td><td>25.3</td></tr>
+          <tr><td style="padding:3px 6px;">客厅</td><td>墙面</td><td>涂料</td><td>48.2</td></tr>
+          <tr><td style="padding:3px 6px;">卧室A</td><td>地面</td><td>木地板</td><td>18.5</td></tr>
+          <tr><td style="padding:3px 6px;">卧室A</td><td>天花</td><td>涂料</td><td>18.5</td></tr>
+          <tr><td style="padding:3px 6px;">厨房</td><td>墙面</td><td>瓷砖</td><td>22.0</td></tr>
+          <tr><td style="padding:3px 6px;">厨房</td><td>地面</td><td>瓷砖</td><td>9.0</td></tr>
+        </table>
+        <div style="margin-top:8px; padding:6px; background:#181825; border-radius:4px; color:#6c7086; font-size:11px;">
+          问题：所有行扁平排列，无法看出面的来源组件层级
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">新方案：按组件树形视图</div>
+    <div class="mockup-body">
+      <div style="background:#313244; border-radius:6px; padding:12px; font-size:12px; font-family:monospace;">
+        <div style="margin-bottom:8px; color:#a6adc8;">视图切换： [按空间汇总] [按材料汇总] [<span style="color:#89b4fa;font-weight:bold;">按组件</span>] [展开明细]</div>
+
+        <div style="border:1px solid #45475a; border-radius:4px; margin-bottom:4px;">
+          <div style="padding:6px 10px; background:#181825; cursor:pointer; display:flex; align-items:center; gap:6px;">
+            <span style="color:#89b4fa;">▾</span>
+            <span style="font-weight:600;">🏠 住宅模型</span>
+            <span style="font-size:10px; color:#a6adc8; margin-left:auto;">12面 · 64.5m²</span>
+          </div>
+          <div style="padding:4px 4px 4px 28px;">
+            <div style="border:1px solid #45475a; border-radius:3px; margin-bottom:2px;">
+              <div style="padding:4px 8px; background:#1e1e2e; cursor:pointer; display:flex; gap:6px;">
+                <span style="color:#89b4fa;">▾</span>
+                <span>🛋 客厅</span>
+                <span style="font-size:10px; color:#a6adc8; margin-left:auto;">4面 · 18.5m² · 2种材质</span>
+              </div>
+              <div style="padding:2px 4px 2px 24px; font-size:10px;">
+                <div>▸ 面 #123 · 瓷砖 · 地面 · 12.5m²</div>
+                <div>▸ 面 #456 · 瓷砖 · 地面 · 12.8m²</div>
+                <div>▸ 面 #789 · 涂料 · 墙面 · 24.1m²</div>
+                <div>▸ 面 #012 · 涂料 · 墙面 · 24.1m²</div>
+              </div>
+            </div>
+            <div style="border:1px solid #45475a; border-radius:3px; margin-bottom:2px;">
+              <div style="padding:4px 8px; background:#1e1e2e; cursor:pointer; display:flex; gap:6px;">
+                <span style="color:#89b4fa;">▸</span>
+                <span>🛏 卧室A</span>
+                <span style="font-size:10px; color:#a6adc8; margin-left:auto;">4面 · 37.0m² · 2种材质</span>
+              </div>
+            </div>
+            <div style="border:1px solid #45475a; border-radius:3px;">
+              <div style="padding:4px 8px; background:#1e1e2e; cursor:pointer; display:flex; gap:6px;">
+                <span style="color:#89b4fa;">▸</span>
+                <span>🍳 厨房</span>
+                <span style="font-size:10px; color:#a6adc8; margin-left:auto;">4面 · 31.0m² · 1种材质</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:8px; padding:6px; background:#a6e3a120; border-radius:4px; color:#a6e3a1; font-size:11px;">
+          ✓ 层级化展示：组件 → 子组件 → 面；可逐级展开，面含完整信息
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 28px;">核心变更点</h3>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>数据层</h3>
+      <p>统计阶段需要传回 <code>ScanItem</code> 原始数据（面级），不只是聚合后的 <code>MaterialUsage</code></p>
+    </div>
+  </div>
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>前端 UI</h3>
+      <p>新增「按组件」视图，复用 Phase 1 的树形展开交互（toggleGroup），组件节点显示汇总统计</p>
+    </div>
+  </div>
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>视图关系</h3>
+      <p>「按组件」与「按空间汇总」「按材料汇总」「展开明细」并列，不替换现有视图</p>
+    </div>
+  </div>
+</div>

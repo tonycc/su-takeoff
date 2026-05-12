@@ -1,0 +1,61 @@
+<h2>三种方案思路</h2>
+<p class="subtitle">基于你的需求：报价场景、SU材质+手动标记、汇总+明细、净面积+可配损耗</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>方案A：轻量级 — SU材质直读+简单标记</h3>
+      <ul>
+        <li>直接读取SU材质名称和面积</li>
+        <li>添加"手动标记面"功能（标签/图层方式）</li>
+        <li>按材质名称汇总，支持损耗率配置</li>
+        <li>输出格式：SU内表格 + CSV导出</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>优点</h4><ul><li>开发快，复杂度低</li><li>对SU材质命名规范要求高</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>材质映射能力弱</li><li>难以处理"同一材质不同色号"场景</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>方案B：推荐 — 材质映射+分类统计引擎</h3>
+      <ul>
+        <li><strong>材质库</strong>：预置常见装修材料库，SU材质名可映射到真实材料</li>
+        <li><strong>智能分组</strong>：按材质、空间、类型自动分组统计</li>
+        <li><strong>手动标记</strong>：在SU中用标签/图层标记未覆盖的材质面</li>
+        <li><strong>灵活输出</strong>：按房间汇总 + 按材料类型汇总 + 面级明细</li>
+        <li><strong>采购计算</strong>：净面积 × (1 + 损耗率%)，支持按材料规格换算</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>优点</h4><ul><li>满足所有需求</li><li>可扩展材质库</li><li>报价直接可用</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>需要前期搭建材质库</li><li>开发周期中等</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>方案C：全功能 — BIM级材料管理平台</h3>
+      <ul>
+        <li>在方案B基础上增加构件级数据管理</li>
+        <li>材料与SU组件/群组关联，支持"一面多材料"叠层</li>
+        <li>支持施工损耗、排版优化、余料管理</li>
+        <li>集成ERP接口，输出采购订单</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>优点</h4><ul><li>最全面</li><li>适合大型装饰公司</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>开发周期长</li><li>需要更多用户培训</li><li>可能过度设计</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p><strong>我的推荐：方案B — 材质映射+分类统计引擎</strong></p>
+  <p>理由：贴合你的核心场景（报价），实现了需求的全覆盖，同时避免了方案C的过度设计。材质库可以逐步积累扩展，前期投入可控。</p>
+</div>

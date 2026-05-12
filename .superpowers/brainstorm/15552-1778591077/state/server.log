@@ -1,0 +1,5 @@
+{"type":"server-started","port":56231,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:56231","screen_dir":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/15552-1778591077/content","state_dir":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/15552-1778591077/state"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/15552-1778591077/content/architecture.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/15552-1778591077/content/ui.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/15552-1778591077/content/table-view.html"}
+{"type":"server-stopped","reason":"idle timeout"}

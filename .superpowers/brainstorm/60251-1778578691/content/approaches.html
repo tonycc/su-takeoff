@@ -1,0 +1,40 @@
+<h2>三种实现方案对比</h2>
+<p class="subtitle">核心问题：统计数据（MaterialUsage）没有面级细节和组件层级，如何构建组件树？</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Ruby 端同时传回 ScanItem + MaterialUsage</h3>
+      <p>在 <code>finalize_and_compute</code> 中额外发送 <code>@last_scan[:items]</code> 到前端，前端在 Phase 3 用 component_path 构建树，用 items 汇总统计，用 MaterialUsage 显示采购量</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>数据完整，面级信息丰富</li><li>可复用 Phase 1 已有的树形渲染逻辑（toggleGroup）</li><li>MaterialUsage 提供采购量等计算结果</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>数据量大（大模型可能有数百面）</li><li>前后端都需要改：Ruby 多传数据，JS 新增视图</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Ruby 端构建组件树结构，前端直接渲染</h3>
+      <p>新增 Ruby 方法将 ScanItem + MaterialUsage 合并构建嵌套树结构 <code>{name, children, faces, stats}</code>，前端只需递归渲染</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>前端逻辑简单，只负责渲染</li><li>树结构可复用（后续可导出为 JSON/CSV）</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Ruby 端多了树构建逻辑</li><li>数据结构与 UI 展示耦合</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Phase 1 缓存的 ScanItem 在 Phase 3 复用</h3>
+      <p>Phase 1 已经传了所有 ScanItem 到 JS（存在 <code>window._reviewState.items</code>）。Phase 3 直接用缓存数据 + MaterialUsage 构建组件树</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Ruby 端零改动</li><li>不增加数据传输量</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>依赖全局状态，用户切标签页后可能丢失</li><li>去重后的面不一致：Calculator 做了薄板去重，但缓存里是去重前的面</li><li>数据完整性依赖 Phase 1 状态</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

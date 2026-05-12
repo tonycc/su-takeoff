@@ -1,0 +1,67 @@
+<h2>导出格式 & 手动标记</h2>
+
+<div class="section">
+  <h3>CSV导出格式</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.6;">
+空间,部位,材料,净面积(m²),损耗率,采购量(m²),规格<br>
+客厅,地面,马可波罗灰砖,27.00,5%,28.35,600×600<br>
+客厅,墙面,多乐士净味白,48.50,5%,50.93,18L/桶<br>
+主卧,地面,爵士白大理石,16.20,8%,17.50,大板<br>
+主卧,墙面,实木墙板,8.10,10%,8.91,定制<br>
+主卧,天花,多乐士净味白,16.20,5%,17.01,18L/桶<br>
+<br>
+Excel(.xlsx)输出时自动加边框、颜色区分部位
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>"手动标记面"交互流程</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-family: sans-serif; font-size: 13px;">
+      <div style="display: flex; gap: 16px; align-items: flex-start;">
+        <div style="flex: 1; border: 1px solid #444; border-radius: 8px; padding: 12px; background: #1a1a2e;">
+          <div style="font-weight: bold; margin-bottom: 8px;">✋ 手动标记面</div>
+          <div>1. 在SU中选中一个或多个面</div>
+          <div>2. 点击"手动标记面"按钮</div>
+          <div>3. 在弹出的对话框中设置：</div>
+          <div style="padding-left: 16px;">
+            <div>— 材料名称（从映射库选择或输入）</div>
+            <div>— 部位（地面/墙面/天花）</div>
+            <div>— 所属空间（自动识别或手动选）</div>
+            <div>— 损耗率（使用默认或自定义）</div>
+          </div>
+          <div>4. 确认后计入统计</div>
+        </div>
+        <div style="flex: 1; border: 1px solid #444; border-radius: 8px; padding: 12px; background: #1a1a2e;">
+          <div style="font-weight: bold; margin-bottom: 8px;">🔖 标记在SU中</div>
+          <div>插件在SU模型内添加自定义属性：</div>
+          <div style="padding-left: 16px;">
+            <div>— 被标记的面添加特殊颜色高亮</div>
+            <div>— 面上显示标记标签</div>
+            <div>— 可批量取消或修改标记</div>
+          </div>
+          <div style="margin-top: 8px; color: #888;">修改模型后标记保留，可增量更新</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>三个视图切换</h3>
+  <div class="options">
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">1</div>
+      <div class="content"><b>按空间汇总</b> — 按空间+部位分组，每个空间汇总采购量</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">2</div>
+      <div class="content"><b>按材料汇总</b> — 所有空间相同材料合并，算出总采购量</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">3</div>
+      <div class="content"><b>展开明细</b> — 每个面的面积、尺寸、SU材质ID，用于核对</div></div>
+  </div>
+</div>
+
+<p>整体设计方案到这里基本完整了。确认一下还有没有遗漏的需求？如果没有，我写正式的设计文档。</p>

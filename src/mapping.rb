@@ -81,6 +81,23 @@ module SuTakeoff
       end
     end
 
+    def load_json_string(json_str)
+      data = JSON.parse(json_str)
+      data.each do |su_name, h|
+        add(su_name, h['material_name'], h['category'],
+            h['unit'], h['spec'] || '', h['default_waste_rate'].to_f)
+      end
+    end
+
+    def save_json_string
+      JSON.generate(@records.transform_values { |r|
+        {
+          material_name: r.material_name, category: r.category,
+          unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate
+        }
+      })
+    end
+
     def bulk_set_waste_rate(category, rate)
       @records.each_value do |r|
         r.default_waste_rate = rate if r.category == category

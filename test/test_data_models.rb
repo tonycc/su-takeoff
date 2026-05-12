@@ -48,10 +48,10 @@ module SuTakeoff
 
   class TestScanItem < Minitest::Test
     def test_scan_item_creation
-      item = ScanItem.new(1, 'marble', 5.0, [0,0,1], 2.0, 2.5, 'Layer0', ['客厅'])
+      item = ScanItem.new(1, 'marble', 5.0, 'm2', :face, [0,0,1], 2.0, 2.5, 'Layer0', ['客厅'], 1.5)
       assert_equal 1, item.face_id
       assert_equal 'marble', item.su_material
-      assert_equal 5.0, item.area
+      assert_equal 5.0, item.qty
     end
   end
 

@@ -1,0 +1,109 @@
+<h2>空间数据结构 — 地面/墙面/天花</h2>
+
+<div class="section">
+  <h3>部位自动识别逻辑</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.6;">
+根据面的法线方向自动判断：<br><br>
+  地面 → 法线朝上 (Z正方向 ±30°)<br>
+  墙面 → 法线水平 (与Z轴夹角 60°~120°)<br>
+  天花 → 法线朝下 (Z负方向 ±30°)<br><br>
+  用户也可手动修正误判的面
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>统计表 — 按空间×部位组织</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px;">
+      <div style="margin-bottom: 8px;">
+        <button style="padding: 4px 12px; background: #0078d4; color: white; border: none; border-radius: 4px;">扫描全部</button>
+        <button style="padding: 4px 12px; background: #555; color: white; border: none; border-radius: 4px;">仅选中面</button>
+        <button style="padding: 4px 12px; background: #555; color: white; border: none; border-radius: 4px;">手动标记面</button>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+          <tr style="background: #333; color: white;">
+            <th style="padding: 6px; border: 1px solid #444;">空间</th>
+            <th style="padding: 6px; border: 1px solid #444;">部位</th>
+            <th style="padding: 6px; border: 1px solid #444;">材料</th>
+            <th style="padding: 6px; border: 1px solid #444;">净面积(m²)</th>
+            <th style="padding: 6px; border: 1px solid #444;">损耗率</th>
+            <th style="padding: 6px; border: 1px solid #444;">采购量(m²)</th>
+            <th style="padding: 6px; border: 1px solid #444;">规格</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background: #e8f5e9;">
+            <td style="padding: 6px; border: 1px solid #ddd;" rowspan="2"><b>客厅</b></td>
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>地面</b> 🟫</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">马可波罗灰砖</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">27.00</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">5%</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">28.35</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">600×600</td>
+          </tr>
+          <tr style="background: #fff3e0;">
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>墙面</b> 🧱</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">多乐士净味白</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">48.50</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">5%</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">50.93</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">18L/桶</td>
+          </tr>
+          <tr style="background: #e3f2fd;">
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>主卧</b></td>
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>地面</b> 🟫</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">爵士白大理石</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">16.20</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">8%</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">17.50</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">大板</td>
+          </tr>
+          <tr style="background: #e3f2fd;">
+            <td style="padding: 6px; border: 1px solid #ddd;"></td>
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>墙面</b> 🧱</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">实木墙板</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">8.10</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">10%</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">8.91</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">定制</td>
+          </tr>
+          <tr style="background: #e3f2fd;">
+            <td style="padding: 6px; border: 1px solid #ddd;"></td>
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>天花</b> ⬜</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">多乐士净味白</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">16.20</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">5%</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">17.01</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">18L/桶</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top: 8px; display: flex; gap: 8px;">
+        <button style="padding: 4px 12px; background: #555; color: white; border: none; border-radius: 4px;">按空间汇总</button>
+        <button style="padding: 4px 12px; background: #555; color: white; border: none; border-radius: 4px;">按材料汇总</button>
+        <button style="padding: 4px 12px; background: #555; color: white; border: none; border-radius: 4px;">展开明细</button>
+        <button style="padding: 4px 12px; background: #555; color: white; border: none; border-radius: 4px;">导出CSV</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>还有一种情况：同一个空间不同部位用同一种材料</h3>
+  <p>比如客厅地面和墙面都用了同款砖，此时在汇总时应自动合并还是分行展示？</p>
+  <div class="options">
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">A</div>
+      <div class="content"><b>合并</b> — 同一空间+同材料合并为一行，采购量统一计算</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">B</div>
+      <div class="content"><b>分行</b> — 按部位分行，地面XXm² + 墙面XXm² 分开显示，方便核对</div></div>
+  </div>
+</div>
+
+<p>这个按地面/墙面/天花的组织方式可以吗？另外同空间同材料是合并一行还是按部位分行？</p>

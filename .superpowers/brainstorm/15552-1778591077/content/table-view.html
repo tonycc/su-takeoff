@@ -1,0 +1,165 @@
+<h2>按组件统计 — 表格形式</h2>
+<p class="subtitle">默认视图，组件行可展开显示子组件或面</p>
+
+<h3>方案 A：树形表格（组件行展开内嵌子行）</h3>
+<div class="mockup">
+  <div class="mockup-body" style="padding:0; font-size:12px;">
+    <table style="width:100%; border-collapse:collapse; color:#cdd6f4;">
+      <thead>
+        <tr style="background:#313244;">
+          <th style="width:24px; padding:6px;"></th>
+          <th style="text-align:left; padding:6px;">组件</th>
+          <th style="text-align:right; padding:6px;">面数</th>
+          <th style="text-align:right; padding:6px;">面积(m²)</th>
+          <th style="text-align:right; padding:6px;">地面</th>
+          <th style="text-align:right; padding:6px;">墙面</th>
+          <th style="text-align:right; padding:6px;">天花</th>
+          <th style="text-align:right; padding:6px;">材质数</th>
+          <th style="text-align:left; padding:6px;">材质</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#181825; cursor:pointer;">
+          <td style="padding:6px; color:#89b4fa;">▾</td>
+          <td style="padding:6px; font-weight:600;">住宅模型</td>
+          <td style="text-align:right; padding:6px;">16</td>
+          <td style="text-align:right; padding:6px;">98.5</td>
+          <td style="text-align:right; padding:6px;">37.0</td>
+          <td style="text-align:right; padding:6px;">46.3</td>
+          <td style="text-align:right; padding:6px;">15.2</td>
+          <td style="text-align:right; padding:6px;">4</td>
+          <td style="padding:6px; font-size:10px; color:#a6adc8;">瓷砖-灰, 涂料-白, 木地板, 石材</td>
+        </tr>
+        <!-- 展开子行：客厅 -->
+        <tr style="background:#1e1e2e; cursor:pointer;">
+          <td style="padding:6px 6px 6px 12px;"></td>
+          <td style="padding:6px 6px 6px 28px;">
+            <span style="color:#89b4fa;">▾</span> 客厅
+          </td>
+          <td style="text-align:right; padding:6px;">6</td>
+          <td style="text-align:right; padding:6px;">37.0</td>
+          <td style="text-align:right; padding:6px;">25.0</td>
+          <td style="text-align:right; padding:6px;">12.0</td>
+          <td style="text-align:right; padding:6px;">—</td>
+          <td style="text-align:right; padding:6px;">2</td>
+          <td style="padding:6px; font-size:10px; color:#a6adc8;">瓷砖-灰, 涂料-白</td>
+        </tr>
+        <!-- 面行 -->
+        <tr style="background:#111118;">
+          <td></td>
+          <td style="padding:4px 6px 4px 44px; font-size:10px; color:#6c7086;">面 #1234</td>
+          <td style="text-align:right; padding:4px;"></td>
+          <td style="text-align:right; padding:4px;">12.5</td>
+          <td style="text-align:right; padding:4px; color:#89b4fa;">12.5</td>
+          <td></td><td></td>
+          <td></td>
+          <td style="padding:4px; font-size:10px;"><span style="background:#8b9a7e; display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:middle;"></span> 瓷砖-灰</td>
+        </tr>
+        <tr style="background:#111118;">
+          <td></td>
+          <td style="padding:4px 6px 4px 44px; font-size:10px; color:#6c7086;">面 #1235</td>
+          <td style="text-align:right; padding:4px;"></td>
+          <td style="text-align:right; padding:4px;">12.5</td>
+          <td style="text-align:right; padding:4px; color:#89b4fa;">12.5</td>
+          <td></td><td></td>
+          <td></td>
+          <td style="padding:4px; font-size:10px;"><span style="background:#8b9a7e; display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:middle;"></span> 瓷砖-灰</td>
+        </tr>
+        <tr style="background:#111118;">
+          <td></td>
+          <td style="padding:4px 6px 4px 44px; font-size:10px; color:#6c7086;">面 #1236</td>
+          <td style="text-align:right; padding:4px;"></td>
+          <td style="text-align:right; padding:4px;">12.0</td>
+          <td></td>
+          <td style="text-align:right; padding:4px; color:#cba6f7;">12.0</td>
+          <td></td><td></td>
+          <td style="padding:4px; font-size:10px;"><span style="background:#e8e4db; display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:middle;"></span> 涂料-白</td>
+        </tr>
+        <!-- 卧室 collapsed -->
+        <tr style="background:#1e1e2e; cursor:pointer;">
+          <td style="padding:6px 6px 6px 12px;"></td>
+          <td style="padding:6px 6px 6px 28px;">
+            <span style="color:#89b4fa;">▸</span> 卧室A
+          </td>
+          <td style="text-align:right; padding:6px;">4</td>
+          <td style="text-align:right; padding:6px;">25.5</td>
+          <td style="text-align:right; padding:6px;">8.5</td>
+          <td style="text-align:right; padding:6px;">—</td>
+          <td style="text-align:right; padding:6px;">17.0</td>
+          <td style="text-align:right; padding:6px;">2</td>
+          <td style="padding:6px; font-size:10px; color:#a6adc8;">木地板, 涂料-白</td>
+        </tr>
+        <!-- 厨房 collapsed -->
+        <tr style="background:#1e1e2e; cursor:pointer;">
+          <td style="padding:6px 6px 6px 12px;"></td>
+          <td style="padding:6px 6px 6px 28px;">
+            <span style="color:#89b4fa;">▸</span> 厨房
+          </td>
+          <td style="text-align:right; padding:6px;">3</td>
+          <td style="text-align:right; padding:6px;">9.0</td>
+          <td style="text-align:right; padding:6px;">3.5</td>
+          <td style="text-align:right; padding:6px;">5.5</td>
+          <td style="text-align:right; padding:6px;">—</td>
+          <td style="text-align:right; padding:6px;">1</td>
+          <td style="padding:6px; font-size:10px; color:#a6adc8;">瓷砖-白</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h3 style="margin-top: 28px;">方案 B：纯平表（按组件分组，不展开）</h3>
+<div class="mockup">
+  <div class="mockup-body" style="padding:0; font-size:12px;">
+    <table style="width:100%; border-collapse:collapse; color:#cdd6f4;">
+      <thead>
+        <tr style="background:#313244;">
+          <th style="text-align:left; padding:6px;">组件</th>
+          <th style="text-align:left; padding:6px;">路径</th>
+          <th style="text-align:right; padding:6px;">面数</th>
+          <th style="text-align:right; padding:6px;">面积(m²)</th>
+          <th style="text-align:right; padding:6px;">地面</th>
+          <th style="text-align:right; padding:6px;">墙面</th>
+          <th style="text-align:right; padding:6px;">天花</th>
+          <th style="text-align:left; padding:6px;">材质</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:6px; font-weight:600;">客厅</td>
+          <td style="padding:6px; font-size:10px; color:#6c7086;">住宅 / 1层</td>
+          <td style="text-align:right; padding:6px;">6</td>
+          <td style="text-align:right; padding:6px;">37.0</td>
+          <td style="text-align:right; padding:6px;">25.0</td>
+          <td style="text-align:right; padding:6px;">12.0</td>
+          <td style="text-align:right; padding:6px;">—</td>
+          <td style="padding:6px; font-size:10px;">瓷砖-灰, 涂料-白</td>
+          <td style="padding:6px;"><button style="padding:2px 8px; font-size:10px; border:1px solid #45475a; border-radius:3px; background:#313244; color:#cdd6f4;">查看面</button></td>
+        </tr>
+        <tr>
+          <td style="padding:6px; font-weight:600;">卧室A</td>
+          <td style="padding:6px; font-size:10px; color:#6c7086;">住宅 / 1层</td>
+          <td style="text-align:right; padding:6px;">4</td>
+          <td style="text-align:right; padding:6px;">25.5</td>
+          <td style="text-align:right; padding:6px;">8.5</td>
+          <td style="text-align:right; padding:6px;">—</td>
+          <td style="text-align:right; padding:6px;">17.0</td>
+          <td style="padding:6px; font-size:10px;">木地板, 涂料-白</td>
+          <td style="padding:6px;"><button style="padding:2px 8px; font-size:10px; border:1px solid #45475a; border-radius:3px; background:#313244; color:#cdd6f4;">查看面</button></td>
+        </tr>
+        <tr>
+          <td style="padding:6px; font-weight:600;">厨房</td>
+          <td style="padding:6px; font-size:10px; color:#6c7086;">住宅 / 1层</td>
+          <td style="text-align:right; padding:6px;">3</td>
+          <td style="text-align:right; padding:6px;">9.0</td>
+          <td style="text-align:right; padding:6px;">3.5</td>
+          <td style="text-align:right; padding:6px;">5.5</td>
+          <td style="text-align:right; padding:6px;">—</td>
+          <td style="padding:6px; font-size:10px;">瓷砖-白</td>
+          <td style="padding:6px;"><button style="padding:2px 8px; font-size:10px; border:1px solid #45475a; border-radius:3px; background:#313244; color:#cdd6f4;">查看面</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

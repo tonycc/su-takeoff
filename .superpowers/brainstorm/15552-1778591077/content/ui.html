@@ -1,0 +1,85 @@
+<h2>设计：UI 布局与交互</h2>
+<p class="subtitle">Phase 3 新增「按组件」按钮，树形展开组件层级</p>
+
+<h3>视图栏 — 新增第四个按钮</h3>
+<div class="mockup">
+  <div class="mockup-body" style="padding:10px; display:flex; gap:4px;">
+    <button style="padding:4px 12px; border:1px solid #45475a; border-radius:4px; background:transparent; color:#a6adc8;">按空间汇总</button>
+    <button style="padding:4px 12px; border:1px solid #45475a; border-radius:4px; background:transparent; color:#a6adc8;">按材料汇总</button>
+    <button style="padding:4px 12px; border:1px solid #89b4fa; border-radius:4px; background:#89b4fa; color:#1e1e2e; font-weight:600;">按组件</button>
+    <button style="padding:4px 12px; border:1px solid #45475a; border-radius:4px; background:transparent; color:#a6adc8;">展开明细</button>
+  </div>
+</div>
+
+<h3>组件树 — 示例</h3>
+<div class="mockup">
+  <div class="mockup-body" style="padding:0; font-size:12px;">
+
+    <div style="border:1px solid #45475a; border-radius:6px; margin:6px;">
+      <div style="padding:8px 14px; background:#181825; display:flex; align-items:center; gap:10px; border-radius:6px;">
+        <span style="color:#89b4fa; font-weight:bold;">▾</span>
+        <span style="font-weight:600;">🏠 住宅模型</span>
+        <span style="display:flex; gap:6px; font-size:10px; color:#a6adc8; margin-left:auto;">
+          <span>16面</span><span>98.5m²</span>
+          <span style="background:#313a4a;color:#89b4fa;padding:1px 6px;border-radius:8px;">地 37</span>
+          <span style="background:#3a3148;color:#cba6f7;padding:1px 6px;border-radius:8px;">墙 46</span>
+          <span style="background:#2f3a31;color:#a6e3a1;padding:1px 6px;border-radius:8px;">顶 15</span>
+          <span>4种材质</span>
+        </span>
+      </div>
+
+      <div style="padding:4px 4px 4px 22px;">
+        <!-- 客厅 expanded -->
+        <div style="border:1px solid #45475a; border-radius:4px; margin-bottom:3px;">
+          <div style="padding:6px 10px; background:#1e1e2e; display:flex; align-items:center; gap:8px; border-radius:4px;">
+            <span style="color:#89b4fa; font-weight:bold;">▾</span>
+            <span>🛋 客厅</span>
+            <span style="font-size:10px; color:#a6adc8; margin-left:auto;">6面 · 37m² · 2材质</span>
+          </div>
+          <div style="padding:2px 4px 2px 22px;">
+            <div style="border:1px solid #3a3a3a; border-radius:3px; margin:2px 0; padding:4px 8px; background:#181825; display:flex; gap:6px; align-items:center;">
+              <span style="font-size:10px; color:#6c7086;">#1234</span>
+              <span style="width:12px;height:12px;background:#8b9a7e;border-radius:2px;"></span>
+              <span>瓷砖-灰</span>
+              <span style="margin-left:auto; color:#a6adc8;">地 · 12.5m² → 瓷砖 13.1m²</span>
+            </div>
+            <div style="border:1px solid #3a3a3a; border-radius:3px; margin:2px 0; padding:4px 8px; background:#181825; display:flex; gap:6px; align-items:center;">
+              <span style="font-size:10px; color:#6c7086;">#1236</span>
+              <span style="width:12px;height:12px;background:#e8e4db;border-radius:2px;"></span>
+              <span>涂料-白</span>
+              <span style="margin-left:auto; color:#cba6f7;">墙 · 12.0m² → 涂料 12.6m²</span>
+            </div>
+            <div style="padding:4px 8px; margin-top:4px; background:#a6e3a110; border-radius:3px; font-size:10px; color:#a6e3a1;">
+              统计：2种材料 | 采购 — 瓷砖 25.5m² · 涂料 12.6m²
+            </div>
+          </div>
+        </div>
+
+        <!-- 卧室 collapsed -->
+        <div style="border:1px solid #45475a; border-radius:4px; margin-bottom:3px;">
+          <div style="padding:6px 10px; background:#1e1e2e; display:flex; align-items:center; gap:8px; border-radius:4px;">
+            <span style="color:#89b4fa; font-weight:bold;">▸</span>
+            <span>🛏 卧室A</span>
+            <span style="font-size:10px; color:#a6adc8; margin-left:auto;">4面 · 25.5m² · 2材质</span>
+          </div>
+        </div>
+
+        <!-- 厨房 collapsed -->
+        <div style="border:1px solid #45475a; border-radius:4px;">
+          <div style="padding:6px 10px; background:#1e1e2e; display:flex; align-items:center; gap:8px; border-radius:4px;">
+            <span style="color:#89b4fa; font-weight:bold;">▸</span>
+            <span>🍳 厨房</span>
+            <span style="font-size:10px; color:#a6adc8; margin-left:auto;">3面 · 9.0m² · 1材质</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 24px;">保留不改</h3>
+<ul style="color:#a6adc8; font-size:13px;">
+  <li>现有三个视图（按空间 / 按材料 / 明细）完整保留</li>
+  <li>Calculator 计算逻辑不变</li>
+  <li>Mapping / Process 数据层不变</li>
+</ul>

@@ -1,0 +1,83 @@
+<h2>设计：架构与数据流</h2>
+<p class="subtitle">Phase 3 统计阶段新增「按组件」视图，数据从 Ruby 传到 JS 再构建树</p>
+
+<h3>1. Ruby 端改动（dialog.rb）</h3>
+<div class="mockup">
+  <div class="mockup-body" style="font-family:monospace; font-size:12px; padding:12px;">
+    <div style="color:#89b4fa; margin-bottom:8px;"># finalize_and_compute — 在现有 data hash 中新增 items</div>
+    <div style="color:#a6adc8;">
+      data = {<br>
+      &nbsp;&nbsp;phase: 'done',<br>
+      &nbsp;&nbsp;by_space: usages.map(&amp;:to_h),<br>
+      &nbsp;&nbsp;by_material: ...,<br>
+      &nbsp;&nbsp;<span style="color:#a6e3a1;">items: @last_scan[:items].map(&amp;:to_h),  <span style="color:#6c7086;">← 新增</span></span><br>
+      &nbsp;&nbsp;<span style="color:#a6e3a1;">openings: @last_scan[:openings].map(&amp;:to_h) <span style="color:#6c7086;">← 新增</span></span><br>
+      }
+    </div>
+    <div style="margin-top:10px; font-size:10px; color:#6c7086;">
+      items 已经过薄板去重（Calculator 内部执行），与 MaterialUsage 数据一致
+    </div>
+  </div>
+</div>
+
+<h3>2. 前端数据流</h3>
+<div style="display:flex; gap:12px; margin-top:16px; font-size:12px;">
+  <div style="flex:1; background:#181825; border:1px solid #45475a; border-radius:8px; padding:14px;">
+    <div style="font-weight:600; color:#89b4fa; margin-bottom:8px;">输入</div>
+    <div style="color:#cdd6f4;">
+      <div style="margin-bottom:6px;"><code>data.items</code> — ScanItem[]</div>
+      <div style="font-size:10px; color:#6c7086;">component_path, face_id, su_material, qty, normal, part...</div>
+      <div style="margin-top:10px;"><code>data.by_space</code> — MaterialUsage[]</div>
+      <div style="font-size:10px; color:#6c7086;">space, part, material_name, net_area, purchase_qty...</div>
+    </div>
+  </div>
+  <div style="display:flex; align-items:center; color:#89b4fa; font-size:20px;">→</div>
+  <div style="flex:1; background:#181825; border:1px solid #45475a; border-radius:8px; padding:14px;">
+    <div style="font-weight:600; color:#a6e3a1; margin-bottom:8px;">构建</div>
+    <div style="color:#cdd6f4;">
+      <div>1. 按 component_path 分组 items</div>
+      <div>2. 构建嵌套树结构</div>
+      <div>3. 每节点聚合子节点统计</div>
+    </div>
+  </div>
+  <div style="display:flex; align-items:center; color:#89b4fa; font-size:20px;">→</div>
+  <div style="flex:1; background:#181825; border:1px solid #45475a; border-radius:8px; padding:14px;">
+    <div style="font-weight:600; color:#cba6f7; margin-bottom:8px;">渲染</div>
+    <div style="color:#cdd6f4;">
+      <div>递归渲染可展开节点</div>
+      <div>组件节点：汇总统计</div>
+      <div>面节点：明细信息</div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 28px;">3. 树节点结构</h3>
+<div class="mockup">
+  <div class="mockup-body" style="padding:12px; font-family:monospace; font-size:11px;">
+<pre style="color:#cdd6f4; margin:0;">
+{
+  name: "客厅",
+  path: ["住宅", "1层", "客厅"],
+  faces: [{
+    face_id: 123, su_material: "瓷砖-灰",
+    qty: 12.5, part: "floor", ...
+  }],
+  children: [ /* 子组件 */ ],
+  stats: {
+    face_count: 6, total_area: 35.2,
+    materials: ["瓷砖-灰", "涂料-白"],
+    by_part: { floor: 25, wall: 0, ceiling: 10.2 }
+  }
+}
+</pre>
+  </div>
+</div>
+
+<h3 style="margin-top: 28px;">4. 改动文件</h3>
+<table style="width:100%; border-collapse:collapse; color:#cdd6f4; font-size:12px;">
+  <tr style="background:#313244;"><th style="padding:6px; text-align:left;">文件</th><th style="text-align:left;">改动</th></tr>
+  <tr><td style="padding:5px 6px;">dialog.rb</td><td>finalize_and_compute 额外传 items + openings</td></tr>
+  <tr><td style="padding:5px 6px;">index.html</td><td>视图栏新增「按组件」按钮</td></tr>
+  <tr><td style="padding:5px 6px;">app.js</td><td>新增 buildComponentTree() + renderComponentView()；renderResults 支持新视图</td></tr>
+  <tr><td style="padding:5px 6px;">styles.css</td><td>新增组件树样式</td></tr>
+</table>

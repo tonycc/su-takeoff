@@ -1,0 +1,83 @@
+<h2>设计：架构与数据流</h2>
+<p class="subtitle">Phase 3 统计阶段新增「按组件」视图，数据从 Ruby 传到 JS 再构建树</p>
+
+<h3>1. Ruby 端改动（dialog.rb）</h3>
+<div class="mockup">
+  <div class="mockup-body" style="font-family:monospace; font-size:12px; padding:12px;">
+    <div style="color:#89b4fa; margin-bottom:8px;"># finalize_and_compute — 新增传 items + openings</div>
+    <div style="color:#a6adc8;">
+      data = {<br>
+      &nbsp;&nbsp;phase: 'done',<br>
+      &nbsp;&nbsp;by_space: usages.map(&amp;:to_h),<br>
+      &nbsp;&nbsp;by_material: ...,<br>
+      &nbsp;&nbsp;<span style="color:#a6e3a1;">items: @last_scan[:items].map(&amp;:to_h),  <span style="color:#6c7086;">← 新增</span></span><br>
+      &nbsp;&nbsp;<span style="color:#a6e3a1;">openings: @last_scan[:openings].map(&amp;:to_h) <span style="color:#6c7086;">← 新增</span></span><br>
+      }
+    </div>
+  </div>
+</div>
+
+<h3>2. 前端数据流</h3>
+<div style="display:flex; gap:20px; margin-top:16px;">
+  <div style="flex:1; background:#181825; border:1px solid #45475a; border-radius:8px; padding:16px;">
+    <div style="font-weight:600; color:#89b4fa; margin-bottom:10px;">📦 输入</div>
+    <div style="font-size:12px; color:#cdd6f4;">
+      <div style="margin-bottom:6px;"><code>data.items</code> — ScanItem[]</div>
+      <div style="margin-bottom:2px; font-size:10px; color:#6c7086;">含 component_path, face_id, su_material, qty, normal, part...</div>
+      <div style="margin-top:10px; margin-bottom:6px;"><code>data.by_space</code> — MaterialUsage[]</div>
+      <div style="font-size:10px; color:#6c7086;">含 space, part, material_name, net_area, purchase_qty...</div>
+    </div>
+  </div>
+  <div style="display:flex; align-items:center; color:#89b4fa; font-size:24px;">→</div>
+  <div style="flex:1; background:#181825; border:1px solid #45475a; border-radius:8px; padding:16px;">
+    <div style="font-weight:600; color:#a6e3a1; margin-bottom:10px;">🌳 构建</div>
+    <div style="font-size:12px; color:#cdd6f4;">
+      <div style="margin-bottom:6px;">1. 按 component_path 分组 items</div>
+      <div style="margin-bottom:6px;">2. 构建嵌套树结构</div>
+      <div style="margin-bottom:6px;">3. 每节点聚合子节点统计</div>
+      <div>4. 面节点关联 MaterialUsage</div>
+    </div>
+  </div>
+  <div style="display:flex; align-items:center; color:#89b4fa; font-size:24px;">→</div>
+  <div style="flex:1; background:#181825; border:1px solid #45475a; border-radius:8px; padding:16px;">
+    <div style="font-weight:600; color:#cba6f7; margin-bottom:10px;">🖥 渲染</div>
+    <div style="font-size:12px; color:#cdd6f4;">
+      <div style="margin-bottom:6px;">递归渲染可展开节点</div>
+      <div style="margin-bottom:6px;">组件节点：汇总统计</div>
+      <div>面节点：明细信息</div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 28px;">3. 树节点结构（JS 内存对象）</h3>
+<div class="mockup">
+  <div class="mockup-body" style="padding:12px; font-family:monospace; font-size:11px;">
+<pre style="color:#cdd6f4; margin:0;">
+{
+  name: "客厅",
+  path: ["住宅", "1层", "客厅"],  // 完整路径
+  depth: 2,
+  children: [                       // 子组件节点
+    { name: "吊顶", path: [...], children: [], faces: [...] }
+  ],
+  faces: [                          // 本层级直接归属的面
+    {
+      face_id: 123,
+      su_material: "瓷砖-灰色",
+      qty: 12.5,                    // 面积 m²
+      part: "floor",
+      normal: [0, 0, 1],
+      ...
+    }
+  ],
+  stats: {                          // 聚合统计（含子节点）
+    face_count: 6,
+    total_area: 35.2,
+    materials: ["瓷砖-灰色", "涂料-白"],
+    material_count: 2,
+    by_part: { floor: 25.0, wall: 0, ceiling: 10.2 }
+  }
+}
+</pre>
+  </div>
+</div>

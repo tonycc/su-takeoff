@@ -1,0 +1,64 @@
+<h2>数据模型 & 边界情况</h2>
+
+<div class="section">
+  <h3>材质映射表结构 (JSON/CSV)</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-family: monospace; font-size: 13px; line-height: 1.6;">
+{|<br>
+│  "su_material_name": "tile_302",     ← SU材质名（唯一标识）<br>
+│  "material_name": "马可波罗灰砖",      ← 真实材料名称<br>
+│  "category": "瓷砖",                  ← 分类：瓷砖/石材/涂料/木材/墙纸/玻璃/金属/其他<br>
+│  "unit": "m²",                       ← 计量单位<br>
+│  "spec": "600×600",                  ← 规格描述（可选）<br>
+│  "default_waste_rate": 0.05          ← 默认损耗率<br>
+|}<br>
+<br>
+▶ 用户可批量导入CSV<br>
+▶ SU材质名重复时提示覆盖<br>
+▶ 支持按分类批量设置损耗率
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>空间识别规则</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.6;">
+通过SU的层级结构自动识别空间：<br><br>
+方案一（推荐）：按 组件/群组 层级划分<br>
+  └ 模型根<br>
+     └ 客厅 (组件/群组)<br>
+        ├ 墙面 → 读取材质<br>
+        └ 地面 → 读取材质<br>
+     └ 主卧 (组件/群组)<br>
+        ├ 墙面 → 读取材质<br>
+        └ 地面 → 读取材质<br><br>
+方案二：按 SU图层 划分<br>
+  每个空间或面放在对应图层，插件按图层分组统计<br><br>
+运行时用户可选择分组方式，也可以不分组汇总
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>边界情况处理</h3>
+  <div class="options">
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">!</div>
+      <div class="content"><b>无材质的面</b> — 扫描时检测到未赋材质的透明面，在结果中标记为"未指定"，允许用户手动映射或忽略</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">!</div>
+      <div class="content"><b>隐藏面/背面</b> — 自动跳过隐藏几何体和背面（法线朝下的面），用户可配置是否计入</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">!</div>
+      <div class="content"><b>曲面</b> — SU的曲面由多个小面构成，分别读取每个面的材质和面积求和，支持网格面的精确统计</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">!</div>
+      <div class="content"><b>"手动标记面"补充</b> — 对于未建入模型的面（如踢脚线），用户选取一个面后通过对话框填写材料和面积，计入统计</div></div>
+    <div class="option" onclick="void(0)" style="cursor: default;">
+      <div class="letter">!</div>
+      <div class="content"><b>同一模型多个相同材料</b> — 自动合并同名材质的面积再汇总，确保不重复统计</div></div>
+  </div>
+</div>
+
+<p>以上数据结构和边界处理方案你觉得合理吗？</p>

@@ -1,0 +1,9 @@
+{"type":"server-started","port":56337,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:56337","screen_dir":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content","state_dir":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/state"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/approaches.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/architecture.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/ui-design.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/ui-design-v2.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/datamodel.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/spaces.html"}
+{"type":"screen-added","file":"/Users/max/projects/su-takeoff/.superpowers/brainstorm/2419-1778342613/content/output-format.html"}
+{"type":"server-stopped","reason":"idle timeout"}

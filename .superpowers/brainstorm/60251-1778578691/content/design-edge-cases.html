@@ -1,0 +1,65 @@
+<h2>设计：边界情况与范围</h2>
+
+<h3>边界情况处理</h3>
+
+<div class="section">
+  <h4>1. 空组件路径（模型根层级的面）</h4>
+  <p>component_path 为空数组的面归入「模型根层级」节点，与正常组件并列显示。</p>
+</div>
+
+<div class="section">
+  <h4>2. 组件层级很深（多级嵌套）</h4>
+  <p>每层独立可展开/折叠，默认只展开第一级。深层路径自动截断显示（CSS text-overflow: ellipsis），hover 显示完整路径。</p>
+</div>
+
+<div class="section">
+  <h4>3. 无面组件</h4>
+  <p>如果某个组件只包含子组件而没有直接面，依然显示为节点（面数=0，面积=0），保留层级结构完整性。</p>
+</div>
+
+<div class="section">
+  <h4>4. 已映射 vs 未映射面</h4>
+  <p>Phase 3 进入时所有材质必须已映射（否则弹窗拦截）。面节点的「真实材料」列始终有值。nil 材质面显示「未赋材质」。</p>
+</div>
+
+<div class="section">
+  <h4>5. 大模型性能</h4>
+  <p>树构建使用一次遍历分组（O(n)），渲染用 DocumentFragment 批量插入 DOM。200 面以内无压力。</p>
+</div>
+
+<h3 style="margin-top: 28px;">不改动的部分</h3>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-body">
+      <h3>Calculator / 计算逻辑</h3>
+      <p>不修改。分组逻辑、去重、洞口扣减、损耗率计算全部不变。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h3>现有三个视图</h3>
+      <p>保留不删除。「按组件」作为第四种视图加入，默认视图保持「按空间汇总」。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h3>Mapping / Process 数据</h3>
+      <p>不涉及。映射规则和工艺做法不受影响。</p>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 28px;">改动文件清单</h3>
+
+<div class="mockup">
+  <div class="mockup-body" style="padding:12px; font-size:12px;">
+    <table style="width:100%; border-collapse:collapse; color:#cdd6f4;">
+      <tr style="background:#313244;"><th style="padding:6px; text-align:left;">文件</th><th style="text-align:left;">改动</th></tr>
+      <tr><td style="padding:5px 6px;"><code>src/ui/dialog.rb</code></td><td>finalize_and_compute 额外传 items + openings</td></tr>
+      <tr><td style="padding:5px 6px;"><code>src/ui/index.html</code></td><td>视图栏新增「按组件」按钮</td></tr>
+      <tr><td style="padding:5px 6px;"><code>src/ui/app.js</code></td><td>新增 buildComponentTree() + renderComponentView()；renderResults 调用新视图</td></tr>
+      <tr><td style="padding:5px 6px;"><code>src/ui/styles.css</code></td><td>新增组件树样式（复用 .group-node 系列，微调）</td></tr>
+    </table>
+  </div>
+</div>
