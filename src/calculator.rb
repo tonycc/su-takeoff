@@ -57,8 +57,7 @@ module SuTakeoff
         end
 
         part = self.class.face_orientation(item.normal)
-        space = item.component_path.first || '未分组'
-        Debug.log "  [space debug] path=#{item.component_path.inspect} first=#{item.component_path.first.inspect} space=#{space.inspect} part=#{part.inspect}" if groups.size < 5
+        space = self.class.extract_space(item)
         key = [space, part, item.su_material, item.unit]
         groups[key] << item
       end
@@ -185,6 +184,14 @@ module SuTakeoff
       end
     end
 
+    # Extract room name from the first element of component_path.
+    # When the model uses naming prefix convention like "主卧-涂料",
+    # the part before the first "-" is the room name.
+    def self.extract_space(item)
+      raw = item.component_path.first || '未分组'
+      raw.include?('-') ? raw.split('-', 2).first : raw
+    end
+
     private
 
     def eval_formula(formula, net_area, item = nil)
@@ -217,7 +224,7 @@ module SuTakeoff
       # Compute per-space vertical midpoint across ALL items in the space,
       # so a slab can be located in its global context rather than against
       # only its own two faces.
-      items_by_space = items.group_by { |it| it.component_path.first || '未分组' }
+      items_by_space = items.group_by { |it| Calculator.extract_space(it) }
       space_z_mid = {}
       items_by_space.each do |sp, sp_items|
         zs = sp_items.map(&:z_center).compact
@@ -226,7 +233,7 @@ module SuTakeoff
         Debug.log "空间 [#{sp}] Z范围: #{zs.min.round(3)}~#{zs.max.round(3)}m 中线: #{space_z_mid[sp].round(3)}m"
       end
 
-      grouped = items.group_by { |it| [it.component_path.first || '未分组', it.su_material] }
+      grouped = items.group_by { |it| [Calculator.extract_space(it), it.su_material] }
       drop_ids = {}
       total_dropped = 0
 

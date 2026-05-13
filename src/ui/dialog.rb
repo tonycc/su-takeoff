@@ -133,7 +133,7 @@ module SuTakeoff
         total_length = 0.0
         group.each do |it|
           parts[Calculator.face_orientation(it.normal)] += it.qty
-          spaces[it.component_path.first || '未分组'] += it.qty
+          spaces[Calculator.extract_space(it)] += it.qty
           if it.width && it.width > 0 && it.height && (it.height / it.width) > 15
             linear_count += 1
             total_length += it.height

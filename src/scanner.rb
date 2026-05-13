@@ -43,9 +43,6 @@ module SuTakeoff
       Debug.section "【扫描阶段】开始"
       Debug.log "扫描模式: #{selection_only && !@model.selection.empty? ? '仅选中面' : '全部模型'}"
       Debug.log "顶层实体数: #{entities.size}"
-      entities.first(10).each do |e|
-        Debug.log "  顶层: #{e.class.name.split('::').last} name=#{e.respond_to?(:name) ? e.name.inspect : 'N/A'} def_name=#{e.respond_to?(:definition) && e.definition ? e.definition.name.inspect : 'N/A'}"
-      end
 
       entities.each do |entity|
         collect_faces(entity, [], IDENTITY, face_set, items, openings, opening_face_ids)
@@ -72,7 +69,7 @@ module SuTakeoff
       Debug.log "  天花 (ceiling): #{by_part['ceiling']&.size || 0}面 #{by_part['ceiling']&.sum(&:qty)&.round(2) || 0}m²"
 
       # 按空间（组件层级）分解 —— 定位面从哪里来
-      by_container = items.group_by { |i| i.component_path.first || "(模型根层级)" }
+      by_container = items.group_by { |i| Calculator.extract_space(i) }
       Debug.log
       Debug.log "按空间/容器分解:"
       Debug.log
@@ -152,13 +149,6 @@ module SuTakeoff
 
         comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
         comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 }
-
-        # DEBUG: print path for first few faces
-        if items.size < 3
-          path_detail = path.map { |c| "#{c.class.name.split('::').last}(name=#{c.respond_to?(:name) ? c.name.inspect : 'N/A'}, entityID=#{c.respond_to?(:entityID) ? c.entityID : 'N/A'})" }
-          Debug.log "  [scanner debug] face ##{items.size} path=#{path_detail.inspect} len=#{path.length}"
-          Debug.log "    → comp_path=#{comp_path.inspect}"
-        end
 
         area_m2 = compute_area(entity, transform)
         world_normal = entity.normal.transform(transform)
