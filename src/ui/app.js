@@ -186,6 +186,7 @@ function renderComponentTable(tree, purchaseBySu) {
     tree.faces = [];
   }
   var html = '<table><thead><tr>' +
+    '<th style="width:40px">#</th>' +
     '<th>组件 / 面</th>' +
     '<th style="text-align:right">面数</th>' +
     '<th style="text-align:right">面积(m²)</th>' +
@@ -197,14 +198,15 @@ function renderComponentTable(tree, purchaseBySu) {
     '<th style="text-align:right">采购量</th>' +
     '</tr></thead><tbody>';
   var rootId = 'comp-root';
+  var counter = { n: 0 };
   tree.children.forEach(function(child) {
-    html += renderComponentNode(child, 1, rootId, purchaseBySu);
+    html += renderComponentNode(child, 1, rootId, purchaseBySu, counter);
   });
   html += '</tbody></table>';
   return html;
 }
 
-function renderComponentNode(node, depth, parentId, purchaseBySu) {
+function renderComponentNode(node, depth, parentId, purchaseBySu, counter) {
   var html = '';
   var idKey = (node.path_ids || []).join('-') || 'noid-' + node.path.join('-');
   var nodeId = 'comp-' + idKey.replace(/[^a-zA-Z0-9\-]/g, '_');
@@ -225,7 +227,9 @@ function renderComponentNode(node, depth, parentId, purchaseBySu) {
       ? '<span style="color:#6c7086" title="含未映射材质">' + purchaseTotal.toFixed(2) + ' *</span>'
       : purchaseTotal.toFixed(2));
 
+  counter.n += 1;
   html += '<tr class="comp-row" data-depth="' + depth + '" data-parent="' + parentId + '"' + hidden + '>' +
+    '<td style="text-align:right; color:#6c7086; font-size:11px;">' + counter.n + '</td>' +
     '<td style="padding-left:' + (indent + 6) + 'px">';
   if (hasChildren) {
     html += '<span class="comp-toggle" id="' + nodeId + '-toggle">' + (depth === 1 ? '▾' : '▸') + '</span> ';
@@ -244,26 +248,29 @@ function renderComponentNode(node, depth, parentId, purchaseBySu) {
     '</tr>';
 
   node.children.forEach(function(child) {
-    html += renderComponentNode(child, depth + 1, nodeId, purchaseBySu);
+    html += renderComponentNode(child, depth + 1, nodeId, purchaseBySu, counter);
   });
   node.faces.forEach(function(face) {
-    html += renderFaceRow(face, depth + 1, nodeId, purchaseBySu);
+    counter.n += 1;
+    html += renderFaceRow(face, depth + 1, nodeId, purchaseBySu, counter.n);
   });
   return html;
 }
 
-function renderFaceRow(face, depth, parentId, purchaseBySu) {
+function renderFaceRow(face, depth, parentId, purchaseBySu, serial) {
   var indent = depth * 18;
   var mapped = face.su_material && purchaseBySu[face.su_material] != null;
   var statusIcon = !face.su_material ? '' :
     (mapped ? '<span style="color:#a6e3a1">✓</span> ' : '<span style="color:#f38ba8">●</span> ');
+  var qty = +(face.qty || 0).toFixed(2);
   return '<tr class="face-row" data-depth="' + depth + '" data-parent="' + parentId + '" style="display:none">' +
+    '<td style="text-align:right; font-size:10px; color:#6c7086;">' + (serial || '') + '</td>' +
     '<td style="padding-left:' + (indent + 6) + 'px; font-size:10px; color:#6c7086;">' + statusIcon + '面 #' + esc(face.face_id) + '</td>' +
     '<td></td>' +
-    '<td style="text-align:right">' + (face.qty || 0) + '</td>' +
-    '<td style="text-align:right">' + (face.part === 'floor' ? (face.qty || 0) : '—') + '</td>' +
-    '<td style="text-align:right">' + (face.part === 'wall' ? (face.qty || 0) : '—') + '</td>' +
-    '<td style="text-align:right">' + (face.part === 'ceiling' ? (face.qty || 0) : '—') + '</td>' +
+    '<td style="text-align:right">' + qty + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'floor' ? qty : '—') + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'wall' ? qty : '—') + '</td>' +
+    '<td style="text-align:right">' + (face.part === 'ceiling' ? qty : '—') + '</td>' +
     '<td></td>' +
     '<td style="font-size:10px">' + esc(face.su_material || '未赋材质') + '</td>' +
     '<td></td>' +
@@ -291,8 +298,9 @@ function renderMaterialView(data) {
     '<input type="text" id="material-search" placeholder="🔍 搜索..." value="' + esc(window._materialSearch || '') + '" oninput="onMaterialSearch(this.value)">' +
     '</div>' +
     '<table id="material-table"><thead><tr>' +
+      '<th style="width:40px">#</th>' +
       '<th style="width:4%">状态</th>' +
-      '<th style="width:20%">SU材质</th>' +
+      '<th style="width:18%">SU材质</th>' +
       '<th style="width:12%">面数/面积</th>' +
       '<th style="width:14%">部位分布</th>' +
       '<th>真实材料名</th>' +
@@ -345,6 +353,7 @@ function renderMaterialTableBody(data) {
   var partLabels = { floor: '地', wall: '墙', ceiling: '顶' };
 
   tbody.innerHTML = '';
+  var serial = 0;
   (data.materials_info || []).forEach(function(info) {
     var name = info.su_name;
     var isIgnored = !!ignoredSet[name];
@@ -355,6 +364,8 @@ function renderMaterialTableBody(data) {
     if (filter === 'mapped' && !isMapped) return;
     if (filter === 'ignored' && !isIgnored) return;
     if (q && name.toLowerCase().indexOf(q) === -1) return;
+
+    serial += 1;
 
     var status = isMapped
       ? '<span class="tag tag-mapped">✓</span>'
@@ -384,6 +395,7 @@ function renderMaterialTableBody(data) {
     var tr = document.createElement('tr');
     tr.className = 'row-' + (isMapped ? 'mapped' : (isIgnored ? 'ignored' : 'unresolved'));
     tr.innerHTML =
+      '<td style="text-align:right; color:#6c7086; font-size:11px;">' + serial + '</td>' +
       '<td>' + status + '</td>' +
       '<td><div class="u-name-row">' + swatch +
         '<span class="u-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
@@ -502,15 +514,17 @@ function renderPurchaseByMaterial(data) {
     return '<p class="hint">暂无已映射材质</p>';
   }
   var html = '<table><thead><tr>' +
+    '<th style="width:40px">#</th>' +
     '<th>材料</th><th>分类</th><th>规格</th><th>单位</th>' +
     '<th style="text-align:right">净面积</th><th style="text-align:right">损耗率</th>' +
     '<th style="text-align:right">采购量</th><th style="text-align:right">占比</th>' +
     '</tr></thead><tbody>';
   var totalNet = 0;
-  rows.forEach(function(r) {
+  rows.forEach(function(r, i) {
     totalNet += r.net_area;
     var pct = (r.purchase_qty / totalPurchase * 100).toFixed(0) + '%';
     html += '<tr>' +
+      '<td style="text-align:right; color:#6c7086; font-size:11px;">' + (i + 1) + '</td>' +
       '<td>' + esc(r.material_name) + '</td>' +
       '<td>' + esc(r.category) + '</td>' +
       '<td>' + esc(r.spec || '-') + '</td>' +
@@ -522,6 +536,7 @@ function renderPurchaseByMaterial(data) {
       '</tr>';
   });
   html += '<tr style="font-weight:bold;background:#313244">' +
+    '<td></td>' +
     '<td>合计</td><td></td><td></td><td></td>' +
     '<td style="text-align:right">' + totalNet.toFixed(2) + '</td>' +
     '<td></td>' +
@@ -537,12 +552,14 @@ function renderPurchaseBySpace(data) {
   if (usages.length === 0) return '<p class="hint">暂无已映射材质</p>';
   var partLabels = { floor: '地面', wall: '墙面', ceiling: '天花' };
   var html = '<table><thead><tr>' +
+    '<th style="width:40px">#</th>' +
     '<th>空间</th><th>部位</th><th>材料</th><th>分类</th><th>规格</th><th>单位</th>' +
     '<th style="text-align:right">净面积</th><th style="text-align:right">损耗率</th>' +
     '<th style="text-align:right">采购量</th>' +
     '</tr></thead><tbody>';
-  usages.forEach(function(u) {
+  usages.forEach(function(u, i) {
     html += '<tr>' +
+      '<td style="text-align:right; color:#6c7086; font-size:11px;">' + (i + 1) + '</td>' +
       '<td>' + esc(u.space || '—') + '</td>' +
       '<td>' + esc(partLabels[u.part] || u.part || '—') + '</td>' +
       '<td>' + esc(u.material_name) + '</td>' +

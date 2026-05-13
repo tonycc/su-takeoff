@@ -22,6 +22,13 @@ module SuTakeoff
       save_ignored
     end
 
+    # Replace the entire ignored list (not additive) — used when UI sends the
+    # complete current state.
+    def set_ignored!(names)
+      @ignored = Array(names).uniq
+      save_ignored
+    end
+
     def unignore!(name)
       @ignored.delete(name)
       save_ignored

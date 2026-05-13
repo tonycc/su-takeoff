@@ -158,7 +158,7 @@ module SuTakeoff
 
     def set_ignored(json)
       names = JSON.parse(json)
-      PluginState.instance.ignore!(names)
+      PluginState.instance.set_ignored!(names)
       send_workbench_state if @last_scan
     end
 
