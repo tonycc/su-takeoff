@@ -77,9 +77,3 @@ Ruby 写映射 + send_workbench_state（重跑 Calculator）
     ↓
 前端再次重绘所有视图
 ```
-
-## 设计文档
-
-完整设计与计划保留在 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`，按日期命名。最近的重构：
-- `2026-05-13-stats-page-refactor-design.md` — 同页多视图工作台
-- `2026-05-12-component-stats-design.md` — 按组件树形视图
