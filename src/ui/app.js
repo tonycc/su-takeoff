@@ -123,7 +123,8 @@ function aggregateComponentStats(node) {
   var stats = {
     face_count: 0, total_area: 0.0,
     by_part: { floor: 0.0, wall: 0.0, ceiling: 0.0 },
-    material_names: {}, material_count: 0
+    material_names: {}, material_count: 0,
+    linear_length: 0.0, linear_face_count: 0
   };
   node.children.forEach(function(child) {
     var cs = aggregateComponentStats(child);
@@ -132,6 +133,8 @@ function aggregateComponentStats(node) {
     stats.by_part.floor += cs.by_part.floor;
     stats.by_part.wall += cs.by_part.wall;
     stats.by_part.ceiling += cs.by_part.ceiling;
+    stats.linear_length += cs.linear_length;
+    stats.linear_face_count += cs.linear_face_count;
     Object.keys(cs.material_names).forEach(function(m) { stats.material_names[m] = true; });
   });
   node.faces.forEach(function(face) {
@@ -139,12 +142,19 @@ function aggregateComponentStats(node) {
     stats.total_area += face.qty || 0;
     if (face.part) stats.by_part[face.part] = (stats.by_part[face.part] || 0) + (face.qty || 0);
     if (face.su_material) stats.material_names[face.su_material] = true;
+    var w = face.width || 0;
+    var h = face.height || 0;
+    if (w > 0 && h > 0 && (h / w) > 15) {
+      stats.linear_length += h;
+      stats.linear_face_count += 1;
+    }
   });
   stats.material_count = Object.keys(stats.material_names).length;
   stats.total_area = +stats.total_area.toFixed(2);
   stats.by_part.floor = +stats.by_part.floor.toFixed(2);
   stats.by_part.wall = +stats.by_part.wall.toFixed(2);
   stats.by_part.ceiling = +stats.by_part.ceiling.toFixed(2);
+  stats.linear_length = +stats.linear_length.toFixed(2);
   node.stats = stats;
   return stats;
 }
@@ -190,6 +200,7 @@ function renderComponentTable(tree, purchaseBySu) {
     '<th>组件 / 面</th>' +
     '<th style="text-align:right">面数</th>' +
     '<th style="text-align:right">面积(m²)</th>' +
+    '<th style="text-align:right">长度(m)</th>' +
     '<th style="text-align:right">地面</th>' +
     '<th style="text-align:right">墙面</th>' +
     '<th style="text-align:right">天花</th>' +
@@ -236,9 +247,11 @@ function renderComponentNode(node, depth, parentId, purchaseBySu, counter) {
   } else {
     html += '<span class="comp-toggle-empty"></span> ';
   }
+  var lengthCell = node.stats.linear_length > 0 ? node.stats.linear_length : '—';
   html += esc(node.name) + partBadge + '</td>' +
     '<td style="text-align:right">' + node.stats.face_count + '</td>' +
     '<td style="text-align:right">' + node.stats.total_area + '</td>' +
+    '<td style="text-align:right">' + lengthCell + '</td>' +
     '<td style="text-align:right">' + (node.stats.by_part.floor > 0 ? node.stats.by_part.floor : '—') + '</td>' +
     '<td style="text-align:right">' + (node.stats.by_part.wall > 0 ? node.stats.by_part.wall : '—') + '</td>' +
     '<td style="text-align:right">' + (node.stats.by_part.ceiling > 0 ? node.stats.by_part.ceiling : '—') + '</td>' +
@@ -263,11 +276,16 @@ function renderFaceRow(face, depth, parentId, purchaseBySu, serial) {
   var statusIcon = !face.su_material ? '' :
     (mapped ? '<span style="color:#a6e3a1">✓</span> ' : '<span style="color:#f38ba8">●</span> ');
   var qty = +(face.qty || 0).toFixed(2);
+  var w = face.width || 0;
+  var h = face.height || 0;
+  var isLinear = w > 0 && h > 0 && (h / w) > 15;
+  var lengthCell = isLinear ? (+h.toFixed(2)) : '—';
   return '<tr class="face-row" data-depth="' + depth + '" data-parent="' + parentId + '" style="display:none">' +
     '<td style="text-align:right; font-size:10px; color:#6c7086;">' + (serial || '') + '</td>' +
     '<td style="padding-left:' + (indent + 6) + 'px; font-size:10px; color:#6c7086;">' + statusIcon + '面 #' + esc(face.face_id) + '</td>' +
     '<td></td>' +
     '<td style="text-align:right">' + qty + '</td>' +
+    '<td style="text-align:right">' + lengthCell + '</td>' +
     '<td style="text-align:right">' + (face.part === 'floor' ? qty : '—') + '</td>' +
     '<td style="text-align:right">' + (face.part === 'wall' ? qty : '—') + '</td>' +
     '<td style="text-align:right">' + (face.part === 'ceiling' ? qty : '—') + '</td>' +
