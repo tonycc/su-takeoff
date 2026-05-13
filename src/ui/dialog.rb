@@ -34,6 +34,8 @@ module SuTakeoff
 
     def show
       @dialog.show
+      send_mappings
+      send_processes
     end
 
     private
