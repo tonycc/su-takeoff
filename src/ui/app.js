@@ -139,14 +139,16 @@ function aggregateComponentStats(node) {
   });
   node.faces.forEach(function(face) {
     stats.face_count += 1;
-    stats.total_area += face.qty || 0;
-    if (face.part) stats.by_part[face.part] = (stats.by_part[face.part] || 0) + (face.qty || 0);
     if (face.su_material) stats.material_names[face.su_material] = true;
     var w = face.width || 0;
     var h = face.height || 0;
-    if (w > 0 && h > 0 && (h / w) > 15) {
+    var isLinear = w > 0 && h > 0 && (h / w) > 15;
+    if (isLinear) {
       stats.linear_length += h;
       stats.linear_face_count += 1;
+    } else {
+      stats.total_area += face.qty || 0;
+      if (face.part) stats.by_part[face.part] = (stats.by_part[face.part] || 0) + (face.qty || 0);
     }
   });
   stats.material_count = Object.keys(stats.material_names).length;
@@ -247,10 +249,11 @@ function renderComponentNode(node, depth, parentId, purchaseBySu, counter) {
   } else {
     html += '<span class="comp-toggle-empty"></span> ';
   }
+  var areaCell = node.stats.total_area > 0 ? node.stats.total_area : '—';
   var lengthCell = node.stats.linear_length > 0 ? node.stats.linear_length : '—';
   html += esc(node.name) + partBadge + '</td>' +
     '<td style="text-align:right">' + node.stats.face_count + '</td>' +
-    '<td style="text-align:right">' + node.stats.total_area + '</td>' +
+    '<td style="text-align:right">' + areaCell + '</td>' +
     '<td style="text-align:right">' + lengthCell + '</td>' +
     '<td style="text-align:right">' + (node.stats.by_part.floor > 0 ? node.stats.by_part.floor : '—') + '</td>' +
     '<td style="text-align:right">' + (node.stats.by_part.wall > 0 ? node.stats.by_part.wall : '—') + '</td>' +
@@ -279,16 +282,20 @@ function renderFaceRow(face, depth, parentId, purchaseBySu, serial) {
   var w = face.width || 0;
   var h = face.height || 0;
   var isLinear = w > 0 && h > 0 && (h / w) > 15;
+  var areaCell = isLinear ? '—' : qty;
   var lengthCell = isLinear ? (+h.toFixed(2)) : '—';
+  var floorCell = (!isLinear && face.part === 'floor') ? qty : '—';
+  var wallCell = (!isLinear && face.part === 'wall') ? qty : '—';
+  var ceilingCell = (!isLinear && face.part === 'ceiling') ? qty : '—';
   return '<tr class="face-row" data-depth="' + depth + '" data-parent="' + parentId + '" style="display:none">' +
     '<td style="text-align:right; font-size:10px; color:#6c7086;">' + (serial || '') + '</td>' +
     '<td style="padding-left:' + (indent + 6) + 'px; font-size:10px; color:#6c7086;">' + statusIcon + '面 #' + esc(face.face_id) + '</td>' +
     '<td></td>' +
-    '<td style="text-align:right">' + qty + '</td>' +
+    '<td style="text-align:right">' + areaCell + '</td>' +
     '<td style="text-align:right">' + lengthCell + '</td>' +
-    '<td style="text-align:right">' + (face.part === 'floor' ? qty : '—') + '</td>' +
-    '<td style="text-align:right">' + (face.part === 'wall' ? qty : '—') + '</td>' +
-    '<td style="text-align:right">' + (face.part === 'ceiling' ? qty : '—') + '</td>' +
+    '<td style="text-align:right">' + floorCell + '</td>' +
+    '<td style="text-align:right">' + wallCell + '</td>' +
+    '<td style="text-align:right">' + ceilingCell + '</td>' +
     '<td></td>' +
     '<td style="font-size:10px">' + esc(face.su_material || '未赋材质') + '</td>' +
     '<td></td>' +
