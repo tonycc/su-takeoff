@@ -787,3 +787,134 @@ function esc(s) {
                   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function escAttr(s) { return esc(s).replace(/'/g, "\\'"); }
+
+// ---------------- Zone view ----------------
+function renderZoneView(data) {
+  var usages = data.usages || [];
+  var container = document.getElementById('view-zone');
+  if (!container) return;
+
+  if (usages.length === 0) {
+    container.innerHTML = '<p class="hint">暂无已映射材质</p>';
+    return;
+  }
+
+  var partLabels = { floor: '地面', wall: '墙面', ceiling: '天花' };
+  var partOrder = ['floor', 'wall', 'ceiling'];
+
+  // Group by space, then by part. Preserve insertion order.
+  var spaceMap = {};
+  var spaceOrder = [];
+  usages.forEach(function(u) {
+    var space = u.space || '未分组';
+    if (!spaceMap[space]) {
+      spaceMap[space] = {};
+      spaceOrder.push(space);
+    }
+    var part = u.part || 'wall';
+    if (!spaceMap[space][part]) spaceMap[space][part] = [];
+    spaceMap[space][part].push(u);
+  });
+
+  // Build flat row list: subtotal + detail rows per space
+  var rows = [];
+  spaceOrder.forEach(function(space) {
+    var spaceNet = 0, spacePurchase = 0;
+    var detailRows = [];
+
+    partOrder.forEach(function(part) {
+      var items = spaceMap[space][part];
+      if (!items || items.length === 0) return;
+
+      items.forEach(function(u) {
+        spaceNet += u.net_area || 0;
+        spacePurchase += u.purchase_qty || 0;
+        detailRows.push({
+          type: 'detail',
+          space: space,
+          part: part,
+          material_name: u.material_name || '',
+          category: u.category || '',
+          spec: u.spec || '',
+          unit: u.unit || 'm2',
+          net_area: u.net_area || 0,
+          waste_rate: u.waste_rate || 0,
+          purchase_qty: u.purchase_qty || 0
+        });
+      });
+    });
+
+    if (detailRows.length > 0) {
+      rows.push({
+        type: 'subtotal',
+        space: space,
+        net_area: +spaceNet.toFixed(2),
+        purchase_qty: +spacePurchase.toFixed(2)
+      });
+      rows = rows.concat(detailRows);
+    }
+  });
+
+  // Compute grand totals
+  var totalNet = 0, totalPurchase = 0;
+  rows.forEach(function(r) {
+    if (r.type === 'detail') {
+      totalNet += r.net_area;
+      totalPurchase += r.purchase_qty;
+    }
+  });
+
+  // Render table
+  var html = '<table><thead><tr>' +
+    '<th style="width:40px">#</th>' +
+    '<th>功能区域</th>' +
+    '<th>区域分项</th>' +
+    '<th>材料</th>' +
+    '<th>分类</th>' +
+    '<th>规格</th>' +
+    '<th>单位</th>' +
+    '<th style="text-align:right">净面积</th>' +
+    '<th style="text-align:right">损耗率</th>' +
+    '<th style="text-align:right">采购量</th>' +
+    '</tr></thead><tbody>';
+
+  var serial = 0;
+  var lastShownSpace = null;
+
+  rows.forEach(function(row) {
+    if (row.type === 'subtotal') {
+      html += '<tr class="zone-subtotal-row">' +
+        '<td></td>' +
+        '<td colspan="9"><strong>' + esc(row.space) + '</strong> 小计 — ' +
+        '净面积 ' + row.net_area.toFixed(2) + ' / 采购量 ' + row.purchase_qty.toFixed(2) + '</td>' +
+        '</tr>';
+    } else {
+      serial++;
+      var showSpace = (row.space !== lastShownSpace);
+      if (showSpace) lastShownSpace = row.space;
+
+      html += '<tr>' +
+        '<td style="text-align:right; color:#6c7086; font-size:11px;">' + serial + '</td>' +
+        '<td>' + (showSpace ? esc(row.space) : '') + '</td>' +
+        '<td><span class="pill pill-' + row.part + '">' + (partLabels[row.part] || row.part) + '</span></td>' +
+        '<td>' + esc(row.material_name) + '</td>' +
+        '<td>' + esc(row.category) + '</td>' +
+        '<td>' + esc(row.spec || '-') + '</td>' +
+        '<td>' + esc(row.unit) + '</td>' +
+        '<td style="text-align:right">' + row.net_area.toFixed(2) + '</td>' +
+        '<td style="text-align:right">' + (row.waste_rate * 100).toFixed(0) + '%</td>' +
+        '<td style="text-align:right">' + row.purchase_qty.toFixed(2) + '</td>' +
+        '</tr>';
+    }
+  });
+
+  // Grand total
+  html += '<tr class="zone-total-row">' +
+    '<td></td>' +
+    '<td colspan="9"><strong>合计</strong> — ' +
+    '净面积 ' + totalNet.toFixed(2) + ' / 采购量 ' + totalPurchase.toFixed(2) + '</td>' +
+    '</tr>';
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
