@@ -117,6 +117,7 @@ module SuTakeoff
         }
       }
       @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
+      send_mappings
     end
 
     # Build per-material context (faces / area / part breakdown / spaces / color / suggested unit)
@@ -150,7 +151,11 @@ module SuTakeoff
           spaces: spaces.sort_by { |_, a| -a }.first(3).map { |s, a| { name: s, area: a.round(2) } },
           color: colors[name],
           suggested_unit: suggested_unit,
-          mapped_unit: record&.unit
+          mapped_unit: record&.unit,
+          material_name: record&.material_name,
+          category: record&.category,
+          spec: record&.spec,
+          waste_rate: record&.default_waste_rate
         }
       end
     end
@@ -165,7 +170,6 @@ module SuTakeoff
       end
       m.save_json(PluginState.mapping_path)
       send_workbench_state if @last_scan
-      send_mappings
     end
 
     def set_ignored(json)
@@ -212,6 +216,7 @@ module SuTakeoff
             data['unit'], data['spec'], data['waste_rate'].to_f)
       m.save_json(PluginState.mapping_path)
       send_mappings
+      send_workbench_state if @last_scan
     end
 
     def delete_mapping(su_name)
@@ -219,6 +224,7 @@ module SuTakeoff
       m.delete(su_name)
       m.save_json(PluginState.mapping_path)
       send_mappings
+      send_workbench_state if @last_scan
     end
 
     def import_csv_dialog
