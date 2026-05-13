@@ -58,6 +58,7 @@ module SuTakeoff
 
         part = self.class.face_orientation(item.normal)
         space = item.component_path.first || '未分组'
+        Debug.log "  [space debug] path=#{item.component_path.inspect} first=#{item.component_path.first.inspect} space=#{space.inspect} part=#{part.inspect}" if groups.size < 5
         key = [space, part, item.su_material, item.unit]
         groups[key] << item
       end
