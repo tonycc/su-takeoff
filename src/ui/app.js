@@ -42,7 +42,7 @@ function switchWorkbenchView(view) {
   window._workbenchView = view;
   document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
   document.querySelector('.view-btn[data-view="' + view + '"]').classList.add('active');
-  ['component', 'material', 'purchase'].forEach(function(v) {
+  ['component', 'material', 'purchase', 'zone'].forEach(function(v) {
     document.getElementById('view-' + v).style.display = (v === view ? 'block' : 'none');
   });
   renderCurrentView();
@@ -54,6 +54,7 @@ function renderCurrentView() {
   if (view === 'component') renderComponentView(window._workbench);
   else if (view === 'material') renderMaterialView(window._workbench);
   else if (view === 'purchase') renderPurchaseView(window._workbench);
+  else if (view === 'zone') renderZoneView(window._workbench);
 }
 
 // ---------------- Summary bar ----------------
