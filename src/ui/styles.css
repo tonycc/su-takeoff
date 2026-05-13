@@ -194,3 +194,21 @@ tr.unmapped td:first-child { color: #f38ba8; }
   background: transparent; color: #a6adc8; cursor: pointer;
 }
 .pm-btn.active { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
+
+/* ---------- Zone view ---------- */
+#view-zone .pill {
+  display: inline-block; padding: 1px 6px; margin: 1px 2px 1px 0;
+  border-radius: 8px; font-size: 10px; background: #313244; color: #cdd6f4;
+}
+#view-zone .pill-floor { background: #313a4a; color: #89b4fa; }
+#view-zone .pill-wall { background: #3a3148; color: #cba6f7; }
+#view-zone .pill-ceiling { background: #2f3a31; color: #a6e3a1; }
+
+.zone-subtotal-row td {
+  background: #252536; font-weight: 600; color: #cdd6f4;
+  padding: 8px 6px; border: 1px solid #45475a;
+}
+.zone-total-row td {
+  background: #313244; font-weight: 700; color: #cdd6f4;
+  padding: 8px 6px; border: 1px solid #45475a;
+}
