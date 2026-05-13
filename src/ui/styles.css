@@ -212,3 +212,38 @@ tr.unmapped td:first-child { color: #f38ba8; }
   background: #313244; font-weight: 700; color: #cdd6f4;
   padding: 8px 6px; border: 1px solid #45475a;
 }
+
+/* ---------- Mapping tab edit table ---------- */
+#mapping-edit-tbody input[type=text], #mapping-edit-tbody input[type=number], #mapping-edit-tbody select {
+  width: 100%; padding: 4px 6px; border: 1px solid #45475a; border-radius: 3px;
+  background: #1e1e2e; color: #cdd6f4; font-size: 12px;
+}
+#mapping-edit-tbody td { vertical-align: middle; }
+#mapping-edit-tbody .u-name-row { display: flex; align-items: center; gap: 6px; }
+#mapping-edit-tbody .u-name {
+  font-weight: 500; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 170px;
+}
+#mapping-edit-tbody .swatch {
+  display: inline-block; width: 16px; height: 16px; border-radius: 3px;
+  border: 1px solid #45475a; flex-shrink: 0;
+}
+#mapping-edit-tbody .swatch-empty {
+  background: repeating-linear-gradient(45deg, #313244, #313244 3px, #1e1e2e 3px, #1e1e2e 6px);
+  color: #6c7086; font-size: 10px; text-align: center; line-height: 16px;
+}
+#mapping-edit-tbody .pill {
+  display: inline-block; padding: 1px 6px; margin: 1px 2px 1px 0;
+  border-radius: 8px; font-size: 10px; background: #313244; color: #cdd6f4;
+}
+#mapping-edit-tbody .pill-floor { background: #313a4a; color: #89b4fa; }
+#mapping-edit-tbody .pill-wall { background: #3a3148; color: #cba6f7; }
+#mapping-edit-tbody .pill-ceiling { background: #2f3a31; color: #a6e3a1; }
+#mapping-edit-tbody button {
+  padding: 4px 8px; border: 1px solid #45475a; border-radius: 3px;
+  background: #313244; color: #cdd6f4; cursor: pointer;
+}
+#mapping-edit-tbody button:hover { background: #89b4fa; color: #1e1e2e; }
+#mapping-edit-tbody tr.row-mapped td { opacity: 0.75; }
+#mapping-edit-tbody tr.row-ignored td { opacity: 0.5; }
+#mapping-edit-tbody tr.row-unresolved { background: rgba(243, 139, 168, 0.04); }

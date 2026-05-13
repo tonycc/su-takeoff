@@ -338,16 +338,7 @@ function toggleComponent(nodeId) {
 
 function renderMaterialView(data) {
   var container = document.getElementById('view-material');
-  var counts = computeMaterialCounts(data);
-
-  var html = '<div class="material-filter-bar">' +
-    filterButton('all', '全部', counts.all) +
-    filterButton('unresolved', '待映射', counts.unresolved) +
-    filterButton('mapped', '已映射', counts.mapped) +
-    filterButton('ignored', '已忽略', counts.ignored) +
-    '<input type="text" id="material-search" placeholder="🔍 搜索..." value="' + esc(window._materialSearch || '') + '" oninput="onMaterialSearch(this.value)">' +
-    '</div>' +
-    '<table id="material-table"><thead><tr>' +
+  var html = '<table id="material-table"><thead><tr>' +
       '<th style="width:40px">#</th>' +
       '<th style="width:4%">状态</th>' +
       '<th style="width:18%">SU材质</th>' +
@@ -358,14 +349,8 @@ function renderMaterialView(data) {
       '<th>规格</th>' +
       '<th style="width:6%">单位</th>' +
       '<th>损耗率</th>' +
-      '<th style="width:5%">忽略</th>' +
       '<th style="width:5%">定位</th>' +
-    '</tr></thead><tbody id="material-tbody"></tbody></table>' +
-    '<div class="toolbar" style="margin-top:12px">' +
-      '<button onclick="fillDefaultMaterialNames()">一键填默认</button>' +
-      '<button onclick="saveMaterialMappings()" class="primary-btn">保存映射</button>' +
-      '<button onclick="ignoreAllUnresolved()">全部忽略</button>' +
-    '</div>';
+    '</tr></thead><tbody id="material-tbody"></tbody></table>';
   container.innerHTML = html;
   renderMaterialTableBody(data);
 }
@@ -399,8 +384,6 @@ function renderMaterialTableBody(data) {
   if (!tbody) return;
   var unresolvedSet = {}; (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
   var ignoredSet = {}; (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
-  var filter = window._materialFilter || 'all';
-  var q = (window._materialSearch || '').toLowerCase();
   var partLabels = { floor: '地', wall: '墙', ceiling: '顶' };
 
   tbody.innerHTML = '';
@@ -410,11 +393,6 @@ function renderMaterialTableBody(data) {
     var isIgnored = !!ignoredSet[name];
     var isUnresolved = !!unresolvedSet[name];
     var isMapped = !isIgnored && !isUnresolved;
-
-    if (filter === 'unresolved' && !isUnresolved) return;
-    if (filter === 'mapped' && !isMapped) return;
-    if (filter === 'ignored' && !isIgnored) return;
-    if (q && name.toLowerCase().indexOf(q) === -1) return;
 
     serial += 1;
 
@@ -434,24 +412,16 @@ function renderMaterialTableBody(data) {
       });
     }
 
-    var editable = !isMapped;
-    var dis = editable ? '' : ' disabled';
-    var cats = (window._workbench.categories && window._workbench.categories.length)
-      ? window._workbench.categories : DEFAULT_CATEGORIES;
-    var catOptions = cats.map(function(cat) {
-      var sel = cat === guessCategory(name) ? ' selected' : '';
-      return '<option value="' + esc(cat) + '"' + sel + '>' + esc(cat) + '</option>';
-    }).join('');
-
     var suggested = info.suggested_unit || 'm²';
-    var unitOptions = ['m²', 'm', '个'].map(function(u) {
-      var sel = u === suggested ? ' selected' : '';
-      return '<option value="' + u + '"' + sel + '>' + u + '</option>';
-    }).join('');
-
     var quantitySummary = suggested === 'm'
       ? (info.face_count || 0) + ' 面 / ' + (info.total_length || 0) + ' m'
       : (info.face_count || 0) + ' 面 / ' + (info.total_area || 0) + ' m²';
+
+    var matName = info.material_name || (isUnresolved ? '—' : '');
+    var category = info.category || '—';
+    var spec = info.spec || '—';
+    var unit = info.mapped_unit || info.suggested_unit || 'm²';
+    var wasteStr = info.waste_rate != null ? (info.waste_rate * 100).toFixed(0) + '%' : '5%';
 
     var tr = document.createElement('tr');
     tr.className = 'row-' + (isMapped ? 'mapped' : (isIgnored ? 'ignored' : 'unresolved'));
@@ -459,17 +429,14 @@ function renderMaterialTableBody(data) {
       '<td style="text-align:right; color:#6c7086; font-size:11px;">' + serial + '</td>' +
       '<td>' + status + '</td>' +
       '<td><div class="u-name-row">' + swatch +
-        '<span class="u-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
-      '</div><input type="hidden" class="u-su" value="' + esc(name) + '"></td>' +
+        '<span class="u-name" title="' + esc(name) + '">' + esc(name) + '</span></div></td>' +
       '<td>' + quantitySummary + '</td>' +
       '<td>' + partsHtml + '</td>' +
-      '<td><input type="text" class="u-mat" placeholder="留空跳过"' + dis + '></td>' +
-      '<td><select class="u-cat"' + dis + '>' + catOptions + '</select></td>' +
-      '<td><input type="text" class="u-spec" placeholder="可选"' + dis + '></td>' +
-      '<td><select class="u-unit"' + dis + '>' + unitOptions + '</select></td>' +
-      '<td><input type="number" class="u-waste" step="0.01" value="0.05" style="width:60px"' + dis + '></td>' +
-      '<td><input type="checkbox" class="u-ignore"' + (isIgnored ? ' checked' : '') +
-         ' onchange="toggleMaterialIgnore(\'' + escAttr(name) + '\', this.checked)"></td>' +
+      '<td>' + esc(matName) + '</td>' +
+      '<td>' + esc(category) + '</td>' +
+      '<td>' + esc(spec) + '</td>' +
+      '<td>' + esc(unit) + '</td>' +
+      '<td>' + wasteStr + '</td>' +
       '<td><button onclick="locateMaterial(\'' + escAttr(name) + '\')">🎯</button></td>';
     tbody.appendChild(tr);
   });
