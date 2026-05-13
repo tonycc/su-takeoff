@@ -38,6 +38,10 @@ function renderWorkbench(data) {
   document.getElementById('workbench').style.display = 'block';
   renderSummaryBar(data);
   renderCurrentView();
+  // Refresh mapping tab rich editor if rendered
+  if (document.getElementById('mapping-edit-table')) {
+    renderMappingEditTableBody();
+  }
 }
 
 function switchWorkbenchView(view) {
@@ -706,26 +710,14 @@ function locateMaterial(suName) {
 
 // ---------------- Mapping management tab ----------------
 function renderMappings(mappings) {
-  var tbody = document.getElementById('mapping-body');
-  tbody.innerHTML = '';
-  mappings.forEach(function(m) {
-    var wastePct = (m.default_waste_rate * 100).toFixed(0);
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td>' + esc(m.su_material_name) + '</td>' +
-      '<td>' + esc(m.material_name) + '</td>' +
-      '<td>' + esc(m.category) + '</td>' +
-      '<td>' + esc(m.unit) + '</td>' +
-      '<td>' + (m.spec ? esc(m.spec) : '-') + '</td>' +
-      '<td>' + wastePct + '%</td>' +
-      '<td>-</td>' +
-      '<td><button onclick="deleteMapping(\'' + escAttr(m.su_material_name) + '\')">删除</button></td>';
-    tbody.appendChild(tr);
-  });
-  filterMappings();
+  if (window._workbench) {
+    renderMappingWithContext();
+  } else {
+    renderSimpleMappingTable(mappings);
+  }
 }
 
-function filterMappings() {
+function filterSimpleMappings() {
   var q = document.getElementById('search-mapping').value.toLowerCase();
   document.querySelectorAll('#mapping-body tr').forEach(function(tr) {
     tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
@@ -919,4 +911,237 @@ function renderZoneView(data) {
 
   html += '</tbody></table>';
   container.innerHTML = html;
+}
+
+// ---------------- Mapping tab: simple read-only table (pre-scan) ----------------
+function renderSimpleMappingTable(mappings) {
+  var container = document.getElementById('mapping-content');
+  if (!container) return;
+
+  var html = '<div class="toolbar">' +
+    '<input type="text" id="search-mapping" placeholder="搜索SU材质..." oninput="filterSimpleMappings()">' +
+    '<button onclick="importCsv()">导入CSV</button>' +
+    '<button onclick="exportCsv()">导出CSV</button>' +
+    '<button onclick="openAddMapping()">+ 新增</button>' +
+    '</div>' +
+    '<table id="mapping-table"><thead><tr>' +
+      '<th>SU材质名</th>' +
+      '<th>真实材料名</th>' +
+      '<th>分类</th>' +
+      '<th>单位</th>' +
+      '<th>规格</th>' +
+      '<th>默认损耗率</th>' +
+      '<th>工艺</th>' +
+      '<th>操作</th>' +
+    '</tr></thead><tbody id="mapping-body"></tbody></table>';
+
+  container.innerHTML = html;
+
+  var tbody = document.getElementById('mapping-body');
+  mappings.forEach(function(m) {
+    var wastePct = (m.default_waste_rate * 100).toFixed(0);
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + esc(m.su_material_name) + '</td>' +
+      '<td>' + esc(m.material_name) + '</td>' +
+      '<td>' + esc(m.category) + '</td>' +
+      '<td>' + esc(m.unit) + '</td>' +
+      '<td>' + (m.spec ? esc(m.spec) : '-') + '</td>' +
+      '<td>' + wastePct + '%</td>' +
+      '<td>-</td>' +
+      '<td><button onclick="deleteMapping(\'' + escAttr(m.su_material_name) + '\')">删除</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ---------------- Mapping tab rich editor (post-scan) ----------------
+function renderMappingWithContext() {
+  var data = window._workbench;
+  if (!data) return;
+  var container = document.getElementById('mapping-content');
+  if (!container) return;
+
+  var counts = computeMaterialCounts(data);
+
+  var html = '<div class="material-filter-bar">' +
+    filterButton('all', '全部', counts.all) +
+    filterButton('unresolved', '待映射', counts.unresolved) +
+    filterButton('mapped', '已映射', counts.mapped) +
+    filterButton('ignored', '已忽略', counts.ignored) +
+    '<input type="text" id="mapping-search" placeholder="搜索..." ' +
+      'value="' + esc(window._mappingSearch || '') + '" ' +
+      'oninput="onMappingSearch(this.value)">' +
+    '</div>' +
+    '<table id="mapping-edit-table"><thead><tr>' +
+      '<th style="width:40px">#</th>' +
+      '<th style="width:4%">状态</th>' +
+      '<th style="width:18%">SU材质</th>' +
+      '<th style="width:12%">面数/面积</th>' +
+      '<th style="width:14%">部位分布</th>' +
+      '<th>真实材料名</th>' +
+      '<th>分类</th>' +
+      '<th>规格</th>' +
+      '<th style="width:6%">单位</th>' +
+      '<th>损耗率</th>' +
+      '<th style="width:5%">忽略</th>' +
+      '<th style="width:5%">定位</th>' +
+    '</tr></thead><tbody id="mapping-edit-tbody"></tbody></table>' +
+    '<div class="toolbar" style="margin-top:12px">' +
+      '<button onclick="fillDefaultMappingTabNames()">一键填默认</button>' +
+      '<button onclick="saveMappingTabMappings()" class="primary-btn">保存映射</button>' +
+      '<button onclick="ignoreAllMappingTabUnresolved()">全部忽略</button>' +
+    '</div>';
+  container.innerHTML = html;
+  renderMappingEditTableBody();
+}
+
+function renderMappingEditTableBody() {
+  var data = window._workbench;
+  var tbody = document.getElementById('mapping-edit-tbody');
+  if (!tbody) return;
+
+  var unresolvedSet = {}; (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
+  var ignoredSet = {}; (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
+  var filter = window._mappingFilter || 'all';
+  var q = (window._mappingSearch || '').toLowerCase();
+  var partLabels = { floor: '地', wall: '墙', ceiling: '顶' };
+
+  tbody.innerHTML = '';
+  var serial = 0;
+  (data.materials_info || []).forEach(function(info) {
+    var name = info.su_name;
+    var isIgnored = !!ignoredSet[name];
+    var isUnresolved = !!unresolvedSet[name];
+    var isMapped = !isIgnored && !isUnresolved;
+
+    if (filter === 'unresolved' && !isUnresolved) return;
+    if (filter === 'mapped' && !isMapped) return;
+    if (filter === 'ignored' && !isIgnored) return;
+    if (q && name.toLowerCase().indexOf(q) === -1) return;
+
+    serial += 1;
+
+    var status = isMapped
+      ? '<span class="tag tag-mapped">✓</span>'
+      : (isIgnored ? '<span class="tag tag-ignored">○</span>' : '<span class="tag tag-unresolved">●</span>');
+
+    var c = info.color || {};
+    var swatch = info.color
+      ? '<span class="swatch" style="background:rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (c.a || 1) + ')"></span>'
+      : '<span class="swatch swatch-empty">?</span>';
+
+    var partsHtml = '';
+    if (info.parts) {
+      Object.keys(info.parts).forEach(function(p) {
+        partsHtml += '<span class="pill pill-' + p + '">' + (partLabels[p] || p) + ' ' + info.parts[p] + '</span>';
+      });
+    }
+
+    var editable = !isMapped;
+    var dis = editable ? '' : ' disabled';
+    var cats = (data.categories && data.categories.length)
+      ? data.categories : DEFAULT_CATEGORIES;
+    var catOptions = cats.map(function(cat) {
+      var sel = cat === (info.category || guessCategory(name)) ? ' selected' : '';
+      return '<option value="' + esc(cat) + '"' + sel + '>' + esc(cat) + '</option>';
+    }).join('');
+
+    var suggested = info.suggested_unit || 'm²';
+    var unitOptions = ['m²', 'm', '个'].map(function(u) {
+      var sel = u === (info.mapped_unit || suggested) ? ' selected' : '';
+      return '<option value="' + u + '"' + sel + '>' + u + '</option>';
+    }).join('');
+
+    var wasteVal = info.waste_rate != null ? info.waste_rate : 0.05;
+    var matVal = info.material_name || '';
+
+    var quantitySummary = suggested === 'm'
+      ? (info.face_count || 0) + ' 面 / ' + (info.total_length || 0) + ' m'
+      : (info.face_count || 0) + ' 面 / ' + (info.total_area || 0) + ' m²';
+
+    var tr = document.createElement('tr');
+    tr.className = 'row-' + (isMapped ? 'mapped' : (isIgnored ? 'ignored' : 'unresolved'));
+    tr.innerHTML =
+      '<td style="text-align:right; color:#6c7086; font-size:11px;">' + serial + '</td>' +
+      '<td>' + status + '</td>' +
+      '<td><div class="u-name-row">' + swatch +
+        '<span class="u-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+      '</div><input type="hidden" class="u-su" value="' + esc(name) + '"></td>' +
+      '<td>' + quantitySummary + '</td>' +
+      '<td>' + partsHtml + '</td>' +
+      '<td><input type="text" class="u-mat" value="' + esc(matVal) + '" placeholder="留空跳过"' + dis + '></td>' +
+      '<td><select class="u-cat"' + dis + '>' + catOptions + '</select></td>' +
+      '<td><input type="text" class="u-spec" value="' + esc(info.spec || '') + '" placeholder="可选"' + dis + '></td>' +
+      '<td><select class="u-unit"' + dis + '>' + unitOptions + '</select></td>' +
+      '<td><input type="number" class="u-waste" step="0.01" value="' + wasteVal + '" style="width:60px"' + dis + '></td>' +
+      '<td><input type="checkbox" class="u-ignore"' + (isIgnored ? ' checked' : '') +
+         ' onchange="toggleMappingTabIgnore(\'' + escAttr(name) + '\', this.checked)"></td>' +
+      '<td><button onclick="locateMaterial(\'' + escAttr(name) + '\')">🎯</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ---------------- Mapping tab action handlers ----------------
+window._mappingFilter = 'all';
+window._mappingSearch = '';
+
+function setMappingFilter(key) {
+  window._mappingFilter = key;
+  renderMappingEditTableBody();
+}
+
+function onMappingSearch(value) {
+  window._mappingSearch = value;
+  renderMappingEditTableBody();
+}
+
+function fillDefaultMappingTabNames() {
+  document.querySelectorAll('#mapping-edit-tbody tr.row-unresolved').forEach(function(tr) {
+    var mat = tr.querySelector('.u-mat');
+    if (mat && !mat.value) mat.value = tr.querySelector('.u-su').value;
+  });
+}
+
+function saveMappingTabMappings() {
+  var rows = [];
+  document.querySelectorAll('#mapping-edit-tbody tr.row-unresolved').forEach(function(tr) {
+    if (tr.querySelector('.u-ignore').checked) return;
+    var mat = tr.querySelector('.u-mat').value.trim();
+    if (!mat) return;
+    rows.push({
+      su_name: tr.querySelector('.u-su').value,
+      material_name: mat,
+      category: tr.querySelector('.u-cat').value,
+      spec: tr.querySelector('.u-spec').value,
+      unit: tr.querySelector('.u-unit').value,
+      waste_rate: parseFloat(tr.querySelector('.u-waste').value) || 0.05
+    });
+  });
+  if (rows.length === 0) {
+    alert('没有可保存的映射 — 请先填写"真实材料名"');
+    return;
+  }
+  callSketchUp('save_mappings_batch', JSON.stringify(rows));
+}
+
+function ignoreAllMappingTabUnresolved() {
+  var names = [];
+  document.querySelectorAll('#mapping-edit-tbody tr.row-unresolved').forEach(function(tr) {
+    names.push(tr.querySelector('.u-su').value);
+  });
+  if (names.length === 0) return;
+  if (!confirm('将忽略 ' + names.length + ' 种待处理材质，确认？')) return;
+  var current = (window._workbench && window._workbench.ignored) || [];
+  var set = {};
+  current.forEach(function(n) { set[n] = true; });
+  names.forEach(function(n) { set[n] = true; });
+  callSketchUp('set_ignored', JSON.stringify(Object.keys(set)));
+}
+
+function toggleMappingTabIgnore(name, on) {
+  var current = (window._workbench && window._workbench.ignored) || [];
+  var set = {};
+  current.forEach(function(n) { set[n] = true; });
+  if (on) set[name] = true; else delete set[name];
+  callSketchUp('set_ignored', JSON.stringify(Object.keys(set)));
 }
