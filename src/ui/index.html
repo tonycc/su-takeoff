@@ -51,29 +51,7 @@
 
   <!-- Tab 2: Mapping management -->
   <div id="tab-mapping" class="tab-content">
-    <div class="toolbar">
-      <input type="text" id="search-mapping" placeholder="搜索SU材质..." oninput="filterMappings()">
-      <button onclick="importCsv()">导入CSV</button>
-      <button onclick="exportCsv()">导出CSV</button>
-      <button onclick="openAddMapping()">+ 新增</button>
-    </div>
-    <div id="mapping-table-container">
-      <table id="mapping-table">
-        <thead>
-          <tr>
-            <th>SU材质名</th>
-            <th>真实材料名</th>
-            <th>分类</th>
-            <th>单位</th>
-            <th>规格</th>
-            <th>默认损耗率</th>
-            <th>工艺</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="mapping-body"></tbody>
-      </table>
-    </div>
+    <div id="mapping-content"></div>
   </div>
 
   <!-- Tab 3: Settings -->
