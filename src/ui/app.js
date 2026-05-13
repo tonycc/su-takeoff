@@ -306,6 +306,7 @@ function renderMaterialView(data) {
       '<th>真实材料名</th>' +
       '<th>分类</th>' +
       '<th>规格</th>' +
+      '<th style="width:6%">单位</th>' +
       '<th>损耗率</th>' +
       '<th style="width:5%">忽略</th>' +
       '<th style="width:5%">定位</th>' +
@@ -392,6 +393,16 @@ function renderMaterialTableBody(data) {
       return '<option value="' + esc(cat) + '"' + sel + '>' + esc(cat) + '</option>';
     }).join('');
 
+    var suggested = info.suggested_unit || 'm²';
+    var unitOptions = ['m²', 'm', '个'].map(function(u) {
+      var sel = u === suggested ? ' selected' : '';
+      return '<option value="' + u + '"' + sel + '>' + u + '</option>';
+    }).join('');
+
+    var quantitySummary = suggested === 'm'
+      ? (info.face_count || 0) + ' 面 / ' + (info.total_length || 0) + ' m'
+      : (info.face_count || 0) + ' 面 / ' + (info.total_area || 0) + ' m²';
+
     var tr = document.createElement('tr');
     tr.className = 'row-' + (isMapped ? 'mapped' : (isIgnored ? 'ignored' : 'unresolved'));
     tr.innerHTML =
@@ -400,11 +411,12 @@ function renderMaterialTableBody(data) {
       '<td><div class="u-name-row">' + swatch +
         '<span class="u-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
       '</div><input type="hidden" class="u-su" value="' + esc(name) + '"></td>' +
-      '<td>' + (info.face_count || 0) + ' 面 / ' + (info.total_area || 0) + ' m²</td>' +
+      '<td>' + quantitySummary + '</td>' +
       '<td>' + partsHtml + '</td>' +
       '<td><input type="text" class="u-mat" placeholder="留空跳过"' + dis + '></td>' +
       '<td><select class="u-cat"' + dis + '>' + catOptions + '</select></td>' +
       '<td><input type="text" class="u-spec" placeholder="可选"' + dis + '></td>' +
+      '<td><select class="u-unit"' + dis + '>' + unitOptions + '</select></td>' +
       '<td><input type="number" class="u-waste" step="0.01" value="0.05" style="width:60px"' + dis + '></td>' +
       '<td><input type="checkbox" class="u-ignore"' + (isIgnored ? ' checked' : '') +
          ' onchange="toggleMaterialIgnore(\'' + escAttr(name) + '\', this.checked)"></td>' +
@@ -431,7 +443,7 @@ function saveMaterialMappings() {
       material_name: mat,
       category: tr.querySelector('.u-cat').value,
       spec: tr.querySelector('.u-spec').value,
-      unit: 'm²',
+      unit: tr.querySelector('.u-unit').value,
       waste_rate: parseFloat(tr.querySelector('.u-waste').value) || 0.05
     });
   });
@@ -497,7 +509,7 @@ function renderPurchaseByMaterial(data) {
   var usages = data.usages || [];
   var grouped = {};
   usages.forEach(function(u) {
-    var key = u.material_name || '—';
+    var key = (u.material_name || '—') + '|' + (u.unit || 'm2');
     if (!grouped[key]) grouped[key] = {
       material_name: u.material_name, category: u.category || '',
       spec: u.spec || '', unit: u.unit || 'm2',

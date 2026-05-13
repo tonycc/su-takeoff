@@ -119,7 +119,7 @@ module SuTakeoff
       @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
     end
 
-    # Build per-material context (faces / area / part breakdown / spaces / color)
+    # Build per-material context (faces / area / part breakdown / spaces / color / suggested unit)
     def build_material_info(names, items, colors)
       by_name = Hash.new { |h, k| h[k] = [] }
       items.each { |it| by_name[it.su_material] << it if it.su_material }
@@ -128,17 +128,28 @@ module SuTakeoff
         group = by_name[name] || []
         parts = Hash.new(0.0)
         spaces = Hash.new(0.0)
+        linear_count = 0
+        total_length = 0.0
         group.each do |it|
           parts[Calculator.face_orientation(it.normal)] += it.qty
           spaces[it.component_path.last || '未分组'] += it.qty
+          # Aspect ratio = longest edge / second-longest edge.
+          # >15 → likely a strip/line (skirting, edge trim).
+          if it.width && it.width > 0 && it.height && (it.height / it.width) > 15
+            linear_count += 1
+            total_length += it.height
+          end
         end
+        suggested_unit = (group.size > 0 && linear_count.to_f / group.size > 0.5) ? 'm' : 'm²'
         {
           su_name: name,
           face_count: group.size,
           total_area: group.sum(&:qty).round(2),
+          total_length: total_length.round(2),
           parts: parts.transform_values { |a| a.round(2) },
           spaces: spaces.sort_by { |_, a| -a }.first(3).map { |s, a| { name: s, area: a.round(2) } },
-          color: colors[name]
+          color: colors[name],
+          suggested_unit: suggested_unit
         }
       end
     end

@@ -78,15 +78,24 @@ module SuTakeoff
       # 3. Build MaterialUsage for each group (fan-out via derivations)
       usages = groups.flat_map do |(space, part, su_mat, item_unit), grp_items|
         record = @mapping.get(su_mat)
-        gross = grp_items.sum(&:qty).round(3)
-        total_deduction = grp_items.sum { |it| opening_area_by_face[it.face_id] || 0.0 }.round(3)
-        net_area = grp_items.sum { |it|
-          deduction = opening_area_by_face[it.face_id] || 0.0
-          [it.qty - deduction, 0.0].max
-        }
+        # When mapping unit is 'm' (linear), sum face heights (longest edge)
+        # instead of areas; skip opening deduction (line items have no openings).
+        is_linear = record.unit == 'm'
+        if is_linear
+          gross = grp_items.sum { |it| (it.height || 0).to_f }.round(3)
+          total_deduction = 0.0
+          net_area = gross
+        else
+          gross = grp_items.sum(&:qty).round(3)
+          total_deduction = grp_items.sum { |it| opening_area_by_face[it.face_id] || 0.0 }.round(3)
+          net_area = grp_items.sum { |it|
+            deduction = opening_area_by_face[it.face_id] || 0.0
+            [it.qty - deduction, 0.0].max
+          }
+        end
 
-        Debug.log "  [#{space}] #{part} | #{record.material_name} (#{su_mat})"
-        Debug.log "    面数: #{grp_items.size} | 毛面积: #{gross}m² | 扣减: #{total_deduction}m² | 净面积: #{net_area.round(3)}m²"
+        Debug.log "  [#{space}] #{part} | #{record.material_name} (#{su_mat}) [#{record.unit}]"
+        Debug.log "    面数: #{grp_items.size} | 毛量: #{gross}#{record.unit} | 扣减: #{total_deduction}#{record.unit} | 净量: #{net_area.round(3)}#{record.unit}"
 
         # Find the process (with optional override)
         process = if process_overrides[su_mat]
@@ -128,10 +137,10 @@ module SuTakeoff
             net_area: net_area.round(4),
             waste_rate: waste_rate,
             su_material_name: su_mat,
-            unit: item_unit
+            unit: record.unit || item_unit
           )
           usage.items = grp_items
-          Debug.log "    损耗率: #{(waste_rate*100).round(1)}% | 采购量: #{usage.purchase_qty}m²"
+          Debug.log "    损耗率: #{(waste_rate*100).round(1)}% | 采购量: #{usage.purchase_qty}#{usage.unit}"
           [usage]
         end
       end
