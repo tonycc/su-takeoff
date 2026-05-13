@@ -80,9 +80,11 @@ function jumpToUnresolved() {
 
 // ---------------- View renderers (stubs — replaced in subsequent tasks) ----------------
 function renderComponentView(data) {
+  var linearityByMaterial = buildLinearityByMaterial(data.materials_info || []);
   var tree = buildComponentTree(data.items || []);
   var purchaseBySu = buildPurchaseBySuMaterial(data.usages || []);
-  var html = renderComponentTable(tree, purchaseBySu);
+  aggregateComponentStats(tree, linearityByMaterial);
+  var html = renderComponentTable(tree, purchaseBySu, linearityByMaterial);
   document.getElementById('view-component').innerHTML = html;
   document.querySelectorAll('#view-component .comp-row').forEach(function(row) {
     row.addEventListener('click', function() {
@@ -90,6 +92,26 @@ function renderComponentView(data) {
       if (toggle) toggleComponent(toggle.id.replace('-toggle', ''));
     });
   });
+}
+
+// Returns { material_name => 'linear' | 'area' } for materials with explicit mapping.
+// Materials not in the map fall back to per-face aspect-ratio detection.
+function buildLinearityByMaterial(infos) {
+  var result = {};
+  infos.forEach(function(info) {
+    if (info.mapped_unit === 'm') result[info.su_name] = 'linear';
+    else if (info.mapped_unit) result[info.su_name] = 'area';
+  });
+  return result;
+}
+
+function isFaceLinear(face, linearityByMaterial) {
+  var matVerdict = face.su_material && linearityByMaterial[face.su_material];
+  if (matVerdict === 'linear') return true;
+  if (matVerdict === 'area') return false;
+  var w = face.width || 0;
+  var h = face.height || 0;
+  return w > 0 && h > 0 && (h / w) > 15;
 }
 
 function buildComponentTree(items) {
@@ -115,11 +137,11 @@ function buildComponentTree(items) {
     });
     node.faces.push(item);
   });
-  aggregateComponentStats(root);
   return root;
 }
 
-function aggregateComponentStats(node) {
+function aggregateComponentStats(node, linearityByMaterial) {
+  linearityByMaterial = linearityByMaterial || {};
   var stats = {
     face_count: 0, total_area: 0.0,
     by_part: { floor: 0.0, wall: 0.0, ceiling: 0.0 },
@@ -127,7 +149,7 @@ function aggregateComponentStats(node) {
     linear_length: 0.0, linear_face_count: 0
   };
   node.children.forEach(function(child) {
-    var cs = aggregateComponentStats(child);
+    var cs = aggregateComponentStats(child, linearityByMaterial);
     stats.face_count += cs.face_count;
     stats.total_area += cs.total_area;
     stats.by_part.floor += cs.by_part.floor;
@@ -140,11 +162,8 @@ function aggregateComponentStats(node) {
   node.faces.forEach(function(face) {
     stats.face_count += 1;
     if (face.su_material) stats.material_names[face.su_material] = true;
-    var w = face.width || 0;
-    var h = face.height || 0;
-    var isLinear = w > 0 && h > 0 && (h / w) > 15;
-    if (isLinear) {
-      stats.linear_length += h;
+    if (isFaceLinear(face, linearityByMaterial)) {
+      stats.linear_length += (face.height || 0);
       stats.linear_face_count += 1;
     } else {
       stats.total_area += face.qty || 0;
@@ -187,13 +206,13 @@ function buildPurchaseBySuMaterial(usages) {
   return result;
 }
 
-function renderComponentTable(tree, purchaseBySu) {
+function renderComponentTable(tree, purchaseBySu, linearityByMaterial) {
   if (tree.faces.length > 0) {
     var orphan = {
       name: '模型根层级', path: [], path_ids: [], faces: tree.faces,
       children: [], childrenMap: {}
     };
-    aggregateComponentStats(orphan);
+    aggregateComponentStats(orphan, linearityByMaterial);
     tree.children.unshift(orphan);
     tree.faces = [];
   }
@@ -213,13 +232,13 @@ function renderComponentTable(tree, purchaseBySu) {
   var rootId = 'comp-root';
   var counter = { n: 0 };
   tree.children.forEach(function(child) {
-    html += renderComponentNode(child, 1, rootId, purchaseBySu, counter);
+    html += renderComponentNode(child, 1, rootId, purchaseBySu, counter, linearityByMaterial);
   });
   html += '</tbody></table>';
   return html;
 }
 
-function renderComponentNode(node, depth, parentId, purchaseBySu, counter) {
+function renderComponentNode(node, depth, parentId, purchaseBySu, counter, linearityByMaterial) {
   var html = '';
   var idKey = (node.path_ids || []).join('-') || 'noid-' + node.path.join('-');
   var nodeId = 'comp-' + idKey.replace(/[^a-zA-Z0-9\-]/g, '_');
@@ -264,24 +283,23 @@ function renderComponentNode(node, depth, parentId, purchaseBySu, counter) {
     '</tr>';
 
   node.children.forEach(function(child) {
-    html += renderComponentNode(child, depth + 1, nodeId, purchaseBySu, counter);
+    html += renderComponentNode(child, depth + 1, nodeId, purchaseBySu, counter, linearityByMaterial);
   });
   node.faces.forEach(function(face) {
     counter.n += 1;
-    html += renderFaceRow(face, depth + 1, nodeId, purchaseBySu, counter.n);
+    html += renderFaceRow(face, depth + 1, nodeId, purchaseBySu, counter.n, linearityByMaterial);
   });
   return html;
 }
 
-function renderFaceRow(face, depth, parentId, purchaseBySu, serial) {
+function renderFaceRow(face, depth, parentId, purchaseBySu, serial, linearityByMaterial) {
   var indent = depth * 18;
   var mapped = face.su_material && purchaseBySu[face.su_material] != null;
   var statusIcon = !face.su_material ? '' :
     (mapped ? '<span style="color:#a6e3a1">✓</span> ' : '<span style="color:#f38ba8">●</span> ');
   var qty = +(face.qty || 0).toFixed(2);
-  var w = face.width || 0;
   var h = face.height || 0;
-  var isLinear = w > 0 && h > 0 && (h / w) > 15;
+  var isLinear = isFaceLinear(face, linearityByMaterial || {});
   var areaCell = isLinear ? '—' : qty;
   var lengthCell = isLinear ? (+h.toFixed(2)) : '—';
   var floorCell = (!isLinear && face.part === 'floor') ? qty : '—';

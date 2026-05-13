@@ -121,6 +121,7 @@ module SuTakeoff
 
     # Build per-material context (faces / area / part breakdown / spaces / color / suggested unit)
     def build_material_info(names, items, colors)
+      mapping = PluginState.instance.mapping
       by_name = Hash.new { |h, k| h[k] = [] }
       items.each { |it| by_name[it.su_material] << it if it.su_material }
 
@@ -133,14 +134,13 @@ module SuTakeoff
         group.each do |it|
           parts[Calculator.face_orientation(it.normal)] += it.qty
           spaces[it.component_path.last || '未分组'] += it.qty
-          # Aspect ratio = longest edge / second-longest edge.
-          # >15 → likely a strip/line (skirting, edge trim).
           if it.width && it.width > 0 && it.height && (it.height / it.width) > 15
             linear_count += 1
             total_length += it.height
           end
         end
         suggested_unit = (group.size > 0 && linear_count.to_f / group.size > 0.5) ? 'm' : 'm²'
+        record = mapping.get(name)
         {
           su_name: name,
           face_count: group.size,
@@ -149,7 +149,8 @@ module SuTakeoff
           parts: parts.transform_values { |a| a.round(2) },
           spaces: spaces.sort_by { |_, a| -a }.first(3).map { |s, a| { name: s, area: a.round(2) } },
           color: colors[name],
-          suggested_unit: suggested_unit
+          suggested_unit: suggested_unit,
+          mapped_unit: record&.unit
         }
       end
     end
