@@ -7,6 +7,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'mapping') callSketchUp('get_mappings');
+    if (btn.dataset.tab === 'settings') callSketchUp('get_processes');
   });
 });
 
