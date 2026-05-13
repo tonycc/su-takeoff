@@ -69,7 +69,7 @@ module SuTakeoff
       Debug.log "  天花 (ceiling): #{by_part['ceiling']&.size || 0}面 #{by_part['ceiling']&.sum(&:qty)&.round(2) || 0}m²"
 
       # 按空间（组件层级）分解 —— 定位面从哪里来
-      by_container = items.group_by { |i| i.component_path.last || "(模型根层级)" }
+      by_container = items.group_by { |i| i.component_path.first || "(模型根层级)" }
       Debug.log
       Debug.log "按空间/容器分解:"
       Debug.log
