@@ -22,11 +22,12 @@ module SuTakeoff
   class MaterialUsage
     attr_accessor :space, :part, :material_name, :category, :spec,
                   :net_area, :waste_rate, :purchase_qty, :items,
-                  :su_material_name, :layer, :parent_su_material, :unit
+                  :su_material_name, :layer, :parent_su_material, :unit,
+                  :detail
 
     def initialize(space:, part:, material_name:, category: '', spec: '',
                    net_area: 0.0, waste_rate: 0.05, su_material_name: '',
-                   layer: '', parent_su_material: '', unit: 'm2')
+                   layer: '', parent_su_material: '', unit: 'm2', detail: nil)
       @space = space
       @part = part           # 'floor', 'wall', 'ceiling'
       @material_name = material_name
@@ -40,6 +41,7 @@ module SuTakeoff
       @layer = layer
       @parent_su_material = parent_su_material
       @unit = unit
+      @detail = detail
     end
 
     def recalc!
@@ -52,7 +54,8 @@ module SuTakeoff
         category: @category, spec: @spec, net_area: @net_area.round(2),
         waste_rate: @waste_rate, purchase_qty: @purchase_qty,
         su_material_name: @su_material_name,
-        layer: @layer, parent_su_material: @parent_su_material, unit: @unit
+        layer: @layer, parent_su_material: @parent_su_material, unit: @unit,
+        detail: @detail
       }
     end
   end

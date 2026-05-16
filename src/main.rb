@@ -6,7 +6,7 @@ module SuTakeoff
   class PluginState
     include Singleton
 
-    attr_reader :mapping, :processes, :ignored
+    attr_reader :mapping, :processes, :ignored, :config
 
     DICT_NAME = 'su_takeoff_data'
 
@@ -14,6 +14,7 @@ module SuTakeoff
       @mapping = MaterialMapping.new
       @processes = ProcessLibrary.new
       @ignored = []
+      @config = { 'categories' => [], 'units' => [] }
       load_data
     end
 
@@ -46,6 +47,16 @@ module SuTakeoff
       File.join(PLUGIN_DIR, 'data', 'ignored_materials.json')
     end
 
+    def self.config_path
+      File.join(PLUGIN_DIR, 'data', 'config.json')
+    end
+
+    def save_config(category_units, units)
+      @config = { 'category_units' => category_units, 'units' => units }
+      path = self.class.config_path
+      File.write(path, JSON.pretty_generate(@config))
+    end
+
     private
 
     def load_data
@@ -69,6 +80,10 @@ module SuTakeoff
       elsif File.exist?(self.class.ignored_path)
         @ignored = JSON.parse(File.read(self.class.ignored_path))
       end
+
+      if File.exist?(self.class.config_path)
+        @config = JSON.parse(File.read(self.class.config_path))
+      end
     end
 
     def snapshot_to_model
@@ -77,7 +92,6 @@ module SuTakeoff
       dict['mapping'] = @mapping.save_json_string
       dict['processes'] = @processes.save_json_string
       dict['ignored'] = JSON.generate(@ignored)
-      Debug.log "✅ 规则已写入模型属性字典"
     end
 
     def load_from_model_dialog
@@ -101,7 +115,6 @@ module SuTakeoff
       @mapping.save_json(self.class.mapping_path)
       @processes.save_json(self.class.processes_path)
       save_ignored
-      Debug.log "✅ 已从模型属性字典加载规则并同步到本地文件"
       true
     end
 
@@ -127,10 +140,6 @@ module SuTakeoff
     ui_menu = UI.menu('Plugins').add_submenu('SU Takeoff')
     ui_menu.add_item('材料统计') { Dialog.new.show }
     ui_menu.add_separator
-    debug_item = ui_menu.add_item('调试输出') {
-      Debug.enabled = !Debug.enabled
-      UI.messagebox("调试输出: #{Debug.enabled ? '开启' : '关闭'}\n输出位置: Ruby 控制台")
-    }
     ui_menu.add_item('重新加载插件') {
       Dir.glob(File.join(PLUGIN_DIR, 'src/**/*.rb')).sort.each { |f| load f }
       # Reset singleton so PluginState picks up fresh data

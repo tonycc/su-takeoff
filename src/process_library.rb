@@ -16,6 +16,10 @@ module SuTakeoff
       @processes << ProcessDef.new(category: category, name: name, waste_rate: waste_rate, derivations: derivations)
     end
 
+    def delete_process(category, name)
+      @processes.reject! { |p| p.category == category && p.name == name }
+    end
+
     def processes_for(category)
       @processes.select { |p| p.category == category }
     end
@@ -30,14 +34,7 @@ module SuTakeoff
     end
 
     def save_json(path)
-      grouped = @processes.group_by(&:category).transform_values { |ps|
-        ps.map { |p|
-          h = { name: p.name, waste_rate: p.waste_rate }
-          h[:derivations] = p.derivations if p.derivations && !p.derivations.empty?
-          h
-        }
-      }
-      File.write(path, JSON.pretty_generate(grouped))
+      File.write(path, JSON.pretty_generate(grouped_for_json))
     end
 
     def load_json(path)
@@ -45,7 +42,7 @@ module SuTakeoff
       @processes.clear
       data = JSON.parse(File.read(path))
       data.each do |category, procs|
-        procs.each { |p| add_process(category, p['name'], p['waste_rate'], p['derivations'] || []) }
+        procs.each { |p| add_process(category, p['name'], p['waste_rate'], build_derivations(p['derivations'])) }
       end
     end
 
@@ -53,19 +50,32 @@ module SuTakeoff
       data = JSON.parse(json_str)
       @processes.clear
       data.each do |category, procs|
-        procs.each { |p| add_process(category, p['name'], p['waste_rate'], p['derivations'] || []) }
+        procs.each { |p| add_process(category, p['name'], p['waste_rate'], build_derivations(p['derivations'])) }
       end
     end
 
+    def build_derivations(raw)
+      return [] unless raw
+      raw.map { |d| Derivation.new(layer: d['layer'], unit: d['unit'], formula: d['formula'], waste_rate: d['waste_rate'].to_f, category: d['category']) }
+    end
+
     def save_json_string
-      grouped = @processes.group_by(&:category).transform_values { |ps|
+      JSON.generate(grouped_for_json)
+    end
+
+    def grouped_for_json
+      @processes.group_by(&:category).transform_values { |ps|
         ps.map { |p|
-          h = { name: p.name, waste_rate: p.waste_rate }
-          h[:derivations] = p.derivations if p.derivations && !p.derivations.empty?
+          h = { 'name' => p.name, 'waste_rate' => p.waste_rate }
+          if p.derivations && !p.derivations.empty?
+            h['derivations'] = p.derivations.map { |d|
+              { 'layer' => d.layer, 'unit' => d.unit, 'formula' => d.formula,
+                'waste_rate' => d.waste_rate, 'category' => d.category }
+            }
+          end
           h
         }
       }
-      JSON.generate(grouped)
     end
   end
 end

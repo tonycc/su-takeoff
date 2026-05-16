@@ -15,31 +15,19 @@ module SuTakeoff
     # openings: Array of Opening
     # process_overrides: Hash { su_material_name => process_name }
     def compute(items, openings, process_overrides)
-      Debug.section "【计算阶段】开始"
-      Debug.log "输入面数: #{items.size}"
-      Debug.log "输入洞口数: #{openings.size}"
-
-      items_before = items.size
       items = dedup_thin_slabs(items)
-      Debug.log "薄板去重后剩余面数: #{items.size} (移除 #{items_before - items.size} 面)" if items_before != items.size
 
       # 1. Map openings to their host face IDs for fast lookup
       opening_area_by_face = {}
+      openings_by_face = Hash.new { |h, k| h[k] = [] }
       openings.each do |op|
         op.host_face_ids.each do |fid|
           opening_area_by_face[fid] ||= 0.0
           opening_area_by_face[fid] += op.area
+          openings_by_face[fid] << { entity_id: op.entity_id, area: op.area.round(3) }
         end
       end
 
-      if opening_area_by_face.any?
-        Debug.subsection "洞口扣减映射"
-        opening_area_by_face.each do |fid, area|
-          Debug.log "  面ID=#{fid} 扣减=#{area.round(3)}m²"
-        end
-      else
-        Debug.log "洞口扣减映射为空 (host_face_ids 全部为空，扣减未生效)"
-      end
 
       # 2. Group items by (space, part, su_material_name, unit)
       groups = Hash.new { |h, k| h[k] = [] }
@@ -62,18 +50,6 @@ module SuTakeoff
         groups[key] << item
       end
 
-      if skipped_unmapped.any?
-        Debug.subsection "跳过未映射材质 (#{skipped_unmapped.size}面)"
-        skipped_unmapped.group_by(&:su_material).each do |mat, grp|
-          Debug.log "  ✗ #{mat}: #{grp.size}面 #{grp.sum(&:qty).round(2)}m²"
-        end
-      end
-      if skipped_nil_mat.any?
-        Debug.log "✗ 跳过无材质面: #{skipped_nil_mat.size}面 #{skipped_nil_mat.sum(&:qty).round(2)}m²"
-      end
-
-      Debug.subsection "分组结果 (#{groups.size}组)"
-      Debug.log
 
       # 3. Build MaterialUsage for each group (fan-out via derivations)
       usages = groups.flat_map do |(space, part, su_mat, item_unit), grp_items|
@@ -85,6 +61,13 @@ module SuTakeoff
           gross = grp_items.sum { |it| (it.height || 0).to_f }.round(3)
           total_deduction = 0.0
           net_area = gross
+          faces_detail = grp_items.map { |it|
+            { face_id: it.face_id, width: (it.width || 0).round(2),
+              height: (it.height || 0).round(2),
+              area: it.qty.round(3), length: (it.height || 0).round(3),
+              part: Calculator.face_orientation(it.normal),
+              component_path: it.component_path }
+          }
         else
           gross = grp_items.sum(&:qty).round(3)
           total_deduction = grp_items.sum { |it| opening_area_by_face[it.face_id] || 0.0 }.round(3)
@@ -92,10 +75,17 @@ module SuTakeoff
             deduction = opening_area_by_face[it.face_id] || 0.0
             [it.qty - deduction, 0.0].max
           }
+          faces_detail = grp_items.map { |it|
+            d = (opening_area_by_face[it.face_id] || 0.0).round(3)
+            ops = openings_by_face[it.face_id] || []
+            { face_id: it.face_id, width: (it.width || 0).round(2),
+              height: (it.height || 0).round(2),
+              area: it.qty.round(3), deduction: d, net: (it.qty - d).round(3),
+              part: Calculator.face_orientation(it.normal),
+              component_path: it.component_path,
+              openings: ops }
+          }
         end
-
-        Debug.log "  [#{space}] #{part} | #{record.material_name} (#{su_mat}) [#{record.unit}]"
-        Debug.log "    面数: #{grp_items.size} | 毛量: #{gross}#{record.unit} | 扣减: #{total_deduction}#{record.unit} | 净量: #{net_area.round(3)}#{record.unit}"
 
         # Find the process (with optional override)
         process = if process_overrides[su_mat]
@@ -106,11 +96,34 @@ module SuTakeoff
           @processes.processes_for(record.category).first
         end
 
+        waste_rate = record.default_waste_rate
+        detail = {
+          gross: gross.round(3),
+          deduction: total_deduction.round(3),
+          face_count: grp_items.size,
+          faces: faces_detail
+        }
+
+        # Always create the primary usage (represents the main material)
+        primary = MaterialUsage.new(
+          space: space, part: part,
+          material_name: record.material_name,
+          category: record.category,
+          spec: record.spec,
+          net_area: net_area.round(4),
+          waste_rate: process&.waste_rate || waste_rate,
+          su_material_name: su_mat,
+          unit: record.unit || item_unit,
+          detail: detail
+        )
+        primary.items = grp_items
+        usages = [primary]
+
+        # Fan-out derivations as additional usages
         if process && process.derivations && !process.derivations.empty?
-          # Fan-out: each derivation produces one MaterialUsage
-          process.derivations.map do |deriv|
+          process.derivations.each do |deriv|
             deriv_qty = eval_formula(deriv.formula, net_area)
-            usage = MaterialUsage.new(
+            derived = MaterialUsage.new(
               space: space, part: part,
               material_name: deriv.layer,
               category: deriv.category,
@@ -120,37 +133,20 @@ module SuTakeoff
               su_material_name: su_mat,
               layer: deriv.layer,
               parent_su_material: su_mat,
-              unit: deriv.unit
+              unit: deriv.unit,
+              detail: {
+                formula: deriv.formula,
+                base_value: net_area.round(3),
+                base_unit: is_linear ? 'm' : 'm²',
+                face_count: grp_items.size
+              }
             )
-            usage.items = grp_items
-            Debug.log "    派生: #{deriv.layer} | 数量: #{deriv_qty.round(3)}#{deriv.unit} | 损耗率: #{(deriv.waste_rate*100).round(1)}% | 采购量: #{usage.purchase_qty}#{deriv.unit}"
-            usage
+            derived.items = grp_items
+            usages << derived
           end
-        else
-          # Fallback: single usage with mapping's default waste_rate
-          waste_rate = record.default_waste_rate
-          usage = MaterialUsage.new(
-            space: space, part: part,
-            material_name: record.material_name,
-            category: record.category,
-            spec: record.spec,
-            net_area: net_area.round(4),
-            waste_rate: waste_rate,
-            su_material_name: su_mat,
-            unit: record.unit || item_unit
-          )
-          usage.items = grp_items
-          Debug.log "    损耗率: #{(waste_rate*100).round(1)}% | 采购量: #{usage.purchase_qty}#{usage.unit}"
-          [usage]
         end
+        usages
       end
-
-      Debug.subsection "统计结果汇总 (#{usages.size}条)"
-      total_net = usages.sum(&:net_area).round(2)
-      total_purchase = usages.sum(&:purchase_qty).round(2)
-      Debug.log "总净面积: #{total_net} m²"
-      Debug.log "总采购量: #{total_purchase} m²"
-      Debug.log
 
       usages
     end
@@ -218,9 +214,6 @@ module SuTakeoff
     #   - slab in the upper half               -> keep the 'ceiling' face (bottom)
     # This mirrors which side is actually visible to occupants.
     def dedup_thin_slabs(items)
-      Debug.subsection "薄板去重"
-      Debug.log "薄板判定容差: 面积差≤#{(SLAB_AREA_TOLERANCE*100).round(0)}%, 高度差≤#{SLAB_Z_TOLERANCE_M}m"
-
       # Compute per-space vertical midpoint across ALL items in the space,
       # so a slab can be located in its global context rather than against
       # only its own two faces.
@@ -230,12 +223,10 @@ module SuTakeoff
         zs = sp_items.map(&:z_center).compact
         next if zs.empty?
         space_z_mid[sp] = (zs.min + zs.max) / 2.0
-        Debug.log "空间 [#{sp}] Z范围: #{zs.min.round(3)}~#{zs.max.round(3)}m 中线: #{space_z_mid[sp].round(3)}m"
       end
 
       grouped = items.group_by { |it| [Calculator.extract_space(it), it.su_material] }
       drop_ids = {}
-      total_dropped = 0
 
       grouped.each do |(space, _mat), group|
         next if group.empty?
@@ -260,20 +251,11 @@ module SuTakeoff
           matched_down[pair.face_id] = true
           slab_z = (up.z_center + pair.z_center) / 2.0
           if slab_z <= mid
-            drop_ids[pair.face_id] = true  # low slab: drop back (ceiling) face
-            Debug.log "  ✅ 去重: [#{space}] 低处薄板 | 保留顶面 ID=#{up.face_id}(Z=#{up.z_center.round(3)}) | 移除底面 ID=#{pair.face_id}(Z=#{pair.z_center.round(3)}) | 板中心Z=#{slab_z.round(3)} ≤ 空间中线#{mid.round(3)}"
+            drop_ids[pair.face_id] = true
           else
-            drop_ids[up.face_id] = true    # high slab: drop back (floor) face
-            Debug.log "  ✅ 去重: [#{space}] 高处薄板 | 保留底面 ID=#{pair.face_id}(Z=#{pair.z_center.round(3)}) | 移除顶面 ID=#{up.face_id}(Z=#{up.z_center.round(3)}) | 板中心Z=#{slab_z.round(3)} > 空间中线#{mid.round(3)}"
+            drop_ids[up.face_id] = true
           end
-          total_dropped += 1
         end
-      end
-
-      if total_dropped.zero?
-        Debug.log "  未发现可去重的薄板对"
-      else
-        Debug.log "  共去重 #{total_dropped} 对薄板"
       end
 
       items.reject { |it| drop_ids[it.face_id] }

@@ -1,24 +1,8 @@
 {
-  "瓷砖": [
-    { "name": "密缝铺贴", "waste_rate": 0.05 },
-    { "name": "留缝铺贴", "waste_rate": 0.05 },
-    { "name": "斜铺", "waste_rate": 0.15 },
-    { "name": "人字拼", "waste_rate": 0.20 }
-  ],
-  "石材": [
-    { "name": "干挂", "waste_rate": 0.05 },
-    { "name": "湿贴", "waste_rate": 0.08 }
-  ],
-  "墙纸": [
-    { "name": "对缝", "waste_rate": 0.10 },
-    { "name": "不对缝", "waste_rate": 0.05 }
-  ],
   "涂料": [
-    { "name": "喷涂", "waste_rate": 0.05 },
-    { "name": "滚涂", "waste_rate": 0.05 }
-  ],
-  "木材": [
-    { "name": "直铺", "waste_rate": 0.05 },
-    { "name": "人字拼", "waste_rate": 0.15 }
+    {
+      "name": "铺装",
+      "waste_rate": 0.05
+    }
   ]
 }

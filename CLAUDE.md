@@ -16,7 +16,7 @@ ruby -Itest test/test_calculator.rb
 ruby -Itest test/test_formula.rb
 ```
 
-测试使用 Minitest，独立于 SketchUp 运行时执行。Scanner、Marker、Dialog 无自动化测试，需在 SketchUp 内手动验证。
+测试使用 Minitest，独立于 SketchUp 运行时执行。Scanner、Dialog 无自动化测试，需在 SketchUp 内手动验证。
 
 ## 架构
 
@@ -32,7 +32,6 @@ ruby -Itest test/test_formula.rb
 
 **SU 运行时层（依赖 Sketchup API）：**
 - `scanner.rb` — `Scanner`：递归遍历模型实体，收集 `ScanItem` 与 `Opening`（透明面或命名为窗/门/window/door 的组件）。同时累积每级容器的 `name` 和 `entityID`，使同名实例可区分
-- `marker.rb` — `Marker`：通过 SU 属性字典（`su_takeoff_marking`）读写面上的手动材料标记
 - `ui/dialog.rb` — `Dialog`：HtmlDialog 桥接层。注册 JS → Ruby 回调。统一通过 `send_workbench_state` 推送数据：扫描后或任何映射/忽略变更后，重跑 Calculator 并把 items + usages + counts 一次性推给前端
 - `main.rb` — `PluginState` 单例（持有 mapping + processes + ignored 列表），注册 SU 菜单/工具栏。`ignore!` 是追加语义；`set_ignored!` 是替换语义（前端发送完整集合时用）
 
@@ -52,13 +51,17 @@ ruby -Itest test/test_formula.rb
 
 ## 关键约束
 
-- **测试不得依赖 SU 运行时**（Scanner、Marker、Dialog 不可被测试用），直接构造 `ScanItem`/`Opening` 进行测试。test_helper 只 require 数据层和工具模块（debug、formula、data_models 等）
+- **测试不得依赖 SU 运行时**（Scanner、Dialog 不可被测试用），直接构造 `ScanItem`/`Opening` 进行测试。test_helper 只 require 数据层和工具模块（debug、formula、data_models 等）
 - **面积换算**：`face.area(transform)` 返回 in²，乘以 `0.00064516` 得到 m²
 - **面朝向判定阈值**：`|normal.z| > 0.866`（约 cos 30°），区分水平面（地面/天花）与垂直面（墙面）
 - **同名实例区分**：`component_path` 仅做显示，识别身份用 `component_path_ids`（entityID 数组）。前端构建组件树时以 ID 作 key，name 作显示
 - **线材识别优先级**：材质映射 `unit == 'm'` > 面长宽比 `height/width > 15`（仅当材质未映射时）。识别后，Calculator 累加 `face.height`，不扣洞口
 - **HtmlDialog 桥接**：Ruby 端使用 `add_action_callback`，JS 端使用 `sketchup.<action>()`，数据通过 `execute_script("window.renderX(...)")` 以 JSON 序列化传递
 - **数据流是响应式的**：任何映射变更触发 `send_workbench_state`，前端 `_workbench` 缓存被替换，所有视图按需重绘；切视图不调 Ruby
+
+## 沟通语言
+
+始终使用中文回复。
 
 ## 工作流
 

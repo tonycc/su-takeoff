@@ -12,12 +12,6 @@ module SuTakeoff
     def initialize
       @model = Sketchup.active_model
       @material_colors = {}
-      @progress_total = 0     # 已扫描面数
-      @skipped_hidden = 0     # 跳过隐藏面
-      @skipped_transparent = 0 # 跳过透明面（洞口）
-      @skipped_tiny = 0       # 跳过极小面
-      @named_openings = 0     # 命名门窗洞口数
-      @progress_step = 50     # 每 N 个面输出一次进度
     end
 
     # Scan entire model or selected faces
@@ -25,13 +19,8 @@ module SuTakeoff
       items = []
       openings = []
       face_set = Set.new
-      opening_face_ids = Set.new     # 防重：同一面不重复标记为洞口
-      @pending_opening_info = []    # 洞口几何信息，用于关联母面
-      @progress_total = 0
-      @skipped_hidden = 0
-      @skipped_transparent = 0
-      @skipped_tiny = 0
-      @named_openings = 0
+      opening_face_ids = Set.new
+      @pending_opening_info = []
 
       entities =
         if selection_only && !@model.selection.empty?
@@ -40,86 +29,12 @@ module SuTakeoff
           @model.entities.to_a
         end
 
-      Debug.section "【扫描阶段】开始"
-      Debug.log "扫描模式: #{selection_only && !@model.selection.empty? ? '仅选中面' : '全部模型'}"
-      Debug.log "顶层实体数: #{entities.size}"
-
       entities.each do |entity|
         collect_faces(entity, [], IDENTITY, face_set, items, openings, opening_face_ids)
       end
 
       # ---- 洞口-母面关联 ----
       associate_openings_to_hosts(items, openings, @pending_opening_info)
-
-      # ---- 输出扫描汇总 ----
-      Debug.section "扫描结果汇总"
-      Debug.log "有效面: #{items.size}"
-      Debug.log "跳过微小面: #{@skipped_tiny} (面积<#{MIN_FACE_AREA_M2}m²)"
-      Debug.log "透明洞口: #{@skipped_transparent} (alpha<0.5)"
-      Debug.log "命名门窗: #{@named_openings}"
-      Debug.log "跳过隐藏面: #{@skipped_hidden}"
-      Debug.log "洞口合计: #{openings.size}"
-
-      # 按部位统计
-      by_part = items.group_by { |i| Calculator.face_orientation(i.normal) }
-      Debug.log
-      Debug.log "部位分布:"
-      Debug.log "  地面 (floor):   #{by_part['floor']&.size || 0}面 #{by_part['floor']&.sum(&:qty)&.round(2) || 0}m²"
-      Debug.log "  墙面 (wall):    #{by_part['wall']&.size || 0}面 #{by_part['wall']&.sum(&:qty)&.round(2) || 0}m²"
-      Debug.log "  天花 (ceiling): #{by_part['ceiling']&.size || 0}面 #{by_part['ceiling']&.sum(&:qty)&.round(2) || 0}m²"
-
-      # 按空间（组件层级）分解 —— 定位面从哪里来
-      by_container = items.group_by { |i| Calculator.extract_space(i) }
-      Debug.log
-      Debug.log "按空间/容器分解:"
-      Debug.log
-      container_rows = by_container.sort_by { |_, g| -g.size }.map do |name, grp|
-        parts = grp.group_by { |i| Calculator.face_orientation(i.normal) }
-        f = (parts['floor'] || []).size
-        w = (parts['wall'] || []).size
-        c = (parts['ceiling'] || []).size
-        [name, grp.size.to_s, "#{grp.sum(&:qty).round(2)}m²", "地#{f}", "墙#{w}", "顶#{c}"]
-      end
-      Debug.table(
-        ["容器/空间", "面数", "总面积", "地面", "墙面", "天花"],
-        container_rows
-      )
-
-      # 按材质分组统计
-      mat_groups = items.group_by(&:su_material)
-      Debug.log
-      Debug.log "材质种类: #{mat_groups.size}"
-      Debug.log
-
-      rows = mat_groups.sort_by { |_, g| -g.sum(&:qty) }.map do |mat_name, grp|
-        name = mat_name || "(未赋材质)"
-        part_groups = grp.group_by { |i| Calculator.face_orientation(i.normal) }
-        floor_area = (part_groups['floor'] || []).sum(&:qty).round(2)
-        wall_area  = (part_groups['wall']  || []).sum(&:qty).round(2)
-        ceil_area  = (part_groups['ceiling'] || []).sum(&:qty).round(2)
-        total_area = grp.sum(&:qty).round(2)
-        [
-          name,
-          grp.size.to_s,
-          total_area.to_s,
-          floor_area > 0 ? floor_area.to_s : "-",
-          wall_area > 0 ? wall_area.to_s : "-",
-          ceil_area > 0 ? ceil_area.to_s : "-"
-        ]
-      end
-
-      Debug.table(
-        ["材质名", "面数", "总面积(m²)", "地面(m²)", "墙面(m²)", "天花(m²)"],
-        rows
-      )
-
-      # 洞口详情
-      if openings.any?
-        Debug.subsection "洞口详情"
-        openings.group_by { |o| o.host_face_ids.empty? ? "独立洞口(host为空)" : "关联洞口" }.each do |type, ops|
-          Debug.log "#{type}: #{ops.size}个, 总面积=#{ops.sum(&:area).round(2)}m²"
-        end
-      end
 
       { items: items, openings: openings }
     end
@@ -133,7 +48,6 @@ module SuTakeoff
         face_set.add(entity.entityID)
 
         if entity.hidden? || !entity.visible?
-          @skipped_hidden += 1
           return
         end
 
@@ -160,12 +74,10 @@ module SuTakeoff
         z_center_m = bb_center_world.z * 0.0254
 
         if area_m2 < MIN_FACE_AREA_M2
-          @skipped_tiny += 1
           return
         end
 
         if mat&.alpha && mat.alpha < 0.5
-          @skipped_transparent += 1
           unless opening_face_ids.include?(entity.entityID)
             openings << Opening.new(entity.entityID, area_m2, [])
             @pending_opening_info << {
@@ -201,11 +113,6 @@ module SuTakeoff
           z_center_m.round(4)
         )
 
-        @progress_total += 1
-        if @progress_total % @progress_step == 0
-          Debug.log "  ...已扫描 #{@progress_total} 面"
-        end
-
       when Sketchup::ComponentInstance
         new_path = path + [entity]
         new_transform = transform * entity.transformation
@@ -236,8 +143,6 @@ module SuTakeoff
               opening_face_ids.add(child.entityID)
             end
           end
-          @named_openings += 1 if op_count > 0
-          Debug.log "  🚪 命名洞口(组件): #{entity.definition.name} | #{op_count}面 | #{op_area.round(2)}m²" if op_count > 0
         end
 
       when Sketchup::Group
@@ -270,8 +175,6 @@ module SuTakeoff
               opening_face_ids.add(child.entityID)
             end
           end
-          @named_openings += 1 if op_count > 0
-          Debug.log "  🚪 命名洞口(Group): #{entity.name} | #{op_count}面 | #{op_area.round(2)}m²" if op_count > 0
         end
 
       when Sketchup::Image
@@ -295,8 +198,6 @@ module SuTakeoff
 
     # 将洞口关联到母面：基于法向量平行 + 同容器 + 面积大于洞口
     def associate_openings_to_hosts(items, openings, pending_info)
-      Debug.subsection "洞口-母面关联"
-
       pending_info.each do |info|
         op_idx = info[:index]
         op_normal = info[:normal]
@@ -320,15 +221,9 @@ module SuTakeoff
           # 取面积最小的候选母面（最精确的宿主）
           best = candidates.min_by(&:qty)
           openings[op_idx].host_face_ids = [best.face_id]
-          Debug.log "  洞口 ID=#{openings[op_idx].entity_id} (#{op_area.round(2)}m²) → 母面 ID=#{best.face_id} (#{best.qty.round(2)}m²)"
-        else
-          Debug.log "  洞口 ID=#{openings[op_idx].entity_id} (#{op_area.round(2)}m²) → 未找到母面"
         end
       end
 
-      linked = openings.count { |o| !o.host_face_ids.empty? }
-      unlinked = openings.count { |o| o.host_face_ids.empty? }
-      Debug.log "  关联结果: #{linked}个已关联 / #{unlinked}个未关联"
     end
   end
 end

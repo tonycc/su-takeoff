@@ -6,85 +6,91 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="tab-bar">
-    <button class="tab-btn active" data-tab="statistics">📊 统计</button>
-    <button class="tab-btn" data-tab="mapping">📋 映射</button>
-    <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
-  </div>
+<div class="app-layout">
 
-  <!-- Tab 1: Statistics — unified workbench -->
-  <div id="tab-statistics" class="tab-content active">
+  <!-- 左侧菜单栏 -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">SU 材料统计</div>
 
-    <!-- Scan controls (always visible) -->
-    <div id="scan-controls" class="toolbar">
-      <button onclick="scanAll()">扫描全部</button>
-      <button onclick="scanSelected()">仅选中面</button>
-      <button onclick="manualMark()">手动标记面</button>
+    <div class="sidebar-group">
+      <div class="sidebar-label">扫描</div>
+      <button class="sb-btn primary" onclick="scanAll()">扫描全部</button>
+      <button class="sb-btn" onclick="scanSelected()">仅选中面</button>
     </div>
 
-    <!-- Empty state (before first scan) -->
-    <div id="empty-state" class="empty-state">
-      <p>🔍 请先点击「扫描全部」或「仅选中面」</p>
+    <div class="sidebar-group">
+      <div class="sidebar-label">统计</div>
+      <button class="sb-nav active" data-page="component">按组件</button>
+      <button class="sb-nav" data-page="material">按材料</button>
+      <button class="sb-nav" data-page="zone">按区域</button>
     </div>
 
-    <!-- Workbench (shown after scan) -->
-    <div id="workbench" style="display:none">
+    <div class="sidebar-group">
+      <div class="sidebar-label">管理</div>
+      <button class="sb-nav" data-page="mapping">映射</button>
+      <button class="sb-nav" data-page="settings">设置</button>
+    </div>
+  </nav>
 
-      <!-- Summary bar -->
-      <div id="summary-bar" class="summary-bar"></div>
+  <!-- 右侧主内容 -->
+  <main class="main">
 
-      <!-- View switcher -->
-      <div class="view-bar">
-        <button class="view-btn active" data-view="component" onclick="switchWorkbenchView('component')">按组件</button>
-        <button class="view-btn" data-view="material" onclick="switchWorkbenchView('material')">按材料</button>
-        <button class="view-btn" data-view="purchase" onclick="switchWorkbenchView('purchase')">采购量</button>
-        <button class="view-btn" data-view="zone" onclick="switchWorkbenchView('zone')">按区域</button>
+    <div id="summary-bar" class="summary-bar" style="display:none"></div>
+
+    <div id="page-component" class="page-content">
+      <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
+    </div>
+    <div id="page-material" class="page-content" style="display:none">
+      <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
+    </div>
+    <div id="page-zone" class="page-content" style="display:none">
+      <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
+    </div>
+    <div id="page-mapping" class="page-content" style="display:none">
+      <div id="mapping-content"></div>
+    </div>
+    <div id="page-settings" class="page-content" style="display:none">
+      <div id="settings-content"></div>
+    </div>
+  </main>
+
+</div>
+
+<!-- ========== Templates ========== -->
+<template id="tmpl-mapping-row">
+  <tr>
+    <td class="col-seq" style="text-align:right;color:#6c7086;font-size:11px"></td>
+    <td class="col-su-name"></td>
+    <td><input type="text" class="u-mat"></td>
+    <td><select class="u-cat" onchange="onMappingCatChange(this)"></select></td>
+    <td><input type="text" class="u-unit" list="mapping-unit-list" style="width:60px"></td>
+    <td><input type="number" class="u-waste" step="1" min="0" max="100" style="width:60px">%</td>
+    <td class="col-actions"></td>
+  </tr>
+</template>
+
+<template id="tmpl-mapping-unmapped-row">
+  <tr class="unmapped-row">
+    <td class="col-seq" style="text-align:right;color:#6c7086;font-size:11px"></td>
+    <td>
+      <div class="u-name-row">
+        <span class="swatch"></span>
+        <span class="u-name"></span>
       </div>
+    </td>
+    <td class="col-quantity"></td>
+    <td class="col-parts"></td>
+    <td><input type="text" class="u-mat" placeholder="输入材料名"></td>
+    <td><select class="u-cat" onchange="onMappingCatChange(this)"></select></td>
+    <td><input type="text" class="u-unit" list="mapping-unit-list" style="width:60px"></td>
+    <td><input type="number" class="u-waste" step="1" min="0" max="100" style="width:60px">%</td>
+    <td class="col-actions"></td>
+  </tr>
+</template>
 
-      <!-- View containers (only one visible at a time) -->
-      <div id="view-component" class="view-container"></div>
-      <div id="view-material" class="view-container" style="display:none"></div>
-      <div id="view-purchase" class="view-container" style="display:none"></div>
-      <div id="view-zone" class="view-container" style="display:none"></div>
-    </div>
-  </div>
-
-  <!-- Tab 2: Mapping management -->
-  <div id="tab-mapping" class="tab-content">
-    <div id="mapping-content"></div>
-  </div>
-
-  <!-- Tab 3: Settings -->
-  <div id="tab-settings" class="tab-content">
-    <h3>模型属性字典</h3>
-    <p class="hint">将映射规则、工艺做法、忽略列表保存到当前 SU 模型中。打开模型时自动加载，实现「规则随模型走」。</p>
-    <div class="toolbar">
-      <button onclick="snapshotToModel()" class="primary-btn">保存规则到模型</button>
-      <button onclick="loadFromModel()">从模型加载规则</button>
-    </div>
-  </div>
-
-  <!-- Marking Dialog (hidden) -->
-  <div id="marking-dialog" class="modal" style="display:none">
-    <div class="modal-content">
-      <h3>手动标记面</h3>
-      <label>材料名称: <input type="text" id="mark-material"></label>
-      <label>部位:
-        <select id="mark-part">
-          <option value="floor">地面</option>
-          <option value="wall">墙面</option>
-          <option value="ceiling">天花</option>
-        </select>
-      </label>
-      <label>所属空间: <input type="text" id="mark-space"></label>
-      <label>损耗率: <input type="number" id="mark-waste" step="0.01" value="0.05"></label>
-      <div class="modal-actions">
-        <button onclick="confirmMark()">确认标记</button>
-        <button onclick="closeMarkDialog()">取消</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="app.js"></script>
+<script src="app.js"></script>
+<script src="js/views.js"></script>
+<script src="js/mapping.js"></script>
+<script src="js/settings.js"></script>
 </body>
 </html>
