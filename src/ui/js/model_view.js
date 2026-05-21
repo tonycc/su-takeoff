@@ -240,7 +240,7 @@ function renderPositionTable(data, container) {
   var cols = ['#', '名称 / 材质', '面积(m²)', '长度(mm)', '件数', '地面', '墙面', '天花', '待处理', '操作'];
   cols.forEach(function(c, i) {
     var th = document.createElement('th');
-    if (i >= 3 && i <= 9) th.className = 'mv-th-num';
+    if (i >= 2 && i <= 8) th.className = 'mv-th-num';
     var sortKey = POS_SORT_COLS[i];
     if (sortKey) {
       th.className = (th.className ? th.className + ' ' : '') + 'mv-th-sortable';
