@@ -346,6 +346,187 @@ function findSearchMatches(node, query, data, matches) {
   });
 }
 
+function getSelfMatCount(selfUsages) {
+  var mats = {};
+  selfUsages.forEach(function(u) {
+    if (!u.is_instance && u.su_material) mats[u.su_material] = true;
+  });
+  return Object.keys(mats).length;
+}
+
+function renderFaceDetailRow(face, usage, depth, tbody) {
+  var row = document.createElement('tr');
+  row.className = 'mv-face-row';
+
+  var tdSeq = document.createElement('td');
+  tdSeq.className = 'mv-col-seq mv-face-seq';
+  row.appendChild(tdSeq);
+
+  var tdName = document.createElement('td');
+  tdName.className = 'mv-col-name mv-face-name';
+  var indent = document.createElement('span');
+  indent.className = 'mv-indent';
+  indent.style.paddingLeft = (depth * 16) + 'px';
+  tdName.appendChild(indent);
+  var bullet = document.createElement('span');
+  bullet.className = 'mv-face-bullet';
+  bullet.textContent = '└ ';
+  tdName.appendChild(bullet);
+  var dims = (face.width && face.height) ? '  ' + Math.round(face.width * 1000) + '×' + Math.round(face.height * 1000) + ' mm' : '';
+  tdName.appendChild(document.createTextNode('#' + face.face_id + dims));
+  row.appendChild(tdName);
+
+  var isLinear = usage.unit === 'm';
+  var partArea = {};
+  partArea[face.part] = face.area;
+
+  var tdArea = document.createElement('td');
+  tdArea.className = 'mv-col-num mv-face-num';
+  tdArea.textContent = isLinear ? '-' : fmtNum(face.area);
+  row.appendChild(tdArea);
+
+  var tdLen = document.createElement('td');
+  tdLen.className = 'mv-col-num mv-face-num';
+  tdLen.textContent = isLinear && face.height ? fmtNum(face.height * 1000) : '-';
+  row.appendChild(tdLen);
+
+  var tdCount = document.createElement('td');
+  tdCount.className = 'mv-col-num mv-face-num';
+  tdCount.textContent = '-';
+  row.appendChild(tdCount);
+
+  ['floor', 'wall', 'ceiling'].forEach(function(pk) {
+    var td = document.createElement('td');
+    td.className = 'mv-col-num mv-face-num';
+    td.textContent = fmtNum(partArea[pk] || 0);
+    row.appendChild(td);
+  });
+
+  var tdUnr = document.createElement('td');
+  tdUnr.className = 'mv-col-num mv-face-num';
+  tdUnr.textContent = '-';
+  row.appendChild(tdUnr);
+
+  var tdAct = document.createElement('td');
+  tdAct.className = 'mv-col-act';
+  var locateBtn = document.createElement('button');
+  locateBtn.className = 'mv-locate-btn mv-face-locate';
+  locateBtn.textContent = '⌖';
+  locateBtn.title = '定位到面';
+  locateBtn.onclick = function() { callSketchUp('locate_face', String(face.face_id)); };
+  tdAct.appendChild(locateBtn);
+  row.appendChild(tdAct);
+
+  tbody.appendChild(row);
+}
+
+function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
+  var matKey = parentEntityId + ':' + usage.su_material;
+  var isMatExpanded = _mv.expandedMaterials && _mv.expandedMaterials[matKey];
+  var isLinear = usage.unit === 'm';
+  var unresolvedSet = {};
+  (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
+  var ignoredSet = {};
+  (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
+  var matStatus = 'mapped';
+  if (ignoredSet[usage.su_material]) matStatus = 'ignored';
+  else if (unresolvedSet[usage.su_material]) matStatus = 'unresolved';
+
+  var row = document.createElement('tr');
+  row.className = 'mv-mat-summary-row mv-mat-summary-' + matStatus;
+  row.dataset.matKey = matKey;
+
+  var tdSeq = document.createElement('td');
+  tdSeq.className = 'mv-col-seq';
+  row.appendChild(tdSeq);
+
+  var tdName = document.createElement('td');
+  tdName.className = 'mv-col-name';
+  var indent = document.createElement('span');
+  indent.className = 'mv-indent';
+  indent.style.paddingLeft = (depth * 16) + 'px';
+  tdName.appendChild(indent);
+
+  var hasFaces = usage.faces && usage.faces.length > 0;
+  if (hasFaces) {
+    var toggle = document.createElement('span');
+    toggle.className = 'mv-toggle';
+    toggle.textContent = isMatExpanded ? '▾' : '▸';
+    toggle.onclick = function(e) {
+      e.stopPropagation();
+      _mv.expandedMaterials = _mv.expandedMaterials || {};
+      _mv.expandedMaterials[matKey] = !isMatExpanded;
+      renderModelView(data);
+    };
+    tdName.appendChild(toggle);
+  } else {
+    var spacer = document.createElement('span');
+    spacer.className = 'mv-indent';
+    spacer.style.minWidth = '14px';
+    spacer.textContent = ' ';
+    tdName.appendChild(spacer);
+  }
+
+  var materialsInfo = data.materials_info || [];
+  var info = null;
+  for (var i = 0; i < materialsInfo.length; i++) {
+    if (materialsInfo[i].su_name === usage.su_material) { info = materialsInfo[i]; break; }
+  }
+  if (info && info.color) {
+    var swatch = document.createElement('span');
+    swatch.className = 'mv-mat-swatch';
+    swatch.style.background = info.color;
+    tdName.appendChild(swatch);
+  }
+
+  var matName = document.createElement('span');
+  matName.className = 'mv-mat-summary-name';
+  matName.textContent = usage.su_material;
+  tdName.appendChild(matName);
+
+  var faceCountSpan = document.createElement('span');
+  faceCountSpan.className = 'mv-mat-summary-faces';
+  faceCountSpan.textContent = ' ' + usage.face_count + '面';
+  tdName.appendChild(faceCountSpan);
+
+  row.appendChild(tdName);
+
+  var byPart = usage.by_part || {};
+  var numCols = [
+    isLinear ? '-' : fmtNum(usage.qty),
+    isLinear ? fmtNum(usage.qty * 1000) : '-',
+    '-',
+    fmtNum(byPart.floor || 0),
+    fmtNum(byPart.wall || 0),
+    fmtNum(byPart.ceiling || 0),
+    unresolvedSet[usage.su_material] ? '待' : '-'
+  ];
+  numCols.forEach(function(v) {
+    var td = document.createElement('td');
+    td.className = 'mv-col-num';
+    td.textContent = v;
+    row.appendChild(td);
+  });
+
+  var tdAct = document.createElement('td');
+  tdAct.className = 'mv-col-act';
+  var locateBtn = document.createElement('button');
+  locateBtn.className = 'mv-locate-btn';
+  locateBtn.textContent = '⌖';
+  locateBtn.title = '定位材质';
+  locateBtn.onclick = function() { callSketchUp('locate_material', usage.su_material); };
+  tdAct.appendChild(locateBtn);
+  row.appendChild(tdAct);
+
+  tbody.appendChild(row);
+
+  if (isMatExpanded && hasFaces) {
+    usage.faces.forEach(function(f) {
+      renderFaceDetailRow(f, usage, depth + 1, tbody);
+    });
+  }
+}
+
 function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches, parentVisible, depthOverride, skipSearch) {
   var tag = cls[node.entity_id];
   if (!tag) return seq;
