@@ -321,25 +321,24 @@ module SuTakeoff
       model.selection.clear
       model.selection.add(face)
 
-      # 相机推到面正前方，从法线方向垂直看过去
+      # 相机推到面正前方
       view = model.active_view
-      view.zoom(face)  # 先让 SU 算好距离
-
-      cam = view.camera
-      center = face.bounds.center
-      normal = face.normal
-      dist = cam.target.distance(cam.eye)
-      eye = center + normal * dist
-
-      z = Geom::Vector3d.new(0, 0, 1)
-      if normal.parallel?(z)
-        up = Geom::Vector3d.new(0, 1, 0)
-      else
-        right = normal.cross(z).normalize
-        up = right.cross(normal).normalize
+      view.zoom(face)
+      begin
+        cam = view.camera
+        center = cam.target
+        normal = face.normal.normalize
+        dist = cam.target.distance(cam.eye)
+        eye = center + normal * dist
+        up = if normal.z.abs > 0.99
+          Geom::Vector3d.new(0, 1, 0)   # 水平面，用 Y 轴做上方向
+        else
+          Geom::Vector3d.new(0, 0, 1)   # 常规 Z 轴上方向
+        end
+        view.camera.set(eye, center, up)
+      rescue
+        # camera.set 失败不阻塞，至少 zoom 已对准面
       end
-
-      view.camera.set(eye, center, up)
     end
 
     def clear_face_highlight
