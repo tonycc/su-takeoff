@@ -50,6 +50,7 @@ module SuTakeoff
 
     def do_scan(selection_only:)
       begin
+        clear_face_highlight
         scanner = Scanner.new
         result = scanner.scan(selection_only: selection_only)
 
@@ -299,14 +300,37 @@ module SuTakeoff
 
       face, ancestors = result
 
-      # Enter component hierarchy so zoom targets the right instance
       model.active_path = ancestors if ancestors.any?
+
+      # Restore previous highlight
+      if @last_face && @last_face.valid?
+        @last_face.material = @last_front_mat
+        @last_face.back_material = @last_back_mat
+      end
+
+      @last_face = face
+      @last_front_mat = face.material
+      @last_back_mat = face.back_material
+
+      highlight = model.materials['Takeoff 定位'] || model.materials.add('Takeoff 定位')
+      highlight.color = Sketchup::Color.new(255, 180, 0)
+      face.material = highlight
+      face.back_material = highlight
 
       model.rendering_options['XRayMode'] = true
       model.selection.clear
       model.selection.add(face)
       model.active_view.zoom(face)
-      model.active_view.zoom(1.3) # 缩小一点，让蓝色选择边框可见
+    end
+
+    def clear_face_highlight
+      if @last_face && @last_face.valid?
+        @last_face.material = @last_front_mat
+        @last_face.back_material = @last_back_mat
+      end
+      @last_face = nil
+      @last_front_mat = nil
+      @last_back_mat = nil
     end
 
 
