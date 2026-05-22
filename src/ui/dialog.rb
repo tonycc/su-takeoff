@@ -303,14 +303,14 @@ module SuTakeoff
       model.active_path = ancestors if ancestors.any?
 
       # Restore previous highlight
-      if @last_face && @last_face.valid?
-        @last_face.material = @last_front_mat
-        @last_face.back_material = @last_back_mat
-      end
+      restore_highlight_face
 
       @last_face = face
       @last_front_mat = face.material
       @last_back_mat = face.back_material
+
+      # 持久化原始材质名，即使插件重载也能恢复
+      save_highlight_origin(face)
 
       highlight = model.materials['Takeoff 定位'] || model.materials.add('Takeoff 定位')
       highlight.color = Sketchup::Color.new(255, 180, 0)
@@ -322,8 +322,13 @@ module SuTakeoff
       model.selection.add(face)
     end
 
-    def clear_face_highlight
-      # 1. 优先恢复已知高亮面（有原始材质记录）
+    def save_highlight_origin(face)
+      dict = face.attribute_dictionary('su_takeoff_highlight', true)
+      dict['front'] = face.material&.name
+      dict['back'] = face.back_material&.name
+    end
+
+    def restore_highlight_face
       if @last_face && @last_face.valid?
         @last_face.material = @last_front_mat
         @last_face.back_material = @last_back_mat
@@ -331,25 +336,32 @@ module SuTakeoff
       @last_face = nil
       @last_front_mat = nil
       @last_back_mat = nil
+    end
 
-      # 2. 兜底扫描：清除模型中所有残留的 Takeoff 定位面（无法恢复原始材质，设为 nil）
+    def clear_face_highlight
+      restore_highlight_face
+      # 兜底：遍历模型，根据持久化属性恢复所有高亮面
       model = Sketchup.active_model
-      clear_takeoff_material(model.entities)
+      restore_all_highlight_faces(model.entities, model)
     rescue
       @last_face = nil
       @last_front_mat = nil
       @last_back_mat = nil
     end
 
-    def clear_takeoff_material(entities)
+    def restore_all_highlight_faces(entities, model)
       entities.each do |e|
-        if e.is_a?(Sketchup::Face)
-          e.material = nil if e.material&.name == 'Takeoff 定位'
-          e.back_material = nil if e.back_material&.name == 'Takeoff 定位'
+        if e.is_a?(Sketchup::Face) && e.material&.name == 'Takeoff 定位'
+          dict = e.attribute_dictionary('su_takeoff_highlight')
+          e.material = model.materials[dict['front']] if dict && dict['front']
+          e.back_material = model.materials[dict['back']] if dict && dict['back']
+          e.delete_attribute('su_takeoff_highlight', 'front') rescue nil
+          e.delete_attribute('su_takeoff_highlight', 'back') rescue nil
+          e.attribute_dictionary_delete('su_takeoff_highlight') rescue nil
         elsif e.respond_to?(:entities)
-          clear_takeoff_material(e.entities)
+          restore_all_highlight_faces(e.entities, model)
         elsif e.respond_to?(:definition)
-          clear_takeoff_material(e.definition.entities)
+          restore_all_highlight_faces(e.definition.entities, model)
         end
       end
     end
