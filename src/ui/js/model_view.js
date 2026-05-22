@@ -1068,7 +1068,7 @@ function exportModelCsv(data, mode) {
   var groupLabel = mode === 'position' ? '按位置' : '按材料';
 
   if (mode === 'position') {
-    rows.push(['#', '名称', '材质', '面积(m²)', '长度(mm)', '件数', '地面', '墙面', '天花', '待处理']);
+    rows.push(['#', '名称 / 材质', '面积(m²)', '长度(mm)', '件数', '地面', '墙面', '天花', '待处理']);
     var seq = 0;
     collectPositionCsvRows(data.hierarchy, data, rows, seq);
   } else {
@@ -1149,19 +1149,10 @@ function collectPositionCsvRows(node, data, rows, seq) {
 
   var stats = rollupStats(node, data);
   var selfUsages = (data._usagesByEntityId || {})[node.entity_id] || [];
-  var csvMatKinds = 0;
-  var csvMatsSeen = {};
-  selfUsages.forEach(function(u) {
-    if (u.su_material && !csvMatsSeen[u.su_material]) {
-      csvMatsSeen[u.su_material] = true;
-      csvMatKinds++;
-    }
-  });
   seq++;
   rows.push([
     seq,
     node.name,
-    csvMatKinds > 0 ? csvMatKinds + '种' : '-',
     fmtNum(stats.area),
     fmtNum(stats.length),
     fmtNum(stats.count),
