@@ -589,7 +589,9 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   tdName.appendChild(indent);
 
   // Toggle icon
-  if (hasChildren) {
+  var hasFaceItems = selfUsages.some(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
+  var hasExpandable = hasChildren || hasFaceItems;
+  if (hasExpandable) {
     var toggle = document.createElement('span');
     toggle.className = 'mv-toggle';
     toggle.textContent = isExpanded ? '▾' : '▸';
@@ -631,6 +633,17 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
     if (badge) tdName.appendChild(badge);
   }
 
+  // Material count badge
+  if (tag === 'has_face_items' || tag === 'has_descendant_stats') {
+    var matCount = getSelfMatCount(selfUsages);
+    if (matCount > 0) {
+      var matBadge = document.createElement('span');
+      matBadge.className = 'mv-mat-count-badge';
+      matBadge.textContent = matCount + '种';
+      tdName.appendChild(matBadge);
+    }
+  }
+
   // Pure organizational chip
   if (tag === 'pure_organizational') {
     var pchip = document.createElement('span');
@@ -639,33 +652,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
     tdName.appendChild(pchip);
   }
 
-  // Face detail expand toggle
-  var faceUsages = selfUsages.filter(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
-  var isFaceExpanded = faceUsages.length > 0 && _mv.expandedFaces[node.entity_id];
-  if (faceUsages.length > 0) {
-    var totalFaces = faceUsages.reduce(function(s, u) { return s + u.faces.length; }, 0);
-    var faceToggle = document.createElement('span');
-    faceToggle.className = 'mv-face-toggle';
-    faceToggle.textContent = (isFaceExpanded ? '▾ ' : '▸ ') + totalFaces + '面';
-    faceToggle.onclick = function(e) {
-      e.stopPropagation();
-      _mv.expandedFaces[node.entity_id] = !_mv.expandedFaces[node.entity_id];
-      renderModelView(data);
-    };
-    tdName.appendChild(faceToggle);
-  }
-
   row.appendChild(tdName);
-
-  // Material col — show count for groups/components
-  var tdMat = document.createElement('td');
-  tdMat.className = 'mv-col-mat-name';
-  var matNames = [];
-  selfUsages.forEach(function(u) {
-    if (u.su_material && matNames.indexOf(u.su_material) < 0) matNames.push(u.su_material);
-  });
-  tdMat.textContent = matNames.length > 0 ? matNames.length + '种' : '-';
-  row.appendChild(tdMat);
 
   // Numeric cols
   var numCols = [area, length, count, floor, wall, ceiling, unresolved];
@@ -693,92 +680,22 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
 
   tbody.appendChild(row);
 
-  // Face detail sub-rows
-  if (isFaceExpanded && faceUsages.length > 0) {
-    faceUsages.forEach(function(u) {
-      (u.faces || []).forEach(function(f) {
-        var subRow = document.createElement('tr');
-        subRow.className = 'mv-face-row';
-        subRow.dataset.parentEntityId = node.entity_id;
-
-        // Col 0: # (empty)
-        var tdSeq = document.createElement('td');
-        tdSeq.className = 'mv-col-seq mv-face-seq';
-        tdSeq.textContent = '';
-        subRow.appendChild(tdSeq);
-
-        // Col 1: Name with indent + face ID + dimensions
-        var tdName = document.createElement('td');
-        tdName.className = 'mv-col-name mv-face-name';
-        var subIndent = document.createElement('span');
-        subIndent.className = 'mv-indent';
-        subIndent.style.paddingLeft = ((effectiveDepth + 1) * 16) + 'px';
-        tdName.appendChild(subIndent);
-        var subBullet = document.createElement('span');
-        subBullet.className = 'mv-face-bullet';
-        subBullet.textContent = '└ ';
-        tdName.appendChild(subBullet);
-        var dims = (f.width && f.height) ? '  ' + Math.round(f.width * 1000) + '×' + Math.round(f.height * 1000) + ' mm' : '';
-        tdName.appendChild(document.createTextNode('#' + f.face_id + dims));
-        subRow.appendChild(tdName);
-
-        // Col 2: 材质
-        var tdMat = document.createElement('td');
-        tdMat.className = 'mv-col-mat-name mv-face-num';
-        tdMat.textContent = u.su_material || '-';
-        subRow.appendChild(tdMat);
-
-        var isFaceLinear = u.unit === 'm';
-
-        // Col 3: 面积(m²)
-        var tdArea = document.createElement('td');
-        tdArea.className = 'mv-col-num mv-face-num';
-        tdArea.textContent = isFaceLinear ? '-' : fmtNum(f.area);
-        subRow.appendChild(tdArea);
-
-        // Col 4: 长度(mm)
-        var tdLen = document.createElement('td');
-        tdLen.className = 'mv-col-num mv-face-num';
-        tdLen.textContent = isFaceLinear && f.height ? fmtNum(f.height * 1000) : '-';
-        subRow.appendChild(tdLen);
-
-        // Cols 5-9: 件数/地面/墙面/天花/待处理
-        var partArea = {};
-        partArea[f.part] = f.area;
-        ['count', 'floor', 'wall', 'ceiling', 'unresolved'].forEach(function(pk) {
-          var td = document.createElement('td');
-          td.className = 'mv-col-num mv-face-num';
-          if (pk === 'count' || pk === 'unresolved') {
-            td.textContent = '-';
-          } else {
-            td.textContent = fmtNum(partArea[pk] || 0);
-          }
-          subRow.appendChild(td);
-        });
-
-        // Col 10: 操作
-        var tdAct = document.createElement('td');
-        tdAct.className = 'mv-col-act';
-        var subLocate = document.createElement('button');
-        subLocate.className = 'mv-locate-btn mv-face-locate';
-        subLocate.textContent = '⌖';
-        subLocate.title = '定位到面';
-        subLocate.onclick = function() {
-          callSketchUp('locate_face', String(f.face_id));
-        };
-        tdAct.appendChild(subLocate);
-        subRow.appendChild(tdAct);
-
-        tbody.appendChild(subRow);
+  // Expansion area: material summary rows + child component rows
+  if (isExpanded) {
+    // Material summary rows (only this entity's own face usages)
+    var faceUsages = selfUsages.filter(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
+    if (faceUsages.length > 0) {
+      faceUsages.forEach(function(u) {
+        renderMaterialSummaryRow(u, effectiveDepth + 1, node.entity_id, tbody, data);
       });
-    });
-  }
+    }
 
-  // Children rows (if expanded)
-  if (isExpanded && hasChildren) {
-    node.children.forEach(function(c) {
-      seq = renderNodeRows(c, data, cls, usagesByEid, tbody, seq, searchMatches, 1, effectiveDepth + 1);
-    });
+    // Child component rows
+    if (hasChildren) {
+      node.children.forEach(function(c) {
+        seq = renderNodeRows(c, data, cls, usagesByEid, tbody, seq, searchMatches, 1, effectiveDepth + 1);
+      });
+    }
   }
 
   return seq;
