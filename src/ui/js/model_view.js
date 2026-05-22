@@ -510,12 +510,6 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
 
   var tdAct = document.createElement('td');
   tdAct.className = 'mv-col-act';
-  var locateBtn = document.createElement('button');
-  locateBtn.className = 'mv-locate-btn';
-  locateBtn.textContent = '⌖';
-  locateBtn.title = '定位材质';
-  locateBtn.onclick = function() { callSketchUp('locate_material', usage.su_material); };
-  tdAct.appendChild(locateBtn);
   row.appendChild(tdAct);
 
   tbody.appendChild(row);
