@@ -321,6 +321,7 @@ module SuTakeoff
       model.selection.clear
       model.selection.add(face)
       model.active_view.zoom(face)
+      model.active_view.zoom(1.3) # 缩小一点，让边框可见
     end
 
     def clear_face_highlight
