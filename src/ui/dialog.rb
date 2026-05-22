@@ -29,12 +29,17 @@ module SuTakeoff
 
       @dialog.add_action_callback('locate_material') { |_ctx, su_name| locate_material(su_name) }
       @dialog.add_action_callback('locate_face') { |_ctx, id| locate_face(id.to_i) }
+      @dialog.add_action_callback('locate_entity') { |_ctx, json| locate_entity(json) }
       @dialog.add_action_callback('save_process') { |_ctx, json| save_process(json) }
       @dialog.add_action_callback('delete_process') { |_ctx, json| delete_process(json) }
       @dialog.add_action_callback('ignore_material') { |_ctx, name| ignore_material(name) }
       @dialog.add_action_callback('unignore') { |_ctx, name| unignore(name) }
       @dialog.add_action_callback('clear_ignored') { |_ctx| clear_ignored }
       @dialog.add_action_callback('save_config') { |_ctx, json| save_config(json) }
+
+      @dialog.add_action_callback('get_component_mappings') { |_ctx| send_component_mappings }
+      @dialog.add_action_callback('save_component_mapping') { |_ctx, json| save_component_mapping(json) }
+      @dialog.add_action_callback('delete_component_mapping') { |_ctx, def_name| delete_component_mapping(def_name) }
     end
 
     def show
@@ -43,33 +48,40 @@ module SuTakeoff
 
     private
 
-    # Phase 1 — scan only. Reports unmapped materials; does NOT compute stats yet.
     def do_scan(selection_only:)
-      scanner = Scanner.new
-      result = scanner.scan(selection_only: selection_only)
+      begin
+        scanner = Scanner.new
+        result = scanner.scan(selection_only: selection_only)
 
-      all_items = result[:items]
+        all_items = result[:items]
 
-      @last_scan = {
-        items: all_items,
-        openings: result[:openings],
-        colors: scanner.material_colors
-      }
+        @last_scan = {
+          items: all_items,
+          openings: result[:openings],
+          hierarchy: result[:hierarchy],
+          colors: scanner.material_colors
+        }
 
-      send_workbench_state
+        send_workbench_state
+      rescue => e
+        msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
+        @dialog.execute_script("window.renderWorkbenchError(#{msg})")
+      end
     end
 
     # Unified state push — called after scan and after any mapping/ignored change.
     # Computes usages for all mapped materials; unmapped are returned for editing UI.
     def send_workbench_state
       return unless @last_scan
-
+      begin
       mapping = PluginState.instance.mapping
       ignored = PluginState.instance.ignored
       processes = PluginState.instance.processes
       all_items = @last_scan[:items]
+      face_items = all_items.reject { |it| it.kind == :instance }
+      instance_items = all_items.select { |it| it.kind == :instance }
 
-      used_names = all_items.map(&:su_material).compact.uniq
+      used_names = face_items.map(&:su_material).compact.uniq
       unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
       mapped_names = used_names.select { |n| mapping.get(n) }
       ignored_names = ignored & used_names
@@ -80,10 +92,94 @@ module SuTakeoff
       usages = calc.compute(all_items, @last_scan[:openings], {})
       info = build_material_info(used_names, all_items, @last_scan[:colors])
 
+      # 几何用量（不含损耗率），直接从 items 按 (entity_id, su_material, unit) 聚合
+      # 先跑 compute_geometry_only 获取去重后的 items 列表
+      geo_usages = calc.compute_geometry_only(all_items, @last_scan[:openings])
+      deduped_items = geo_usages.flat_map(&:items)
+
+      # 构建洞口扣减 map
+      opening_area_by_face = {}
+      @last_scan[:openings].each do |op|
+        op.host_face_ids.each do |fid|
+          opening_area_by_face[fid] ||= 0.0
+          opening_area_by_face[fid] += op.area
+        end
+      end
+
+      # 按 entity_id 分组，再按 (su_material, unit) 子分组
+      geo_agg = {}
+      deduped_items.each do |it|
+        next if it.su_material.nil?
+        eid = it.component_path_ids.last || 0
+        if it.kind == :instance
+          cm_rec = PluginState.instance.component_mapping.get(it.su_material)
+          unit = cm_rec ? cm_rec.unit : '个'
+        else
+          map_rec = PluginState.instance.mapping.get(it.su_material)
+          if map_rec
+            raw_unit = map_rec.unit
+            length_units = PluginState.instance.config['length_units'] || %w[m mm cm dm km]
+            unit = length_units.include?(raw_unit) ? 'm' : raw_unit
+          elsif it.width && it.width > 0 && it.height && (it.height / it.width) > 15
+            unit = 'm'
+          else
+            unit = 'm²'
+          end
+        end
+        key = [eid, it.su_material, unit]
+        geo_agg[key] ||= []
+        geo_agg[key] << it
+      end
+
+      geometry_usages_list = geo_agg.map do |(eid, su_mat, unit), mat_items|
+        face_items = mat_items.reject { |i| i.kind == :instance }
+        is_instance = mat_items.any? { |i| i.kind == :instance } && face_items.empty?
+
+        part_counts = Hash.new(0.0)
+        face_items.each do |i|
+          part_counts[Calculator.face_orientation(i.normal)] += i.qty if i.kind == :face
+        end
+
+        qty = if is_instance
+          mat_items.sum { |i| i.qty.to_f }.round(4)
+        elsif unit == 'm'
+          face_items.sum { |i| (i.height || 0).to_f }.round(4)
+        else
+          face_items.sum { |i|
+            deduction = opening_area_by_face[i.face_id] || 0.0
+            [i.qty - deduction, 0.0].max
+          }.round(4)
+        end
+
+        faces_detail = face_items.map { |i|
+          {
+            face_id: i.face_id,
+            width: i.width&.round(2),
+            height: i.height&.round(2),
+            area: i.qty.round(3),
+            kind: i.kind,
+            part: Calculator.face_orientation(i.normal)
+          }
+        }
+
+        {
+          entity_id: eid,
+          su_material: su_mat,
+          unit: unit,
+          qty: qty,
+          face_count: face_items.size,
+          by_part: part_counts.transform_values { |v| v.round(2) },
+          is_instance: is_instance,
+          faces: faces_detail
+        }
+      end
+
       data = {
         overview: {
-          total_faces: all_items.size,
-          total_area: all_items.sum(&:qty).round(2),
+          total_faces: face_items.size,
+          total_area: face_items.sum(&:qty).round(2),
+          instance_count: instance_items.size,
+          instance_total: instance_items.sum(&:qty).round(0),
           total_openings: @last_scan[:openings].size,
           total_opening_area: @last_scan[:openings].sum(&:area).round(2),
           material_count: used_names.size,
@@ -104,18 +200,27 @@ module SuTakeoff
         unresolved: unresolved,
         materials_info: info,
         categories: processes.all_categories,
+        length_units: PluginState.instance.config['length_units'] || [],
         usages: usages.map(&:to_h),
+        hierarchy: @last_scan[:hierarchy],
+        geometry_usages: geometry_usages_list,
         by_material: {}
       }
       @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
       send_mappings
+      send_component_mappings
+      rescue => e
+        msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
+        @dialog.execute_script("window.renderWorkbenchError(#{msg})")
+      end
     end
 
     # Build per-material context (faces / area / part breakdown / spaces / color / suggested unit)
     def build_material_info(names, items, colors)
       mapping = PluginState.instance.mapping
+      face_items = items.reject { |it| it.kind == :instance }
       by_name = Hash.new { |h, k| h[k] = [] }
-      items.each { |it| by_name[it.su_material] << it if it.su_material }
+      face_items.each { |it| by_name[it.su_material] << it if it.su_material }
 
       names.map do |name|
         group = by_name[name] || []
@@ -197,26 +302,34 @@ module SuTakeoff
       # Enter component hierarchy so zoom targets the right instance
       model.active_path = ancestors if ancestors.any?
 
-      # Restore previous face
-      if @last_face && @last_face.valid?
-        @last_face.material = @last_front_mat
-        @last_face.back_material = @last_back_mat
-      end
-
-      @last_face = face
-      @last_front_mat = face.material
-      @last_back_mat = face.back_material
-
-      # Paint + select
-      highlight = model.materials['Takeoff 定位'] || model.materials.add('Takeoff 定位')
-      highlight.color = Sketchup::Color.new(255, 180, 0)
-      face.material = highlight
-      face.back_material = highlight
-
       model.rendering_options['XRayMode'] = true
       model.selection.clear
       model.selection.add(face)
       model.active_view.zoom(face)
+    end
+
+    def locate_entity(json)
+      eid = JSON.parse(json)
+      model = Sketchup.active_model
+      entity = model.find_entity_by_id(eid)
+      return unless entity
+      model.selection.clear
+      model.selection.add(entity)
+      # 逐层展开父级容器，确保 zoom 不会跳转到错误的坐标空间
+      parents = []
+      p = entity.parent
+      while p && !p.is_a?(Sketchup::Model)
+        parents.unshift(p) if p.is_a?(Sketchup::Group) || p.is_a?(Sketchup::ComponentInstance)
+        p = p.parent
+      end
+      begin
+        model.active_path = parents unless parents.empty?
+      rescue
+        # 某些容器可能无法作为编辑路径打开，忽略继续
+      end
+      model.active_view.zoom(entity)
+    rescue
+      model.active_view.zoom_extents
     end
 
     def find_face_with_ancestors(entities, target_id, ancestors)
@@ -252,7 +365,7 @@ module SuTakeoff
               {}
             end
       config = {
-        category_units: cfg['category_units'] || [],
+        category_units: cfg['material_category_units'] || cfg['category_units'] || [],
         config_units: cfg['units'] || []
       }
       @dialog.execute_script("window.renderMappings(#{JSON.generate(mappings)}, #{JSON.generate(config)})")
@@ -273,6 +386,43 @@ module SuTakeoff
       m.delete(su_name)
       m.save_json(PluginState.mapping_path)
       send_mappings
+      send_workbench_state if @last_scan
+    end
+
+    def send_component_mappings
+      mappings = PluginState.instance.component_mapping.all.map(&:to_h)
+      # Collect all component/group definition names from the model
+      model = Sketchup.active_model
+      def_names = model.definitions.reject(&:group?).map(&:name).reject { |n| n.nil? || n.empty? }.uniq.sort
+      # Read config for category and unit lists
+      cfg = if File.exist?(PluginState.config_path)
+              JSON.parse(File.read(PluginState.config_path))
+            else
+              {}
+            end
+      config = {
+        category_units: cfg['component_category_units'] || [],
+        config_units: cfg['units'] || []
+      }
+      @dialog.execute_script("window.renderComponentMappings(#{JSON.generate(mappings)}, #{JSON.generate(def_names)}, #{JSON.generate(config)})")
+    end
+
+    def save_component_mapping(json)
+      data = JSON.parse(json)
+      cm = PluginState.instance.component_mapping
+      cm.add(data['definition_name'], data['material_name'], data['category'],
+             data['unit'] || '个', data['spec'] || '', data['waste_rate'].to_f,
+             data['counting_method'] || 'expand')
+      cm.save_json(PluginState.component_mapping_path)
+      send_component_mappings
+      send_workbench_state if @last_scan
+    end
+
+    def delete_component_mapping(def_name)
+      cm = PluginState.instance.component_mapping
+      cm.delete(def_name)
+      cm.save_json(PluginState.component_mapping_path)
+      send_component_mappings
       send_workbench_state if @last_scan
     end
 
@@ -304,8 +454,11 @@ module SuTakeoff
           }
         },
         ignored: state.ignored,
-        category_units: state.config['category_units'] || [],
-        config_units: state.config['units'] || []
+        material_category_units: state.config['material_category_units'] || [],
+        component_category_units: state.config['component_category_units'] || [],
+        config_units: state.config['units'] || [],
+        length_units: state.config['length_units'] || [],
+        count_units: state.config['count_units'] || []
       }
       @dialog.execute_script("window.renderProcesses(#{JSON.generate(data)})")
     end
@@ -313,8 +466,11 @@ module SuTakeoff
     def save_config(json)
       data = JSON.parse(json)
       PluginState.instance.save_config(
-        data['category_units'] || [],
-        data['units'] || []
+        data['material_category_units'] || data['category_units'] || [],
+        data['component_category_units'] || [],
+        data['units'] || [],
+        data['length_units'],
+        data['count_units']
       )
     end
     def save_process(json)
