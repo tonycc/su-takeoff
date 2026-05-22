@@ -51,6 +51,9 @@ function renderWorkbench(data) {
   try {
     window._workbench = data;
     buildWorkbenchIndexes(data);
+    // 新扫描重置展开状态，第一层由 isNodeExpanded 默认展开
+    _mv.expandedNodes = {};
+    _mv.expandedMaterials = {};
     document.querySelectorAll('.page-content .empty-state').forEach(function(el) { el.style.display = 'none'; });
     var bar = document.getElementById('summary-bar');
     bar.style.display = 'flex';
