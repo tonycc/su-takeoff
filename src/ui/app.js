@@ -165,6 +165,7 @@ window.highlightFaceInUI = function(faceId) {
   var data = window._workbench;
   var geoUsages = data.geometry_usages || [];
   var targetEntityId = null;
+  var targetUsage = null;
 
   // 查找包含该 face_id 的 geometry_usage 的 entity_id
   for (var i = 0; i < geoUsages.length; i++) {
@@ -172,6 +173,7 @@ window.highlightFaceInUI = function(faceId) {
     for (var j = 0; j < faces.length; j++) {
       if (faces[j].face_id === faceId) {
         targetEntityId = geoUsages[i].entity_id;
+        targetUsage = geoUsages[i];
         break;
       }
     }
@@ -183,6 +185,11 @@ window.highlightFaceInUI = function(faceId) {
   // 展开从根到目标 entity 路径上的所有祖先节点
   _mv.expandedNodes = _mv.expandedNodes || {};
   expandAncestorsToEntity(data.hierarchy, targetEntityId);
+
+  // 展开包含该面的材质汇总行（面明细行是材质汇汇总行的子行）
+  _mv.expandedMaterials = _mv.expandedMaterials || {};
+  var matKey = targetEntityId + ':' + targetUsage.su_material;
+  _mv.expandedMaterials[matKey] = true;
 
   // 设置高亮面 ID 并重绘
   _mv.highlightFaceId = faceId;
