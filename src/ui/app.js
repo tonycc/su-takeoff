@@ -161,7 +161,7 @@ function locateEntity(entityId) {
 }
 
 // ---------------- Model → UI face highlight ----------------
-window.highlightFaceInUI = function(faceId) {
+window.highlightFaceInUI = function(faceId, containerEntityId) {
   if (window._currentPage !== 'position') return;
   if (!window._workbench) return;
 
@@ -170,11 +170,12 @@ window.highlightFaceInUI = function(faceId) {
   var targetEntityId = null;
   var targetUsage = null;
 
-  // 查找包含该 face_id 的 geometry_usage 的 entity_id
+  // 查找包含该 face_id 且 entity_id 匹配容器实例的 geometry_usage
+  var cid = (containerEntityId !== undefined) ? containerEntityId : 0;
   for (var i = 0; i < geoUsages.length; i++) {
     var faces = geoUsages[i].faces || [];
     for (var j = 0; j < faces.length; j++) {
-      if (faces[j].face_id === faceId) {
+      if (faces[j].face_id === faceId && geoUsages[i].entity_id === cid) {
         targetEntityId = geoUsages[i].entity_id;
         targetUsage = geoUsages[i];
         break;

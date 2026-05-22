@@ -9,7 +9,13 @@ module SuTakeoff
       return unless @html_dialog.visible?
       entity = selection.first
       return unless entity.is_a?(Sketchup::Face)
-      @html_dialog.execute_script("window.highlightFaceInUI(#{entity.entityID})")
+
+      # 确定面所在的组件实例（用于区分同一定义的不同实例）
+      model = Sketchup.active_model
+      active_path = model.active_path
+      container_id = active_path&.last&.entityID || 0
+
+      @html_dialog.execute_script("window.highlightFaceInUI(#{entity.entityID}, #{container_id})")
     rescue => e
       # 静默失败，不干扰用户操作
     end
