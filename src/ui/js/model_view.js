@@ -706,6 +706,10 @@ function isNodeExpanded(node, searchMatches) {
   if (_mv.searchQuery && searchMatches[node.entity_id]) {
     return true;
   }
+  // 默认展开第一层
+  if (node.depth === 1) {
+    return true;
+  }
   return false;
 }
 
