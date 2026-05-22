@@ -394,3 +394,8 @@ tr.unmapped td:first-child { color: #f38ba8; }
 .tag-chip-del:hover { color: #f38ba8; }
 
 
+/* 模型选中面 → UI 高亮 */
+.mv-highlight {
+  background: rgba(255, 180, 0, 0.18) !important;
+  transition: background 0.25s;
+}
