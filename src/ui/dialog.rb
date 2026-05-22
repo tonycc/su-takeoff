@@ -49,6 +49,7 @@ module SuTakeoff
     private
 
     def do_scan(selection_only:)
+      clear_face_highlight  # 尽力清除，失败不阻塞
       begin
         scanner = Scanner.new
         result = scanner.scan(selection_only: selection_only)
@@ -341,7 +342,20 @@ module SuTakeoff
       view.camera.set(eye, center, up)
     end
 
-
+    def clear_face_highlight
+      if @last_face && @last_face.valid?
+        @last_face.material = @last_front_mat
+        @last_face.back_material = @last_back_mat
+      end
+      @last_face = nil
+      @last_front_mat = nil
+      @last_back_mat = nil
+    rescue
+      # 清除失败不阻塞扫描，让结果忠实显示
+      @last_face = nil
+      @last_front_mat = nil
+      @last_back_mat = nil
+    end
 
     def locate_entity(json)
       eid = JSON.parse(json)
