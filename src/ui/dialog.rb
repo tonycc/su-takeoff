@@ -323,14 +323,24 @@ module SuTakeoff
       model.selection.clear
       model.selection.add(face)
 
-      # 将相机推到面正前方，从法线方向垂直看过去
+      # 相机推到面正前方，从法线方向垂直看过去
       view = model.active_view
+      view.zoom(face)  # 先让 SU 算好距离
+
+      cam = view.camera
       center = face.bounds.center
       normal = face.normal
-      diag = face.bounds.diagonal
-      dist = [diag * 0.6, 0.4].max
+      dist = cam.target.distance(cam.eye)
       eye = center + normal * dist
-      up = normal.z.abs > 0.9 ? Geom::Vector3d.new(0, 1, 0) : Geom::Vector3d.new(0, 0, 1)
+
+      z = Geom::Vector3d.new(0, 0, 1)
+      if normal.parallel?(z)
+        up = Geom::Vector3d.new(0, 1, 0)
+      else
+        right = normal.cross(z).normalize
+        up = right.cross(normal).normalize
+      end
+
       view.camera.set(eye, center, up)
     end
 
