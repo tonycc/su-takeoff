@@ -49,7 +49,6 @@ module SuTakeoff
     private
 
     def do_scan(selection_only:)
-      clear_face_highlight  # 必须在 begin 外，否则异常被吞
       begin
         scanner = Scanner.new
         result = scanner.scan(selection_only: selection_only)
@@ -83,7 +82,6 @@ module SuTakeoff
       instance_items = all_items.select { |it| it.kind == :instance }
 
       used_names = face_items.map(&:su_material).compact.uniq
-      used_names.reject! { |n| n == 'Takeoff 定位' }
       unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
       mapped_names = used_names.select { |n| mapping.get(n) }
       ignored_names = ignored & used_names
@@ -134,7 +132,6 @@ module SuTakeoff
       end
 
       geometry_usages_list = geo_agg.map do |(eid, su_mat, unit), mat_items|
-        next if su_mat == 'Takeoff 定位'
         face_items = mat_items.reject { |i| i.kind == :instance }
         is_instance = mat_items.any? { |i| i.kind == :instance } && face_items.empty?
 
@@ -175,7 +172,7 @@ module SuTakeoff
           is_instance: is_instance,
           faces: faces_detail
         }
-      end.compact
+      end
 
       data = {
         overview: {
@@ -344,15 +341,6 @@ module SuTakeoff
       view.camera.set(eye, center, up)
     end
 
-    def clear_face_highlight
-      if @last_face && @last_face.valid?
-        @last_face.material = @last_front_mat
-        @last_face.back_material = @last_back_mat
-      end
-      @last_face = nil
-      @last_front_mat = nil
-      @last_back_mat = nil
-    end
 
 
     def locate_entity(json)
