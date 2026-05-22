@@ -706,8 +706,8 @@ function isNodeExpanded(node, searchMatches) {
   if (_mv.searchQuery && searchMatches[node.entity_id]) {
     return true;
   }
-  // 默认展开第一层
-  if (node.depth === 1) {
+  // 默认展开根节点，显示第一层子节点
+  if (node.depth === 0) {
     return true;
   }
   return false;
