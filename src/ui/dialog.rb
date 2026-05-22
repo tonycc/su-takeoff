@@ -1,5 +1,26 @@
 # src/ui/dialog.rb
 module SuTakeoff
+  class FaceSelectionObserver < Sketchup::SelectionObserver
+    def initialize(html_dialog)
+      @html_dialog = html_dialog
+    end
+
+    def onSelectionBulkChange(selection)
+      return unless @html_dialog.visible?
+      entity = selection.first
+      return unless entity.is_a?(Sketchup::Face)
+      @html_dialog.execute_script("window.highlightFaceInUI(#{entity.entityID})")
+    rescue => e
+      # 静默失败，不干扰用户操作
+    end
+
+    def onSelectionCleared(selection)
+      return unless @html_dialog.visible?
+      @html_dialog.execute_script("window.clearFaceHighlight()")
+    rescue => e
+    end
+  end
+
   class Dialog
     def initialize
       @dialog = UI::HtmlDialog.new(
@@ -44,6 +65,9 @@ module SuTakeoff
 
     def show
       @dialog.show
+      model = Sketchup.active_model
+      @selection_observer = FaceSelectionObserver.new(@dialog)
+      model.selection.add_observer(@selection_observer)
     end
 
     private
