@@ -300,7 +300,14 @@ module SuTakeoff
 
       face, ancestors = result
 
-      model.active_path = ancestors if ancestors.any?
+      # Compute world-space bounding box by walking ancestor transforms
+      transform = Geom::Transformation.new
+      ancestors.reverse_each { |a|
+        transform = a.transformation * transform if a.respond_to?(:transformation)
+      }
+      face_verts = face.vertices.map { |v| v.position.transform(transform) }
+      bb = Geom::BoundingBox.new
+      face_verts.each { |pt| bb.add(pt) }
 
       # Restore previous highlight
       if @last_face && @last_face.valid?
@@ -317,11 +324,18 @@ module SuTakeoff
       face.material = highlight
       face.back_material = highlight
 
+      # Position camera looking at the face center from its normal direction
+      center = bb.center
+      face_normal = face.normal
+      unless ancestors.empty?
+        face_normal = face_normal.transform(transform).normalize
+      end
+      eye = center + face_normal * bb.diagonal
+      up = face_normal.parallel?(Z_AXIS) ? Y_AXIS : Z_AXIS
+      camera = model.active_view.camera
+      camera.set(eye, center, up)
+
       model.rendering_options['XRayMode'] = true
-      model.selection.clear
-      model.selection.add(face)
-      model.active_view.zoom(face)
-      model.active_view.zoom(1.3) # 缩小一点，让边框可见
     end
 
     def clear_face_highlight
