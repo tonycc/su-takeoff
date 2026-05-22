@@ -357,6 +357,10 @@ function getSelfMatCount(selfUsages) {
 function renderFaceDetailRow(face, usage, depth, tbody) {
   var row = document.createElement('tr');
   row.className = 'mv-face-row';
+  row.dataset.faceId = face.face_id;
+  if (_mv.highlightFaceId === face.face_id) {
+    row.classList.add('mv-highlight');
+  }
 
   var tdSeq = document.createElement('td');
   tdSeq.className = 'mv-col-seq mv-face-seq';
