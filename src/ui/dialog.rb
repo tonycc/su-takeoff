@@ -343,6 +343,7 @@ module SuTakeoff
     end
 
     def clear_face_highlight
+      # 1. 优先恢复已知高亮面（有原始材质记录）
       if @last_face && @last_face.valid?
         @last_face.material = @last_front_mat
         @last_face.back_material = @last_back_mat
@@ -350,11 +351,27 @@ module SuTakeoff
       @last_face = nil
       @last_front_mat = nil
       @last_back_mat = nil
+
+      # 2. 兜底扫描：清除模型中所有残留的 Takeoff 定位面（无法恢复原始材质，设为 nil）
+      model = Sketchup.active_model
+      clear_takeoff_material(model.entities)
     rescue
-      # 清除失败不阻塞扫描，让结果忠实显示
       @last_face = nil
       @last_front_mat = nil
       @last_back_mat = nil
+    end
+
+    def clear_takeoff_material(entities)
+      entities.each do |e|
+        if e.is_a?(Sketchup::Face)
+          e.material = nil if e.material&.name == 'Takeoff 定位'
+          e.back_material = nil if e.back_material&.name == 'Takeoff 定位'
+        elsif e.respond_to?(:entities)
+          clear_takeoff_material(e.entities)
+        elsif e.respond_to?(:definition)
+          clear_takeoff_material(e.definition.entities)
+        end
+      end
     end
 
     def locate_entity(json)
