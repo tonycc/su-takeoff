@@ -153,82 +153,58 @@ function locateMaterial(suName) {
 }
 
 function locateFace(faceId, pathIds) {
-  var pids = pathIds || [];
-  dlog('locateFace called: faceId=' + faceId + ' pathIds=[' + pids.join(',') + ']');
-  callSketchUp('locate_face', JSON.stringify({ face_id: faceId, path_ids: pids }));
+  callSketchUp('locate_face', JSON.stringify({ face_id: faceId, path_ids: pathIds || [] }));
 }
 
 function locateEntity(entityId) {
   callSketchUp('locate_entity', String(entityId));
 }
 
-// ---------------- Debug logger ----------------
-function dlog(msg) {
-  var el = document.getElementById('hl-debug');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'hl-debug';
-    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:9999;max-height:160px;overflow:auto;font-family:monospace;white-space:pre-wrap';
-    document.body.appendChild(el);
-  }
-  el.textContent = (el.textContent || '') + msg + '\n';
-  el.scrollTop = el.scrollHeight;
-}
-
 // ---------------- Model → UI face highlight ----------------
 window.highlightFaceInUI = function(faceId, activePathIds) {
-  dlog('highlightFaceInUI: faceId=' + faceId + ' activePathIds=[' + (activePathIds || []).join(',') + '] page=' + window._currentPage);
-
-  if (window._currentPage !== 'position') { dlog('  SKIP: not position page'); return; }
-  if (!window._workbench) { dlog('  SKIP: no workbench'); return; }
+  if (window._currentPage !== 'position') return;
+  if (!window._workbench) return;
 
   var data = window._workbench;
   var geoUsages = data.geometry_usages || [];
   var targetEntityId = null;
   var targetUsage = null;
 
+  // 按完整路径匹配面：face_id 相同 + path_ids 相同 = 同一实例中的同一个面
   var pathIds = activePathIds || [];
-  dlog('  searching in ' + geoUsages.length + ' geoUsages for face_id=' + faceId + ' pathIds=[' + pathIds.join(',') + ']');
-
   for (var i = 0; i < geoUsages.length; i++) {
     var faces = geoUsages[i].faces || [];
     for (var j = 0; j < faces.length; j++) {
-      if (faces[j].face_id === faceId) {
-        var fPids = faces[j].path_ids || [];
-        var match = arraysEqual(fPids, pathIds);
-        dlog('  candidate: eid=' + geoUsages[i].entity_id + ' face.path_ids=[' + fPids.join(',') + '] match=' + match);
-        if (match) {
-          targetEntityId = geoUsages[i].entity_id;
-          targetUsage = geoUsages[i];
-          break;
-        }
+      if (faces[j].face_id === faceId && arraysEqual(faces[j].path_ids, pathIds)) {
+        targetEntityId = geoUsages[i].entity_id;
+        targetUsage = geoUsages[i];
+        break;
       }
     }
     if (targetEntityId !== null) break;
   }
 
-  if (targetEntityId === null) { dlog('  NO MATCH, returning'); return; }
+  if (targetEntityId === null) return;
 
-  dlog('  MATCHED eid=' + targetEntityId + ' su_mat=' + targetUsage.su_material);
-
+  // 展开从根到目标 entity 路径上的所有祖先节点
   expandAncestorsToEntity(data.hierarchy, targetEntityId);
 
+  // 展开包含该面的材质汇总行（面明细行是材质汇汇总行的子行）
   var matKey = targetEntityId + ':' + targetUsage.su_material;
   _mv.expandedMaterials[matKey] = true;
 
+  // 设置高亮面 key（face_id + 路径）并重绘
   _mv.highlightFaceKey = faceId + ':' + pathIds.join(',');
-  dlog('  set highlightFaceKey=' + _mv.highlightFaceKey + ' rendering...');
   renderPositionView(data);
 
+  // 滚动到高亮行
   requestAnimationFrame(function() {
     var el = document.querySelector('.mv-highlight');
-    dlog('  after render: .mv-highlight count=' + (el ? 1 : 0));
     if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 };
 
 window.clearFaceHighlight = function() {
-  dlog('clearFaceHighlight called');
   delete _mv.highlightFaceKey;
   var els = document.querySelectorAll('.mv-highlight');
   for (var i = 0; i < els.length; i++) {

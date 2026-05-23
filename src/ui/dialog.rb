@@ -320,12 +320,9 @@ module SuTakeoff
     end
 
     def locate_face(json)
-      @dialog.execute_script("dlog('Ruby locate_face entered')")
-      begin
-        data = JSON.parse(json)
-        face_id = data['face_id'].to_i
-        path_ids = data['path_ids'] || []
-        @dialog.execute_script("dlog('Ruby parsed: face_id=#{face_id} path_ids=[#{path_ids.join(',')}]')")
+      data = JSON.parse(json)
+      face_id = data['face_id'].to_i
+      path_ids = data['path_ids'] || []
 
       model = Sketchup.active_model
 
@@ -373,11 +370,6 @@ module SuTakeoff
       model.rendering_options['XRayMode'] = true rescue nil
       model.selection.clear
       model.selection.add(face)
-
-      @dialog.execute_script("dlog('Ruby done')")
-      rescue => e
-        @dialog.execute_script("dlog('Ruby ERROR: #{e.message.gsub("'", "\\\\'")}')")
-      end
     end
 
     def save_highlight_origin(face)
