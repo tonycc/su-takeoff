@@ -15,14 +15,14 @@ module SuTakeoff
       path_ids = (model.active_path || []).map(&:entityID)
 
       @html_dialog.execute_script("window.highlightFaceInUI(#{entity.entityID}, #{JSON.generate(path_ids)})")
-    rescue => e
+    rescue
       # 静默失败，不干扰用户操作
     end
 
     def onSelectionCleared(selection)
       return unless @html_dialog.visible?
       @html_dialog.execute_script("window.clearFaceHighlight()")
-    rescue => e
+    rescue
     end
   end
 

@@ -187,11 +187,9 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
   if (targetEntityId === null) return;
 
   // 展开从根到目标 entity 路径上的所有祖先节点
-  _mv.expandedNodes = _mv.expandedNodes || {};
   expandAncestorsToEntity(data.hierarchy, targetEntityId);
 
   // 展开包含该面的材质汇总行（面明细行是材质汇汇总行的子行）
-  _mv.expandedMaterials = _mv.expandedMaterials || {};
   var matKey = targetEntityId + ':' + targetUsage.su_material;
   _mv.expandedMaterials[matKey] = true;
 
