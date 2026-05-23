@@ -358,8 +358,11 @@ function renderFaceDetailRow(face, usage, depth, tbody) {
   var row = document.createElement('tr');
   row.className = 'mv-face-row';
   row.dataset.faceId = face.face_id;
-  if (_mv.highlightFaceId === face.face_id) {
-    row.classList.add('mv-highlight');
+  if (_mv.highlightFaceKey) {
+    var faceKey = face.face_id + ':' + (face.path_ids || []).join(',');
+    if (_mv.highlightFaceKey === faceKey) {
+      row.classList.add('mv-highlight');
+    }
   }
 
   var tdSeq = document.createElement('td');

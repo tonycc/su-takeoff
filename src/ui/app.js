@@ -195,8 +195,8 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
   var matKey = targetEntityId + ':' + targetUsage.su_material;
   _mv.expandedMaterials[matKey] = true;
 
-  // 设置高亮面 ID 并重绘
-  _mv.highlightFaceId = faceId;
+  // 设置高亮面 key（face_id + 路径）并重绘
+  _mv.highlightFaceKey = faceId + ':' + pathIds.join(',');
   renderPositionView(data);
 
   // 滚动到高亮行
@@ -207,7 +207,7 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
 };
 
 window.clearFaceHighlight = function() {
-  delete _mv.highlightFaceId;
+  delete _mv.highlightFaceKey;
   var els = document.querySelectorAll('.mv-highlight');
   for (var i = 0; i < els.length; i++) {
     els[i].classList.remove('mv-highlight');
