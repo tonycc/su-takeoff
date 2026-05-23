@@ -349,27 +349,15 @@ module SuTakeoff
         return
       end
 
-      # Restore previous highlight
-      restore_highlight_face
-
-      @last_face = face
-      @last_front_mat = face.material
-      @last_back_mat = face.back_material
-
-      # 持久化原始材质名，即使插件重载也能恢复
-      save_highlight_origin(face)
-
-      highlight = model.materials['Takeoff 定位'] || model.materials.add('Takeoff 定位')
-      highlight.color = Sketchup::Color.new(255, 180, 0)
-      face.material = highlight
-      face.back_material = highlight
-
-      # 先推送 UI 高亮（在模型操作之前，确保不受模型异常影响）
+      # 推送 UI 高亮
       @dialog.execute_script("window.highlightFaceInUI(#{face_id}, #{JSON.generate(path_ids)})")
 
-      model.rendering_options['XRayMode'] = true rescue nil
+      # 选中面（蓝色选中态仅在当前编辑上下文可见，不会跨实例）
       model.selection.clear
       model.selection.add(face)
+      model.active_view.zoom(face)
+    rescue => e
+      model.active_view.zoom_extents
     end
 
     def save_highlight_origin(face)
