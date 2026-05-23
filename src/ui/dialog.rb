@@ -367,13 +367,13 @@ module SuTakeoff
       face.material = highlight
       face.back_material = highlight
 
-      model.rendering_options['XRayMode'] = true
+      # 先推送 UI 高亮（在模型操作之前，确保不受模型异常影响）
+      @dialog.execute_script("window.highlightFaceInUI(#{face_id}, #{JSON.generate(path_ids)})")
+
+      model.rendering_options['XRayMode'] = true rescue nil
       model.selection.clear
       model.selection.add(face)
 
-      # 直接推送 UI 高亮（不依赖 SelectionObserver 回传）
-      @dialog.execute_script("dlog('Ruby calling highlightFaceInUI')")
-      @dialog.execute_script("window.highlightFaceInUI(#{face_id}, #{JSON.generate(path_ids)})")
       @dialog.execute_script("dlog('Ruby done')")
       rescue => e
         @dialog.execute_script("dlog('Ruby ERROR: #{e.message.gsub("'", "\\\\'")}')")
