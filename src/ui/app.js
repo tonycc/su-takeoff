@@ -197,6 +197,22 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
   _mv.highlightFaceKey = faceId + ':' + pathIds.join(',');
   renderPositionView(data);
 
+  // DEBUG
+  var debugEl = document.getElementById('hl-debug');
+  if (!debugEl) {
+    debugEl = document.createElement('div');
+    debugEl.id = 'hl-debug';
+    debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:9999;max-height:140px;overflow:auto;font-family:monospace;white-space:pre';
+    document.body.appendChild(debugEl);
+  }
+  var lines = ['highlightFaceKey=' + _mv.highlightFaceKey];
+  var highlighted = document.querySelectorAll('.mv-highlight');
+  for (var k = 0; k < highlighted.length; k++) {
+    var fId = highlighted[k].dataset.faceId;
+    lines.push('  highlighted row: data-face-id=' + fId);
+  }
+  debugEl.textContent = lines.join('\n');
+
   // 滚动到高亮行
   requestAnimationFrame(function() {
     var el = document.querySelector('.mv-highlight');
