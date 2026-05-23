@@ -58,6 +58,15 @@ function renderWorkbench(data) {
     var bar = document.getElementById('summary-bar');
     bar.style.display = 'flex';
     renderSummaryBar(data);
+    // DEBUG panel
+    var dbg = document.getElementById('hl-debug');
+    if (!dbg) {
+      dbg = document.createElement('div');
+      dbg.id = 'hl-debug';
+      dbg.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:9999;max-height:140px;overflow:auto;font-family:monospace;white-space:pre';
+      document.body.appendChild(dbg);
+    }
+    dbg.textContent = 'ready. _mv.highlightFaceKey=' + (_mv.highlightFaceKey || '(none)');
     renderCurrentPage();
   } catch(e) {
     var pageId = 'page-' + (window._currentPage === 'material' ? 'material' : 'position');
@@ -197,21 +206,15 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
   _mv.highlightFaceKey = faceId + ':' + pathIds.join(',');
   renderPositionView(data);
 
-  // DEBUG
-  var debugEl = document.getElementById('hl-debug');
-  if (!debugEl) {
-    debugEl = document.createElement('div');
-    debugEl.id = 'hl-debug';
-    debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:9999;max-height:140px;overflow:auto;font-family:monospace;white-space:pre';
-    document.body.appendChild(debugEl);
+  var dbg = document.getElementById('hl-debug');
+  if (dbg) {
+    var lines = ['highlightFaceInUI called: key=' + _mv.highlightFaceKey + ' pathIds=' + JSON.stringify(pathIds)];
+    var highlighted = document.querySelectorAll('.mv-highlight');
+    for (var k = 0; k < highlighted.length; k++) {
+      lines.push('  HIGHLIGHTED row: data-face-id=' + highlighted[k].dataset.faceId);
+    }
+    dbg.textContent = lines.join('\n');
   }
-  var lines = ['highlightFaceKey=' + _mv.highlightFaceKey];
-  var highlighted = document.querySelectorAll('.mv-highlight');
-  for (var k = 0; k < highlighted.length; k++) {
-    var fId = highlighted[k].dataset.faceId;
-    lines.push('  highlighted row: data-face-id=' + fId);
-  }
-  debugEl.textContent = lines.join('\n');
 
   // 滚动到高亮行
   requestAnimationFrame(function() {
@@ -226,6 +229,8 @@ window.clearFaceHighlight = function() {
   for (var i = 0; i < els.length; i++) {
     els[i].classList.remove('mv-highlight');
   }
+  var dbg = document.getElementById('hl-debug');
+  if (dbg) dbg.textContent = 'clearFaceHighlight called';
 };
 
 // 沿 hierarchy 树查找从根到 targetEid 的路径，展开所有祖先
