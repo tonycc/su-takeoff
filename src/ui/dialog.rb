@@ -367,6 +367,9 @@ module SuTakeoff
       model.rendering_options['XRayMode'] = true
       model.selection.clear
       model.selection.add(face)
+
+      # 直接推送 UI 高亮（不依赖 SelectionObserver 回传）
+      @dialog.execute_script("window.highlightFaceInUI(#{face_id}, #{JSON.generate(path_ids)})")
     end
 
     def save_highlight_origin(face)
