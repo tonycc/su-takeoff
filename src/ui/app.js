@@ -152,8 +152,8 @@ function locateMaterial(suName) {
   callSketchUp('locate_material', suName);
 }
 
-function locateFace(faceId) {
-  callSketchUp('locate_face', String(faceId));
+function locateFace(faceId, pathIds) {
+  callSketchUp('locate_face', JSON.stringify({ face_id: faceId, path_ids: pathIds || [] }));
 }
 
 function locateEntity(entityId) {

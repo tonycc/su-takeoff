@@ -54,7 +54,7 @@ module SuTakeoff
       @dialog.add_action_callback('get_processes') { |_ctx| send_processes }
 
       @dialog.add_action_callback('locate_material') { |_ctx, su_name| locate_material(su_name) }
-      @dialog.add_action_callback('locate_face') { |_ctx, id| locate_face(id.to_i) }
+      @dialog.add_action_callback('locate_face') { |_ctx, json| locate_face(json) }
       @dialog.add_action_callback('locate_entity') { |_ctx, json| locate_entity(json) }
       @dialog.add_action_callback('save_process') { |_ctx, json| save_process(json) }
       @dialog.add_action_callback('delete_process') { |_ctx, json| delete_process(json) }
@@ -319,18 +319,35 @@ module SuTakeoff
       end
     end
 
-    def locate_face(entity_id)
+    def locate_face(json)
+      data = JSON.parse(json)
+      face_id = data['face_id'].to_i
+      path_ids = data['path_ids'] || []
+
       model = Sketchup.active_model
-      tid = entity_id.to_i
-      result = find_face_with_ancestors(model.entities, tid, [])
-      unless result
-        UI.messagebox("未找到面 ##{tid}")
-        return
+
+      # 按 path_ids 导航到正确的组件实例
+      if path_ids.any?
+        ancestors = path_ids.map { |eid| model.find_entity_by_id(eid) }.compact
+        model.active_path = ancestors if ancestors.any?
       end
 
-      face, ancestors = result
+      # 从路径最内层容器开始搜索，而非从模型根
+      search_root = if path_ids.any?
+        inner = model.find_entity_by_id(path_ids.last)
+        if inner&.respond_to?(:definition)
+          inner.definition.entities
+        elsif inner&.respond_to?(:entities)
+          inner.entities
+        end
+      end
+      search_root ||= model.entities
 
-      model.active_path = ancestors if ancestors.any?
+      face = find_face(search_root, face_id)
+      unless face
+        UI.messagebox("未找到面 ##{face_id}")
+        return
+      end
 
       # Restore previous highlight
       restore_highlight_face

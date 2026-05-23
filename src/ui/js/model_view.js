@@ -420,7 +420,7 @@ function renderFaceDetailRow(face, usage, depth, tbody) {
   locateBtn.className = 'mv-locate-btn mv-face-locate';
   locateBtn.textContent = '⌖';
   locateBtn.title = '定位到面';
-  locateBtn.onclick = function() { callSketchUp('locate_face', String(face.face_id)); };
+  locateBtn.onclick = function() { locateFace(face.face_id, face.path_ids || []); };
   tdAct.appendChild(locateBtn);
   row.appendChild(tdAct);
 
