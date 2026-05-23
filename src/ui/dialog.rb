@@ -10,12 +10,11 @@ module SuTakeoff
       entity = selection.first
       return unless entity.is_a?(Sketchup::Face)
 
-      # 确定面所在的组件实例（用于区分同一定义的不同实例）
+      # 获取当前编辑路径（用于区分同名定义在不同实例中的面）
       model = Sketchup.active_model
-      active_path = model.active_path
-      container_id = active_path&.last&.entityID || 0
+      path_ids = (model.active_path || []).map(&:entityID)
 
-      @html_dialog.execute_script("window.highlightFaceInUI(#{entity.entityID}, #{container_id})")
+      @html_dialog.execute_script("window.highlightFaceInUI(#{entity.entityID}, #{JSON.generate(path_ids)})")
     rescue => e
       # 静默失败，不干扰用户操作
     end
@@ -185,6 +184,7 @@ module SuTakeoff
         faces_detail = face_items.map { |i|
           {
             face_id: i.face_id,
+            path_ids: i.component_path_ids,
             width: i.width&.round(2),
             height: i.height&.round(2),
             area: i.qty.round(3),

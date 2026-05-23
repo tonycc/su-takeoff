@@ -161,7 +161,7 @@ function locateEntity(entityId) {
 }
 
 // ---------------- Model → UI face highlight ----------------
-window.highlightFaceInUI = function(faceId, containerEntityId) {
+window.highlightFaceInUI = function(faceId, activePathIds) {
   if (window._currentPage !== 'position') return;
   if (!window._workbench) return;
 
@@ -170,12 +170,12 @@ window.highlightFaceInUI = function(faceId, containerEntityId) {
   var targetEntityId = null;
   var targetUsage = null;
 
-  // 查找包含该 face_id 且 entity_id 匹配容器实例的 geometry_usage
-  var cid = (containerEntityId !== undefined) ? containerEntityId : 0;
+  // 按完整路径匹配面：face_id 相同 + path_ids 相同 = 同一实例中的同一个面
+  var pathIds = activePathIds || [];
   for (var i = 0; i < geoUsages.length; i++) {
     var faces = geoUsages[i].faces || [];
     for (var j = 0; j < faces.length; j++) {
-      if (faces[j].face_id === faceId && geoUsages[i].entity_id === cid) {
+      if (faces[j].face_id === faceId && arraysEqual(faces[j].path_ids, pathIds)) {
         targetEntityId = geoUsages[i].entity_id;
         targetUsage = geoUsages[i];
         break;
@@ -237,4 +237,13 @@ function expandAncestorsToEntity(root, targetEid) {
       _mv.expandedNodes[path[i]] = true;
     }
   }
+}
+
+function arraysEqual(a, b) {
+  if (!a || !b) return (!a || a.length === 0) && (!b || b.length === 0);
+  if (a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
