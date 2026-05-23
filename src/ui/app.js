@@ -172,26 +172,6 @@ window.highlightFaceInUI = function(faceId, containerEntityId) {
 
   // 查找包含该 face_id 且 entity_id 匹配容器实例的 geometry_usage
   var cid = (containerEntityId !== undefined) ? containerEntityId : 0;
-
-  // DEBUG: show received params and matching candidates
-  var debugLines = ['highlightFaceInUI faceId=' + faceId + ' containerId=' + cid];
-  for (var i = 0; i < geoUsages.length; i++) {
-    var faces = geoUsages[i].faces || [];
-    for (var j = 0; j < faces.length; j++) {
-      if (faces[j].face_id === faceId) {
-        debugLines.push('  candidate: entity_id=' + geoUsages[i].entity_id + ' su_mat=' + geoUsages[i].su_material + ' match=' + (geoUsages[i].entity_id === cid));
-      }
-    }
-  }
-  var debugDiv = document.getElementById('highlight-debug');
-  if (!debugDiv) {
-    debugDiv = document.createElement('div');
-    debugDiv.id = 'highlight-debug';
-    debugDiv.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:9999;max-height:120px;overflow:auto;font-family:monospace';
-    document.body.appendChild(debugDiv);
-  }
-  debugDiv.textContent = debugLines.join('\n');
-
   for (var i = 0; i < geoUsages.length; i++) {
     var faces = geoUsages[i].faces || [];
     for (var j = 0; j < faces.length; j++) {
@@ -204,10 +184,7 @@ window.highlightFaceInUI = function(faceId, containerEntityId) {
     if (targetEntityId !== null) break;
   }
 
-  if (targetEntityId === null) {
-    debugDiv.textContent = debugLines.join('\n') + '\nNO MATCH FOUND';
-    return;
-  }
+  if (targetEntityId === null) return;
 
   // 展开从根到目标 entity 路径上的所有祖先节点
   _mv.expandedNodes = _mv.expandedNodes || {};
