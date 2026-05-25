@@ -98,10 +98,5 @@ module SuTakeoff
       })
     end
 
-    def bulk_set_waste_rate(category, rate)
-      @records.each_value do |r|
-        r.default_waste_rate = rate if r.category == category
-      end
-    end
   end
 end

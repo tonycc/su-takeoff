@@ -17,11 +17,6 @@ module SuTakeoff
       assert_equal '密缝铺贴', ps[0].name
     end
 
-    def test_get_default_waste_rate
-      rate = @lib.default_waste_rate('瓷砖')
-      assert_equal 0.05, rate
-    end
-
     def test_process_for_nonexistent_category
       ps = @lib.processes_for('木材')
       assert_empty ps

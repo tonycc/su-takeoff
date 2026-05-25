@@ -440,18 +440,6 @@ module SuTakeoff
       model.active_view.zoom_extents
     end
 
-    def find_face_with_ancestors(entities, target_id, ancestors)
-      entities.each do |e|
-        return [e, ancestors] if e.entityID == target_id
-        next unless e.respond_to?(:definition) || e.respond_to?(:entities)
-
-        children = e.respond_to?(:definition) ? e.definition.entities : e.entities
-        result = find_face_with_ancestors(children, target_id, ancestors + [e])
-        return result if result
-      end
-      nil
-    end
-
     def find_face(entities, target_id)
       entities.each do |e|
         return e if e.entityID == target_id

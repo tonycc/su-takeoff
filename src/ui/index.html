@@ -20,14 +20,14 @@
 
     <div class="sidebar-group">
       <div class="sidebar-label">统计</div>
-      <button class="sb-nav active" data-page="component">按组件</button>
+      <button class="sb-nav active" data-page="position">按组件</button>
       <button class="sb-nav" data-page="material">按材料</button>
-      <button class="sb-nav" data-page="zone">按区域</button>
     </div>
 
     <div class="sidebar-group">
       <div class="sidebar-label">管理</div>
-      <button class="sb-nav" data-page="mapping">映射</button>
+      <button class="sb-nav" data-page="mapping">材料映射</button>
+      <button class="sb-nav" data-page="comp-mapping">组件映射</button>
       <button class="sb-nav" data-page="settings">设置</button>
     </div>
   </nav>
@@ -37,17 +37,17 @@
 
     <div id="summary-bar" class="summary-bar" style="display:none"></div>
 
-    <div id="page-component" class="page-content">
+    <div id="page-position" class="page-content">
       <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
     </div>
     <div id="page-material" class="page-content" style="display:none">
       <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
     </div>
-    <div id="page-zone" class="page-content" style="display:none">
-      <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
-    </div>
     <div id="page-mapping" class="page-content" style="display:none">
       <div id="mapping-content"></div>
+    </div>
+    <div id="page-comp-mapping" class="page-content" style="display:none">
+      <div id="comp-mapping-content"></div>
     </div>
     <div id="page-settings" class="page-content" style="display:none">
       <div id="settings-content"></div>
@@ -89,8 +89,9 @@
 </template>
 
 <script src="app.js"></script>
-<script src="js/views.js"></script>
+<script src="js/model_view.js"></script>
 <script src="js/mapping.js"></script>
+<script src="js/comp_mapping.js"></script>
 <script src="js/settings.js"></script>
 </body>
 </html>

@@ -63,14 +63,5 @@ module SuTakeoff
       assert_equal 'A', mapping2.get('a').material_name
     end
 
-    def test_bulk_set_waste_rate_by_category
-      @mapping.add('a', 'A', '瓷砖', 'm²', '', 0.05)
-      @mapping.add('b', 'B', '瓷砖', 'm²', '', 0.08)
-      @mapping.add('c', 'C', '石材', 'm²', '', 0.10)
-      @mapping.bulk_set_waste_rate('瓷砖', 0.06)
-      assert_equal 0.06, @mapping.get('a').default_waste_rate
-      assert_equal 0.06, @mapping.get('b').default_waste_rate
-      assert_equal 0.10, @mapping.get('c').default_waste_rate
-    end
   end
 end

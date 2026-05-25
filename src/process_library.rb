@@ -24,11 +24,6 @@ module SuTakeoff
       @processes.select { |p| p.category == category }
     end
 
-    def default_waste_rate(category)
-      first = @processes.find { |p| p.category == category }
-      first&.waste_rate || 0.05
-    end
-
     def all_categories
       @processes.map(&:category).uniq
     end

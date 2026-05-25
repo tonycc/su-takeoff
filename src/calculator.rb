@@ -5,9 +5,15 @@ module SuTakeoff
     SLAB_AREA_TOLERANCE = 0.02      # 2% area diff
     SLAB_Z_TOLERANCE_M = 0.15       # 15 cm thickness max
 
-    def initialize(mapping, process_library)
+    # Fallback constants used when config.json is unavailable (e.g. tests).
+    # In production, unit classification comes from config.json.
+    FALLBACK_LENGTH_UNITS = %w[m mm cm dm km].freeze
+    FALLBACK_COUNT_UNITS = %w[个 件 套 组 台 只].freeze
+
+    def initialize(mapping, process_library, component_mapping = nil)
       @mapping = mapping
       @processes = process_library
+      @component_mapping = component_mapping
     end
 
     # Returns Array of MaterialUsage
@@ -31,17 +37,12 @@ module SuTakeoff
 
       # 2. Group items by (space, part, su_material_name, unit)
       groups = Hash.new { |h, k| h[k] = [] }
-      skipped_unmapped = []
-      skipped_nil_mat = []
 
       items.each do |item|
-        unless @mapping.get(item.su_material)
-          if item.su_material.nil?
-            skipped_nil_mat << item
-          else
-            skipped_unmapped << item
-          end
-          next
+        if item.kind == :instance
+          next unless component_mapping.get(item.su_material)
+        else
+          next unless @mapping.get(item.su_material)
         end
 
         part = self.class.face_orientation(item.normal)
@@ -53,11 +54,28 @@ module SuTakeoff
 
       # 3. Build MaterialUsage for each group (fan-out via derivations)
       usages = groups.flat_map do |(space, part, su_mat, item_unit), grp_items|
-        record = @mapping.get(su_mat)
-        # When mapping unit is 'm' (linear), sum face heights (longest edge)
-        # instead of areas; skip opening deduction (line items have no openings).
-        is_linear = record.unit == 'm'
-        if is_linear
+        first_item = grp_items.first
+        is_instance = first_item&.kind == :instance
+
+        record = if is_instance
+          component_mapping.get(su_mat)
+        else
+          @mapping.get(su_mat)
+        end
+
+        is_count = is_instance || count_units.include?(record.unit)
+        is_linear = !is_count && length_units.include?(record.unit)
+        unit = is_linear ? 'm' : record.unit
+
+        if is_count
+          gross = grp_items.sum { |it| it.qty.to_f }.round(0)
+          total_deduction = 0.0
+          net_area = gross
+          faces_detail = grp_items.map { |it|
+            { face_id: it.face_id, count: it.qty,
+              component_path: it.component_path }
+          }
+        elsif is_linear
           gross = grp_items.sum { |it| (it.height || 0).to_f }.round(3)
           total_deduction = 0.0
           net_area = gross
@@ -97,12 +115,13 @@ module SuTakeoff
         end
 
         waste_rate = record.default_waste_rate
-        detail = {
-          gross: gross.round(3),
-          deduction: total_deduction.round(3),
-          face_count: grp_items.size,
-          faces: faces_detail
-        }
+        detail = if is_count
+          { gross: gross, deduction: 0, instance_count: grp_items.size,
+            instances: faces_detail }
+        else
+          { gross: gross.round(3), deduction: total_deduction.round(3),
+            face_count: grp_items.size, faces: faces_detail }
+        end
 
         # Always create the primary usage (represents the main material)
         primary = MaterialUsage.new(
@@ -110,7 +129,7 @@ module SuTakeoff
           material_name: record.material_name,
           category: record.category,
           spec: record.spec,
-          net_area: net_area.round(4),
+          net_area: net_area.round(is_count ? 0 : 4),
           waste_rate: process&.waste_rate || waste_rate,
           su_material_name: su_mat,
           unit: record.unit || item_unit,
@@ -136,9 +155,9 @@ module SuTakeoff
               unit: deriv.unit,
               detail: {
                 formula: deriv.formula,
-                base_value: net_area.round(3),
-                base_unit: is_linear ? 'm' : 'm²',
-                face_count: grp_items.size
+                base_value: net_area.round(is_count ? 0 : 3),
+                base_unit: is_count ? record.unit : (is_linear ? 'm' : 'm²'),
+                instance_count: grp_items.size
               }
             )
             derived.items = grp_items
@@ -146,6 +165,128 @@ module SuTakeoff
           end
         end
         usages
+      end
+
+      usages
+    end
+
+    # 几何用量计算：含洞口扣减、薄板去重、面/线材识别，不含损耗率与工艺做法
+    # 不接受 process_overrides 参数，内部不使用 @processes
+    # 与 compute 的关键差异：面 item 不要求映射，未映射材质也产出记录
+    def compute_geometry_only(items, openings)
+      items = dedup_thin_slabs(items)
+
+      opening_area_by_face = {}
+      openings_by_face = Hash.new { |h, k| h[k] = [] }
+      openings.each do |op|
+        op.host_face_ids.each do |fid|
+          opening_area_by_face[fid] ||= 0.0
+          opening_area_by_face[fid] += op.area
+          openings_by_face[fid] << { entity_id: op.entity_id, area: op.area.round(3) }
+        end
+      end
+
+      groups = Hash.new { |h, k| h[k] = [] }
+
+      items.each do |item|
+        # instance 仍需 component_mapping（整件语义），未映射跳过
+        if item.kind == :instance
+          unless component_mapping.get(item.su_material)
+            next
+          end
+        end
+        # nil su_material 无意义，跳过
+        next if item.su_material.nil?
+
+        part = self.class.face_orientation(item.normal)
+        space = self.class.extract_space(item)
+        key = [space, part, item.su_material]
+        groups[key] << item
+      end
+
+      usages = groups.map do |(space, part, su_mat), grp_items|
+        first_item = grp_items.first
+        is_instance = first_item&.kind == :instance
+
+        record = if is_instance
+          component_mapping.get(su_mat)
+        else
+          @mapping.get(su_mat)
+        end
+
+        # 未映射面 item：回退判定计量类型
+        if record
+          is_count = is_instance || count_units.include?(record.unit)
+          is_linear = !is_count && length_units.include?(record.unit)
+          unit = is_linear ? 'm' : record.unit
+        else
+          # 按面长宽比判定线材
+          linear_ratio = grp_items.count { |it|
+            it.kind == :face && it.width && it.width > 0 && it.height && (it.height / it.width) > 15
+          }.to_f / grp_items.size
+          is_linear = linear_ratio > 0.5
+          is_count = false
+          unit = is_linear ? 'm' : 'm²'
+        end
+
+        if is_count
+          gross = grp_items.sum { |it| it.qty.to_f }.round(0)
+          net_area = gross
+          faces_detail = grp_items.map { |it|
+            { face_id: it.face_id, count: it.qty,
+              component_path: it.component_path }
+          }
+        elsif is_linear
+          gross = grp_items.sum { |it| (it.height || 0).to_f }.round(3)
+          net_area = gross
+          faces_detail = grp_items.map { |it|
+            { face_id: it.face_id, width: (it.width || 0).round(2),
+              height: (it.height || 0).round(2),
+              area: it.qty.round(3), length: (it.height || 0).round(3),
+              part: Calculator.face_orientation(it.normal),
+              component_path: it.component_path }
+          }
+        else
+          gross = grp_items.sum(&:qty).round(3)
+          total_deduction = grp_items.sum { |it| opening_area_by_face[it.face_id] || 0.0 }.round(3)
+          net_area = grp_items.sum { |it|
+            deduction = opening_area_by_face[it.face_id] || 0.0
+            [it.qty - deduction, 0.0].max
+          }
+          faces_detail = grp_items.map { |it|
+            d = (opening_area_by_face[it.face_id] || 0.0).round(3)
+            ops = openings_by_face[it.face_id] || []
+            { face_id: it.face_id, width: (it.width || 0).round(2),
+              height: (it.height || 0).round(2),
+              area: it.qty.round(3), deduction: d, net: (it.qty - d).round(3),
+              part: Calculator.face_orientation(it.normal),
+              component_path: it.component_path,
+              openings: ops }
+          }
+        end
+
+        # 不查找工艺，waste_rate = 0
+        detail = if is_count
+          { gross: gross, deduction: 0, instance_count: grp_items.size,
+            instances: faces_detail }
+        else
+          { gross: gross.round(3), deduction: total_deduction&.round(3) || 0,
+            face_count: grp_items.size, faces: faces_detail }
+        end
+
+        primary = MaterialUsage.new(
+          space: space, part: part,
+          material_name: record&.material_name || '',
+          category: record&.category || '',
+          spec: record&.spec || '',
+          net_area: net_area.round(is_count ? 0 : 4),
+          waste_rate: 0,
+          su_material_name: su_mat,
+          unit: unit,
+          detail: detail
+        )
+        primary.items = grp_items
+        primary
       end
 
       usages
@@ -172,6 +313,7 @@ module SuTakeoff
     end
 
     def self.face_orientation(normal)
+      return 'object' if normal.nil? || normal[2].nil?
       z = normal[2].abs
       if z > 0.866  # ~30° from vertical
         normal[2] > 0 ? 'floor' : 'ceiling'
@@ -190,13 +332,22 @@ module SuTakeoff
 
     private
 
-    def eval_formula(formula, net_area, item = nil)
-      vars = { area: net_area }
-      if item
-        vars[:length] = item.qty if item.kind == :edge
-        vars[:count] = item.qty if item.kind == :instance
-      end
-      Formula.eval(formula, vars)
+    def length_units
+      cfg = PluginState.instance.config rescue {}
+      cfg['length_units'] || FALLBACK_LENGTH_UNITS
+    end
+
+    def count_units
+      cfg = PluginState.instance.config rescue {}
+      cfg['count_units'] || FALLBACK_COUNT_UNITS
+    end
+
+    def component_mapping
+      @component_mapping || PluginState.instance.component_mapping
+    end
+
+    def eval_formula(formula, net_area)
+      Formula.eval(formula, { area: net_area })
     end
 
     # Remove the "back side" of thin horizontal slabs.
@@ -233,8 +384,8 @@ module SuTakeoff
         mid = space_z_mid[space]
         next unless mid
 
-        ups = group.select { |it| it.normal[2] > 0.866 }
-        downs = group.select { |it| it.normal[2] < -0.866 }
+        ups = group.select { |it| it.normal && it.normal[2] && it.normal[2] > 0.866 }
+        downs = group.select { |it| it.normal && it.normal[2] && it.normal[2] < -0.866 }
         matched_down = {}
 
         next if ups.empty? || downs.empty?

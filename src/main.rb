@@ -6,15 +6,19 @@ module SuTakeoff
   class PluginState
     include Singleton
 
-    attr_reader :mapping, :processes, :ignored, :config
+    attr_reader :mapping, :component_mapping, :processes, :ignored, :config
 
     DICT_NAME = 'su_takeoff_data'
 
     def initialize
       @mapping = MaterialMapping.new
       @processes = ProcessLibrary.new
+      @component_mapping = ComponentMapping.new
       @ignored = []
-      @config = { 'categories' => [], 'units' => [] }
+      @config = { 'material_category_units' => [], 'component_category_units' => [],
+                  'units' => [],
+                  'length_units' => %w[m mm cm dm km],
+                  'count_units' => %w[个 件 套 组 台 只] }
       load_data
     end
 
@@ -43,6 +47,10 @@ module SuTakeoff
       File.join(PLUGIN_DIR, 'data', 'default_processes.json')
     end
 
+    def self.component_mapping_path
+      File.join(PLUGIN_DIR, 'data', 'default_component_mapping.json')
+    end
+
     def self.ignored_path
       File.join(PLUGIN_DIR, 'data', 'ignored_materials.json')
     end
@@ -51,8 +59,13 @@ module SuTakeoff
       File.join(PLUGIN_DIR, 'data', 'config.json')
     end
 
-    def save_config(category_units, units)
-      @config = { 'category_units' => category_units, 'units' => units }
+    def save_config(material_category_units, component_category_units, units, length_units = nil, count_units = nil)
+      length_units ||= @config['length_units'] || %w[m mm cm dm km]
+      count_units ||= @config['count_units'] || %w[个 件 套 组 台 只]
+      @config = { 'material_category_units' => material_category_units,
+                  'component_category_units' => component_category_units,
+                  'units' => units,
+                  'length_units' => length_units, 'count_units' => count_units }
       path = self.class.config_path
       File.write(path, JSON.pretty_generate(@config))
     end
@@ -75,6 +88,12 @@ module SuTakeoff
         @processes.load_json(self.class.processes_path)
       end
 
+      if model_dict[:component_mapping]
+        @component_mapping.load_json_string(model_dict[:component_mapping])
+      else
+        @component_mapping.load_json(self.class.component_mapping_path)
+      end
+
       if model_dict[:ignored]
         @ignored = JSON.parse(model_dict[:ignored])
       elsif File.exist?(self.class.ignored_path)
@@ -83,39 +102,13 @@ module SuTakeoff
 
       if File.exist?(self.class.config_path)
         @config = JSON.parse(File.read(self.class.config_path))
+        # Migrate old single category_units to material_category_units
+        if @config['category_units'] && !@config['material_category_units']
+          @config['material_category_units'] = @config['category_units']
+        end
+        @config['material_category_units'] ||= []
+        @config['component_category_units'] ||= []
       end
-    end
-
-    def snapshot_to_model
-      model = Sketchup.active_model
-      dict = model.attribute_dictionary(DICT_NAME, true)
-      dict['mapping'] = @mapping.save_json_string
-      dict['processes'] = @processes.save_json_string
-      dict['ignored'] = JSON.generate(@ignored)
-    end
-
-    def load_from_model_dialog
-      model_dict = load_from_model_dict
-      if model_dict.empty?
-        UI.messagebox('当前模型中未存储规则数据')
-        return false
-      end
-
-      if model_dict[:mapping]
-        @mapping.load_json_string(model_dict[:mapping])
-      end
-      if model_dict[:processes]
-        @processes.load_json_string(model_dict[:processes])
-      end
-      if model_dict[:ignored]
-        @ignored = JSON.parse(model_dict[:ignored])
-      end
-
-      # Also save to local JSON files so they persist beyond this model
-      @mapping.save_json(self.class.mapping_path)
-      @processes.save_json(self.class.processes_path)
-      save_ignored
-      true
     end
 
     def save_ignored
@@ -130,6 +123,7 @@ module SuTakeoff
       result = {}
       result[:mapping] = dict['mapping'] if dict['mapping']
       result[:processes] = dict['processes'] if dict['processes']
+      result[:component_mapping] = dict['component_mapping'] if dict['component_mapping']
       result[:ignored] = dict['ignored'] if dict['ignored']
       result
     end
@@ -145,6 +139,7 @@ module SuTakeoff
       # Reset singleton so PluginState picks up fresh data
       PluginState.instance.instance_variable_set(:@mapping, MaterialMapping.new)
       PluginState.instance.instance_variable_set(:@processes, ProcessLibrary.new)
+      PluginState.instance.instance_variable_set(:@component_mapping, ComponentMapping.new)
       PluginState.instance.instance_variable_set(:@ignored, [])
       PluginState.instance.send(:load_data)
       UI.messagebox("SU Takeoff 插件已重新加载")

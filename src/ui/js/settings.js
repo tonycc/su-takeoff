@@ -6,49 +6,54 @@ function renderProcesses(data) {
   if (!container) return;
 
   var html = '';
-  html += '<div class="settings-card">' + renderCategoryUnitConfig(data.category_units || []) + '</div>';
+  html += '<div class="settings-card">' + renderCategoryUnitConfig('材料分类', 'material_category_units', data.material_category_units || data.category_units || []) + '</div>';
+  html += '<div class="settings-card">' + renderCategoryUnitConfig('组件分类', 'component_category_units', data.component_category_units || []) + '</div>';
   html += '<div class="settings-card">' + renderUnitTagConfig(data.config_units || []) + '</div>';
+  html += '<div class="settings-card">' + renderUnitClassConfig('长度单位', 'length_units', data.length_units || [], 'length') + '</div>';
+  html += '<div class="settings-card">' + renderUnitClassConfig('件数单位', 'count_units', data.count_units || [], 'count') + '</div>';
   html += '<div class="settings-card">' + renderProcessSection(data.processes || []) + '</div>';
   html += '<div class="settings-card">' + renderIgnoredSection(data.ignored || []) + '</div>';
   container.innerHTML = html;
 }
 
 // ---------------- Category-unit config ----------------
-function renderCategoryUnitConfig(categoryUnits) {
+function renderCategoryUnitConfig(title, key, categoryUnits) {
   var cfgUnits = (window._processData && window._processData.config_units) || [];
   var unitOptions = cfgUnits.map(function(u) {
     return '<option value="' + esc(u) + '">' + esc(u) + '</option>';
   }).join('');
 
-  var html = '<div class="sc-head">分类与默认单位</div>';
+  var html = '<div class="sc-head">' + title + '</div>';
   html += '<div class="sc-body">';
-  html += '<div class="cu-grid">';
+  html += '<div class="cu-grid" id="cu-grid-' + key + '">';
   categoryUnits.forEach(function(cu) {
     html += '<div class="cu-card">' +
       '<span class="cu-card-name">' + esc(cu.category) + '</span>' +
       '<span class="cu-card-unit">' + esc(cu.unit) + '</span>' +
-      '<button onclick="removeCategoryUnit(this)" class="cu-card-del">×</button>' +
+      '<button onclick="removeCategoryUnit(this, \'' + key + '\')" class="cu-card-del">×</button>' +
       '</div>';
   });
   html += '</div>';
   html += '<div class="cu-add-row">' +
-    '<input type="text" class="cu-new-cat" placeholder="分类名">' +
-    '<select class="cu-new-unit">' + unitOptions + '</select>' +
-    '<button onclick="addCategoryUnit()" class="primary-btn">添加</button>' +
+    '<input type="text" class="cu-new-cat-' + key + '" placeholder="分类名">' +
+    '<select class="cu-new-unit-' + key + '">' + unitOptions + '</select>' +
+    '<button onclick="addCategoryUnit(\'' + key + '\')" class="primary-btn">添加</button>' +
     '</div>';
   html += '</div>';
   return html;
 }
 
-function addCategoryUnit() {
-  var catInput = document.querySelector('.cu-new-cat');
-  var unitSelect = document.querySelector('.cu-new-unit');
+function addCategoryUnit(key) {
+  var catInput = document.querySelector('.cu-new-cat-' + key);
+  var unitSelect = document.querySelector('.cu-new-unit-' + key);
   var cat = catInput.value.trim();
   var unit = unitSelect.value;
   if (!cat) return;
 
   var data = window._processData;
-  data.category_units.push({ category: cat, unit: unit });
+  var list = data[key] || [];
+  list.push({ category: cat, unit: unit });
+  data[key] = list;
   persistConfig();
 
   var card = document.createElement('div');
@@ -56,10 +61,62 @@ function addCategoryUnit() {
   card.innerHTML =
     '<span class="cu-card-name">' + esc(cat) + '</span>' +
     '<span class="cu-card-unit">' + esc(unit) + '</span>' +
-    '<button onclick="removeCategoryUnit(this)" class="cu-card-del">×</button>';
-  document.querySelector('.cu-grid').appendChild(card);
+    '<button onclick="removeCategoryUnit(this, \'' + key + '\')" class="cu-card-del">×</button>';
+  document.getElementById('cu-grid-' + key).appendChild(card);
   catInput.value = '';
   unitSelect.selectedIndex = 0;
+}
+
+// ---------------- Unit classification config ----------------
+function renderUnitClassConfig(title, key, items, typeName) {
+  var cfg = window._processData || {};
+  var allUnits = cfg.config_units || [];
+
+  var html = '<div class="sc-head">' + title + ' <span style="font-weight:normal;font-size:11px;color:#6c7086">（' + typeName + '）</span></div>';
+  html += '<div class="sc-body">';
+  html += '<div class="tag-list" id="' + key + '-list">';
+  items.forEach(function(u) {
+    html += '<span class="tag-chip">' + esc(u) +
+      '<button onclick="removeUnitClass(\'' + key + '\', \'' + escAttr(u) + '\')" class="tag-chip-del">×</button></span>';
+  });
+  html += '</div>';
+  html += '<div class="cu-add-row" style="margin-top:8px">' +
+    '<select id="' + key + '-select" style="width:120px">' +
+      '<option value="">选择单位...</option>' +
+      allUnits.map(function(u) { return '<option value="' + esc(u) + '">' + esc(u) + '</option>'; }).join('') +
+    '</select>' +
+    '<button onclick="addUnitClass(\'' + key + '\')" class="primary-btn">添加</button>' +
+    '</div>';
+  html += '</div>';
+  return html;
+}
+
+function addUnitClass(key) {
+  var sel = document.getElementById(key + '-select');
+  var val = sel.value;
+  if (!val) return;
+  var data = window._processData;
+  var list = data[key] || [];
+  if (list.indexOf(val) >= 0) return;
+  list.push(val);
+  data[key] = list;
+  persistConfig();
+  var chip = document.createElement('span');
+  chip.className = 'tag-chip';
+  chip.innerHTML = esc(val) + ' <button onclick="removeUnitClass(\'' + key + '\', \'' + escAttr(val) + '\')" class="tag-chip-del">×</button>';
+  document.getElementById(key + '-list').appendChild(chip);
+  sel.selectedIndex = 0;
+}
+
+function removeUnitClass(key, val) {
+  var data = window._processData;
+  var list = data[key] || [];
+  var idx = list.indexOf(val);
+  if (idx >= 0) list.splice(idx, 1);
+  persistConfig();
+  document.querySelectorAll('#' + key + '-list .tag-chip').forEach(function(chip) {
+    if (chip.textContent.indexOf(val) >= 0) chip.remove();
+  });
 }
 
 // ---------------- Unit tag config ----------------
@@ -103,11 +160,11 @@ function removeUnitTag(btn, val) {
   btn.parentElement.remove();
 }
 
-function removeCategoryUnit(btn) {
+function removeCategoryUnit(btn, key) {
   var card = btn.closest('.cu-card');
   var cat = card.querySelector('.cu-card-name').textContent;
   var data = window._processData;
-  data.category_units = data.category_units.filter(function(cu) { return cu.category !== cat; });
+  data[key] = (data[key] || []).filter(function(cu) { return cu.category !== cat; });
   persistConfig();
   card.remove();
 }
@@ -115,8 +172,11 @@ function removeCategoryUnit(btn) {
 function persistConfig() {
   var data = window._processData;
   callSketchUp('save_config', JSON.stringify({
-    category_units: data.category_units || [],
-    units: data.config_units || []
+    material_category_units: data.material_category_units || [],
+    component_category_units: data.component_category_units || [],
+    units: data.config_units || [],
+    length_units: data.length_units || [],
+    count_units: data.count_units || []
   }));
 }
 
@@ -130,7 +190,7 @@ function renderProcessSection(processList) {
   });
 
   var cfg = (window._processData) || {};
-  var cu = cfg.category_units || [];
+  var cu = cfg.material_category_units || cfg.category_units || [];
   var categories = cu.map(function(x) { return x.category; });
   var catOptions = categories.map(function(c) {
     return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
@@ -192,7 +252,7 @@ function renderProcessSection(processList) {
           '<td><input type="text" class="u-dlayer" value="' + esc(der.layer || '') + '" placeholder="如: 抹灰找平层"></td>' +
           '<td><input type="text" class="u-dformula" value="' + esc(der.formula || 'area') + '" style="width:100px"></td>' +
           '<td><select class="u-dunit">' +
-            ['m²','m','m³','个','kg','桶'].map(function(u) {
+            ((cfg.config_units && cfg.config_units.length > 0) ? cfg.config_units : ['m²','m','个']).map(function(u) {
               var s = u === (der.unit || 'm²') ? ' selected' : '';
               return '<option value="' + u + '"' + s + '>' + u + '</option>';
             }).join('') +
@@ -231,7 +291,7 @@ function addDerivRow(btn) {
   var tbody = btn.parentElement.querySelector('.deriv-tbody');
   if (!tbody) return;
   var cfg = (window._processData) || {};
-  var cu = cfg.category_units || [];
+  var cu = cfg.material_category_units || cfg.category_units || [];
   var cats = cu.map(function(x) { return x.category; });
   var derivCatOptions = cats.map(function(c) {
     return '<option value="' + esc(c) + '">' + esc(c) + '</option>';

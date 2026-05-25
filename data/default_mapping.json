@@ -1,14 +1,42 @@
 {
-  "Metal_06_1K": {
-    "material_name": "钢丝网",
-    "category": "金属",
+  "Material #23123272322332332": {
+    "material_name": "木地板",
+    "category": "木材",
     "unit": "m²",
     "spec": "",
     "default_waste_rate": 0.05
   },
-  "paint_white": {
-    "material_name": "乳胶漆",
+  "Material #172": {
+    "material_name": "多乐士涂料",
     "category": "涂料",
+    "unit": "m²",
+    "spec": "",
+    "default_waste_rate": 0.05
+  },
+  "Material #23-2147483630": {
+    "material_name": "橡胶软垫",
+    "category": "涂料",
+    "unit": "m²",
+    "spec": "",
+    "default_waste_rate": 0.05
+  },
+  "Material23 #17232332": {
+    "material_name": "踢脚线",
+    "category": "长度测试",
+    "unit": "mm",
+    "spec": "",
+    "default_waste_rate": 0.05
+  },
+  "24322323": {
+    "material_name": "墙纸",
+    "category": "墙纸",
+    "unit": "m²",
+    "spec": "",
+    "default_waste_rate": 0.05
+  },
+  "Metal_10_1K": {
+    "material_name": "长度条",
+    "category": "墙纸",
     "unit": "m²",
     "spec": "",
     "default_waste_rate": 0.05

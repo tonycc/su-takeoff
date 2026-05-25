@@ -12,6 +12,7 @@ module SuTakeoff
     def initialize
       @model = Sketchup.active_model
       @material_colors = {}
+      @component_mapping = PluginState.instance.component_mapping
     end
 
     # Scan entire model or selected faces
@@ -36,7 +37,9 @@ module SuTakeoff
       # ---- 洞口-母面关联 ----
       associate_openings_to_hosts(items, openings, @pending_opening_info)
 
-      { items: items, openings: openings }
+      hierarchy = collect_hierarchy(entities)
+
+      { items: items, openings: openings, hierarchy: hierarchy }
     end
 
     private
@@ -114,15 +117,41 @@ module SuTakeoff
         )
 
       when Sketchup::ComponentInstance
+        if entity.hidden? || !entity.visible? || (entity.layer && !entity.layer.visible?)
+          return
+        end
+        # Check component mapping before recursing into children
+        def_name = entity.definition.name
+        cm_record = @component_mapping.get(def_name)
+        if cm_record && cm_record.counting_method == 'aggregate' && def_name && !def_name.empty?
+          comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+          comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+          items << ScanItem.new(
+            entity.entityID,
+            def_name,
+            1,
+            cm_record.unit || '个',
+            :instance,
+            nil,
+            0,
+            0,
+            entity.layer.name,
+            comp_path,
+            comp_path_ids,
+            0
+          )
+          return
+        end
+
         new_path = path + [entity]
         new_transform = transform * entity.transformation
+        # 每个组件实例使用独立的 face_set，避免共享定义导致面被去重
+        inst_face_set = Set.new
         entity.definition.entities.each do |child|
-          collect_faces(child, new_path, new_transform, face_set, items, openings, opening_face_ids)
+          collect_faces(child, new_path, new_transform, inst_face_set, items, openings, opening_face_ids)
         end
 
         if opening_name?(entity.definition.name)
-          op_count = 0
-          op_area = 0.0
           parent_comp_path = new_path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
           entity.definition.entities.each do |child|
             if child.is_a?(Sketchup::Face) && !opening_face_ids.include?(child.entityID)
@@ -130,8 +159,6 @@ module SuTakeoff
               child_normal = child.normal.transform(new_transform)
               child_normal.normalize! if child_normal.length > 0
               child_z_center = child.bounds.center.transform(new_transform).z * 0.0254
-              op_area += a
-              op_count += 1
               openings << Opening.new(child.entityID, a, [])
               @pending_opening_info << {
                 index: openings.size - 1,
@@ -146,6 +173,31 @@ module SuTakeoff
         end
 
       when Sketchup::Group
+        if entity.hidden? || !entity.visible? || (entity.layer && !entity.layer.visible?)
+          return
+        end
+        def_name = entity.name
+        cm_record = @component_mapping.get(def_name)
+        if cm_record && cm_record.counting_method == 'aggregate' && def_name && !def_name.empty?
+          comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+          comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+          items << ScanItem.new(
+            entity.entityID,
+            def_name,
+            1,
+            cm_record.unit || '个',
+            :instance,
+            nil,
+            0,
+            0,
+            entity.layer.name,
+            comp_path,
+            comp_path_ids,
+            0
+          )
+          return
+        end
+
         new_path = path + [entity]
         new_transform = transform * entity.transformation
         entity.entities.each do |child|
@@ -153,8 +205,6 @@ module SuTakeoff
         end
 
         if opening_name?(entity.name)
-          op_count = 0
-          op_area = 0.0
           parent_comp_path = new_path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
           entity.entities.each do |child|
             if child.is_a?(Sketchup::Face) && !opening_face_ids.include?(child.entityID)
@@ -162,8 +212,6 @@ module SuTakeoff
               child_normal = child.normal.transform(new_transform)
               child_normal.normalize! if child_normal.length > 0
               child_z_center = child.bounds.center.transform(new_transform).z * 0.0254
-              op_area += a
-              op_count += 1
               openings << Opening.new(child.entityID, a, [])
               @pending_opening_info << {
                 index: openings.size - 1,
@@ -208,6 +256,8 @@ module SuTakeoff
         parent_path = op_path[0..-2]
 
         candidates = items.select do |item|
+          # instance 项无法向量，不可能是洞口的母面
+          next if item.normal.nil?
           # 法向量平行判定
           dot = (op_normal[0] * item.normal[0] +
                  op_normal[1] * item.normal[1] +
@@ -224,6 +274,57 @@ module SuTakeoff
         end
       end
 
+    end
+
+    # 模型层级骨架：单根树，根节点 entity_id=0 承载根级面
+    def collect_hierarchy(entities)
+      children = collect_hierarchy_children(entities)
+      {
+        name: '(模型根)',
+        entity_id: 0,
+        kind: 'root',
+        definition_name: nil,
+        depth: 0,
+        hidden: false,
+        children: children
+      }
+    end
+
+    private
+
+    def collect_hierarchy_children(entities, depth = 1)
+      nodes = []
+      entities.each do |e|
+        case e
+        when Sketchup::ComponentInstance
+          def_name = e.definition.name rescue e.name
+          is_hidden = e.hidden? || !e.visible? || (e.layer && !e.layer.visible?)
+          children = collect_hierarchy_children(e.definition.entities, depth + 1)
+          node_name = (!e.name.nil? && !e.name.empty?) ? e.name : def_name
+          nodes << {
+            name: node_name,
+            entity_id: e.entityID,
+            kind: 'component_instance',
+            definition_name: def_name,
+            depth: depth,
+            hidden: is_hidden,
+            children: children
+          }
+        when Sketchup::Group
+          is_hidden = e.hidden? || !e.visible? || (e.layer && !e.layer.visible?)
+          children = collect_hierarchy_children(e.entities, depth + 1)
+          nodes << {
+            name: (!e.name.nil? && !e.name.empty?) ? e.name : '(未命名群组)',
+            entity_id: e.entityID,
+            kind: 'group',
+            definition_name: nil,
+            depth: depth,
+            hidden: is_hidden,
+            children: children
+          }
+        end
+      end
+      nodes
     end
   end
 end
