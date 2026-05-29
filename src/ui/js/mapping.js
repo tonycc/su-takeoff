@@ -41,7 +41,7 @@ function renderSimpleMappingTable(mappings) {
   var cfg = (window._processData) || {};
   var cu = cfg.category_units || [];
   var cats = cu.length > 0 ? cu.map(function(x) { return x.category; }) : DEFAULT_CATEGORIES;
-  var units = (cfg.config_units && cfg.config_units.length > 0) ? cfg.config_units : ['m²', 'm', '个'];
+  var units = (cfg.config_units && cfg.config_units.length > 0) ? cfg.config_units : ['m²', 'm', 'm³', '个'];
   var partLabels = { floor: '地', wall: '墙', ceiling: '顶' };
 
   var infoMap = {};

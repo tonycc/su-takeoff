@@ -2,7 +2,7 @@ module SuTakeoff
   class FormulaError < StandardError; end
 
   class Formula
-    ALLOWED_VARS = %w[area perimeter count length unit_area].freeze
+    ALLOWED_VARS = %w[area perimeter count length volume unit_area].freeze
 
     def self.eval(expr, vars)
       raise FormulaError, "Empty expression" if expr.nil? || expr.strip.empty?

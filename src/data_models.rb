@@ -1,18 +1,42 @@
 module SuTakeoff
-  # Result of scanning one face, edge, or instance
+  # Result of scanning one face, edge, or instance.
+  #
+  # 历史字段（前 12 个）保持位置不变，老调用 ScanItem.new(face_id, su_material, qty,
+  # unit, kind, normal, width, height, layer_name, component_path,
+  # component_path_ids, z_center) 仍然有效，新增字段默认为 nil。
+  #
+  # 新字段说明（P1 仅扩展数据载体，未引入语义变化）：
+  #   qty_area / qty_length / qty_volume / qty_count
+  #     按量纲拆分的几何量，由 Scanner 同时填充。Calculator 优先使用这些字段，
+  #     回退到 qty 兼容旧调用。
+  #   depth   solid bbox 第三维（P3 体积场景启用）
+  #   tags    AttributeDictionary 读出的覆盖标签 { method:, material: }
+  #   resolved_method / source
+  #     Policy 决议结果占位（P2 启用）
   ScanItem = Struct.new(
-    :face_id,       # SU entity_id
-    :su_material,   # SU material name (string) or nil
-    :qty,           # Float quantity (m²/m/个 depending on unit)
-    :unit,          # 'm2' / 'm' / '个'
-    :kind,          # :face / :edge / :instance
-    :normal,        # [x, y, z] world-space normal vector (nil for edge/instance)
-    :width,         # Float estimated width in m
-    :height,        # Float estimated height in m
-    :layer_name,    # String SU layer name
-    :component_path,    # Array of ancestor component names (for display)
-    :component_path_ids,# Array of ancestor entityIDs (for identity — distinguishes same-named instances)
-    :z_center       # Float bounds center Z in meters (world space)
+    :face_id,
+    :su_material,
+    :qty,
+    :unit,
+    :kind,           # :face / :edge / :instance / :solid / :linear_solid
+    :normal,
+    :width,
+    :height,
+    :layer_name,
+    :component_path,
+    :component_path_ids,
+    :z_center,
+    :qty_area,
+    :qty_length,
+    :qty_volume,
+    :qty_count,
+    :depth,
+    :tags,
+    :tag,             # 标记名（来自标记系统，如 "踢脚线"）
+    :resolved_method,
+    :source,
+    :center_x,       # P4: bbox 中心世界坐标 X（米）—— 竖直薄板配对用
+    :center_y        # P4: bbox 中心世界坐标 Y（米）
   )
 
   # One derived material item from a process/工艺
@@ -23,11 +47,12 @@ module SuTakeoff
     attr_accessor :space, :part, :material_name, :category, :spec,
                   :net_area, :waste_rate, :purchase_qty, :items,
                   :su_material_name, :layer, :parent_su_material, :unit,
-                  :detail
+                  :detail, :confidence, :source
 
     def initialize(space:, part:, material_name:, category: '', spec: '',
                    net_area: 0.0, waste_rate: 0.05, su_material_name: '',
-                   layer: '', parent_su_material: '', unit: 'm2', detail: nil)
+                   layer: '', parent_su_material: '', unit: 'm2', detail: nil,
+                   confidence: :explicit, source: :mapping)
       @space = space
       @part = part           # 'floor', 'wall', 'ceiling'
       @material_name = material_name
@@ -42,6 +67,8 @@ module SuTakeoff
       @parent_su_material = parent_su_material
       @unit = unit
       @detail = detail
+      @confidence = confidence  # :explicit / :heuristic
+      @source = source          # :attr / :layer / :heuristic / :mapping / :default
     end
 
     def recalc!
@@ -55,7 +82,8 @@ module SuTakeoff
         waste_rate: @waste_rate, purchase_qty: @purchase_qty,
         su_material_name: @su_material_name,
         layer: @layer, parent_su_material: @parent_su_material, unit: @unit,
-        detail: @detail
+        detail: @detail,
+        confidence: @confidence, source: @source
       }
     end
   end

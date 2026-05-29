@@ -21,11 +21,9 @@ function switchPage(page) {
   document.querySelector('.sb-nav[data-page="' + page + '"]').classList.add('active');
   document.querySelectorAll('.page-content').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById('page-' + page).style.display = 'block';
-  var bar = document.getElementById('summary-bar');
-  var isView = page === 'position' || page === 'material';
-  if (bar) bar.style.display = (isView && window._workbench) ? 'flex' : 'none';
   if (page === 'mapping') callSketchUp('get_mappings');
   if (page === 'comp-mapping') callSketchUp('get_component_mappings');
+  if (page === 'tag-mapping') callSketchUp('get_tag_mappings');
   if (page === 'settings') callSketchUp('get_processes');
   if (isView) renderCurrentPage();
 }
@@ -51,13 +49,11 @@ function renderWorkbench(data) {
   try {
     window._workbench = data;
     buildWorkbenchIndexes(data);
-    // 新扫描重置展开状态，第一层由 isNodeExpanded 默认展开
-    _mv.expandedNodes = {};
-    _mv.expandedMaterials = {};
+    // 保留已有展开状态（标签/映射变更触发重扫时避免折叠）
+    if (!_mv.expandedNodes) _mv.expandedNodes = {};
+    if (!_mv.expandedMaterials) _mv.expandedMaterials = {};
+    if (!_mv.expandedSpecs) _mv.expandedSpecs = {};
     document.querySelectorAll('.page-content .empty-state').forEach(function(el) { el.style.display = 'none'; });
-    var bar = document.getElementById('summary-bar');
-    bar.style.display = 'flex';
-    renderSummaryBar(data);
     renderCurrentPage();
   } catch(e) {
     var pageId = 'page-' + (window._currentPage === 'material' ? 'material' : 'position');
@@ -104,30 +100,6 @@ function renderCurrentPage() {
   var page = window._currentPage;
   if (page === 'position') renderPositionView(window._workbench);
   else if (page === 'material') renderMaterialView(window._workbench);
-}
-
-// ---------------- Summary bar ----------------
-function renderSummaryBar(data) {
-  var ov = data.overview || {};
-  var unresolved = ov.unresolved_count || 0;
-  var text = (ov.total_faces || 0) + ' 面 · ' + (ov.total_area || 0) + ' m²';
-  if (ov.instance_count > 0) text += ' · ' + ov.instance_count + ' 件';
-  text += ' · ' + (ov.material_count || 0) + ' 种材质 · 已映射 ' + (ov.mapped || 0) + ' · 待 ' + unresolved +
-    ' · 已忽略 ' + (ov.ignored_count || 0);
-  var bar = document.getElementById('summary-bar');
-  bar.textContent = text;
-  if (unresolved > 0) {
-    bar.classList.add('clickable');
-    bar.onclick = function() { switchToModelMaterialFilter(); };
-  } else {
-    bar.classList.remove('clickable');
-    bar.onclick = null;
-  }
-}
-
-function switchToModelMaterialFilter() {
-  switchPage('material');
-  setModelFilter('unresolved');
 }
 
 // ---------------- Shared helpers ----------------

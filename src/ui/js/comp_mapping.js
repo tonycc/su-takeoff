@@ -16,11 +16,18 @@ function renderComponentMappings(mappings, definitions, config) {
     mappedByDef[m.definition_name] = m;
   });
 
+  // Index definitions by name for quick lookup
+  var defByName = {};
+  definitions.forEach(function(entry) {
+    defByName[entry.name] = entry.kind;
+  });
+
   // Merge: all definitions from model, with mapping data where available
-  var rows = definitions.map(function(defName) {
-    var m = mappedByDef[defName];
+  var rows = definitions.map(function(entry) {
+    var m = mappedByDef[entry.name];
     return {
-      definition_name: defName,
+      definition_name: entry.name,
+      kind: entry.kind || 'component',
       material_name: m ? m.material_name : '',
       category: m ? m.category : '其他',
       unit: m ? m.unit : '个',
@@ -32,9 +39,10 @@ function renderComponentMappings(mappings, definitions, config) {
 
   // Also include any mappings whose definition is not currently in the model
   mappings.forEach(function(m) {
-    if (definitions.indexOf(m.definition_name) < 0) {
+    if (!defByName[m.definition_name]) {
       rows.push({
         definition_name: m.definition_name,
+        kind: 'component',
         material_name: m.material_name || '',
         category: m.category || '其他',
         unit: m.unit || '个',
@@ -57,20 +65,23 @@ function renderComponentMappings(mappings, definitions, config) {
   var html = '';
 
   html += '<div class="toolbar" style="gap:8px;margin-bottom:10px">';
-  html += '<span style="font-weight:600;color:#cdd6f4">组件定义映射</span>';
-  html += '<span style="color:#6c7086;font-size:12px">模型共 ' + totalDefs + ' 个组件，已映射 ' + mappedCount + ' 个</span>';
+  html += '<span style="font-weight:600;color:#cdd6f4">群组/组件映射</span>';
+  var compCount = rows.filter(function(r) { return r.kind === 'component'; }).length;
+  var groupCount = rows.filter(function(r) { return r.kind === 'group'; }).length;
+  html += '<span style="color:#6c7086;font-size:12px">组件 ' + compCount + ' 个，群组 ' + groupCount + ' 个，已映射 ' + mappedCount + ' 个</span>';
   html += '<span style="flex:1"></span>';
   html += '<input type="text" id="comp-mapping-search" placeholder="搜索组件名..." style="width:160px" oninput="filterCompMappingRows()">';
   html += '<button onclick="addComponentMapping()">+ 新增</button>';
   html += '</div>';
 
   if (rows.length === 0) {
-    html += '<p class="hint">模型中暂无组件定义。请先在 SketchUp 中创建组件。</p>';
+    html += '<p class="hint">模型中暂无群组或组件。请先在 SketchUp 中创建。</p>';
   } else {
     html += '<table style="table-layout:fixed"><thead><tr>' +
       '<th style="width:36px">#</th>' +
-      '<th style="width:150px">组件名称</th>' +
-      '<th style="width:110px">真实组件名称</th>' +
+      '<th style="width:50px">类型</th>' +
+      '<th style="width:150px">名称</th>' +
+      '<th style="width:110px">自定义名称</th>' +
       '<th style="width:70px">分类</th>' +
       '<th style="width:50px">单位</th>' +
       '<th style="width:80px">计量方式</th>' +
@@ -100,11 +111,14 @@ function renderComponentMappings(mappings, definitions, config) {
     if (row.is_mapped) tr.classList.add('row-mapped');
     if (row.not_in_model) tr.classList.add('row-not-in-model');
 
+    var kindLabel = row.kind === 'group' ? '群组' : '组件';
+    var kindClass = row.kind === 'group' ? 'mv-tag-badge-count' : 'mv-tag-badge-area';
     var nameDisplay = esc(row.definition_name);
     if (row.not_in_model) nameDisplay += ' <span style="color:#f38ba8;font-size:10px">(不在模型中)</span>';
 
     tr.innerHTML =
       '<td style="text-align:right;color:#6c7086;font-size:11px">' + (idx + 1) + '</td>' +
+      '<td><span class="mv-tag-badge ' + kindClass + '" style="font-size:10px">' + kindLabel + '</span></td>' +
       '<td><code style="color:#89b4fa">' + nameDisplay + '</code></td>' +
       '<td><input type="text" class="u-mat" value="' + esc(row.material_name) + '"></td>' +
       '<td><select class="u-cat" onchange="onCompMappingCatChange(this)">' + buildCatOpts(row.category) + '</select></td>' +

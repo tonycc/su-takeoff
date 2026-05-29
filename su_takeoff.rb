@@ -6,6 +6,7 @@ require_relative 'src/formula'
 require_relative 'src/data_models'
 require_relative 'src/mapping'
 require_relative 'src/process_library'
+require_relative 'src/takeoff_policy'
 require_relative 'src/calculator'
 require_relative 'src/scanner'
 

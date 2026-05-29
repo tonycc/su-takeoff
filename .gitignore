@@ -1,5 +1,6 @@
 .DS_Store
 *.swp
 *.swo
+.superpowers/
 data/ignored_materials.json
 data/config.json

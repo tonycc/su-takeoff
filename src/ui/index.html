@@ -27,7 +27,8 @@
     <div class="sidebar-group">
       <div class="sidebar-label">管理</div>
       <button class="sb-nav" data-page="mapping">材料映射</button>
-      <button class="sb-nav" data-page="comp-mapping">组件映射</button>
+      <button class="sb-nav" data-page="comp-mapping">群组/组件映射</button>
+      <button class="sb-nav" data-page="tag-mapping">标记映射</button>
       <button class="sb-nav" data-page="settings">设置</button>
     </div>
   </nav>
@@ -35,7 +36,6 @@
   <!-- 右侧主内容 -->
   <main class="main">
 
-    <div id="summary-bar" class="summary-bar" style="display:none"></div>
 
     <div id="page-position" class="page-content">
       <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
@@ -48,6 +48,9 @@
     </div>
     <div id="page-comp-mapping" class="page-content" style="display:none">
       <div id="comp-mapping-content"></div>
+    </div>
+    <div id="page-tag-mapping" class="page-content" style="display:none">
+      <div id="tag-mapping-content"></div>
     </div>
     <div id="page-settings" class="page-content" style="display:none">
       <div id="settings-content"></div>

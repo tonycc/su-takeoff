@@ -64,8 +64,15 @@ module SuTakeoff
       @dialog.add_action_callback('save_config') { |_ctx, json| save_config(json) }
 
       @dialog.add_action_callback('get_component_mappings') { |_ctx| send_component_mappings }
+      @dialog.add_action_callback('get_tag_mappings') { |_ctx| send_tag_mappings }
+      @dialog.add_action_callback('save_tag_mapping') { |_ctx, json| save_tag_mapping(json) }
       @dialog.add_action_callback('save_component_mapping') { |_ctx, json| save_component_mapping(json) }
       @dialog.add_action_callback('delete_component_mapping') { |_ctx, def_name| delete_component_mapping(def_name) }
+
+      # P2: 红行确认 —— 把用户选择的计量方式写入对应 entity 的 AttributeDictionary
+      @dialog.add_action_callback('set_takeoff_method_batch') { |_ctx, json| set_takeoff_method_batch(json) }
+      # 标记系统 —— 为群组/组件分配/清除标记
+      @dialog.add_action_callback('set_entity_tag') { |_ctx, json| set_entity_tag(json) }
     end
 
     def show
@@ -118,7 +125,8 @@ module SuTakeoff
 
       # Recompute usages for all mapped materials. Unmapped materials are
       # filtered by Calculator (no record in mapping → skipped).
-      calc = Calculator.new(mapping, processes)
+      policy = PluginState.instance.takeoff_policy
+      calc = Calculator.new(mapping, processes, PluginState.instance.component_mapping, policy: policy)
       usages = calc.compute(all_items, @last_scan[:openings], {})
       info = build_material_info(used_names, all_items, @last_scan[:colors])
 
@@ -136,32 +144,43 @@ module SuTakeoff
         end
       end
 
-      # 按 entity_id 分组，再按 (su_material, unit) 子分组
+      # 按 entity_id 分组，再按 su_material 子分组（同材质不同计量方式合并）
       geo_agg = {}
       deduped_items.each do |it|
         next if it.su_material.nil?
+        # 取最内层容器的 entityID（嵌套群组时面归属到直接父容器）
         eid = it.component_path_ids.last || 0
         if it.kind == :instance
           cm_rec = PluginState.instance.component_mapping.get(it.su_material)
           unit = cm_rec ? cm_rec.unit : '个'
         else
+          # P2: 走 policy 决议 unit，与 Calculator 保持一致
+          r = policy.resolve(it)
+          method = r.method
           map_rec = PluginState.instance.mapping.get(it.su_material)
-          if map_rec
-            raw_unit = map_rec.unit
-            length_units = PluginState.instance.config['length_units'] || %w[m mm cm dm km]
-            unit = length_units.include?(raw_unit) ? 'm' : raw_unit
-          elsif it.width && it.width > 0 && it.height && (it.height / it.width) > 15
-            unit = 'm'
-          else
-            unit = 'm²'
-          end
+          unit =
+            case method
+            when :length then 'm'
+            when :volume then 'm³'
+            when :count  then (map_rec&.unit || '个')
+            else (map_rec&.unit || 'm²')
+            end
+          # 把决议结果暂存到 item，供下面按面渲染
+          it.resolved_method = method
+          it.source = r.source
         end
-        key = [eid, it.su_material, unit]
+        key = [eid, it.su_material]
         geo_agg[key] ||= []
         geo_agg[key] << it
       end
 
-      geometry_usages_list = geo_agg.map do |(eid, su_mat, unit), mat_items|
+      puts "[Dialog] geo_agg 分组: #{geo_agg.size} 个 (eid, su_mat) 键" if Scanner::DEBUG
+      geo_agg.each do |(eid, su_mat), mat_items|
+        kinds = mat_items.map(&:kind).uniq.join(',')
+        puts "  eid=#{eid} su_mat=\"#{su_mat}\" items=#{mat_items.size} kinds=#{kinds}" if Scanner::DEBUG
+      end
+
+      geometry_usages_list = geo_agg.map do |(eid, su_mat), mat_items|
         face_items = mat_items.reject { |i| i.kind == :instance }
         is_instance = mat_items.any? { |i| i.kind == :instance } && face_items.empty?
 
@@ -170,39 +189,87 @@ module SuTakeoff
           part_counts[Calculator.face_orientation(i.normal)] += i.qty if i.kind == :face
         end
 
-        qty = if is_instance
-          mat_items.sum { |i| i.qty.to_f }.round(4)
-        elsif unit == 'm'
-          face_items.sum { |i| (i.height || 0).to_f }.round(4)
+        # 按 resolved_method 分别累加各量纲（同材质合并后不再由 unit 主导）
+        qty_area = 0.0
+        qty_length = 0.0
+        qty_volume = 0.0
+        qty_count = 0
+
+        if is_instance
+          qty_count = mat_items.sum { |i| i.qty.to_f }
         else
-          face_items.sum { |i|
-            deduction = opening_area_by_face[i.face_id] || 0.0
-            [i.qty - deduction, 0.0].max
-          }.round(4)
+          face_items.each do |i|
+            case i.resolved_method
+            when :length
+              qty_length += (i.qty_length || i.height || 0).to_f
+            when :volume
+              qty_volume += (i.qty_volume || 0).to_f
+            when :count
+              # face 每面算 1 件；instance/linear_solid 用自带的 qty_count/qty
+              qty_count += if i.kind == :face
+                1.0
+              else
+                (i.qty_count || i.qty || 0).to_f
+              end
+            else
+              deduction = opening_area_by_face[i.face_id] || 0.0
+              qty_area += [i.qty - deduction, 0.0].max
+            end
+          end
         end
+
+        primary_qty, primary_unit =
+          if qty_area > 0
+            [qty_area, 'm²']
+          elsif qty_length > 0
+            [qty_length, 'm']
+          elsif qty_volume > 0
+            [qty_volume, 'm³']
+          elsif qty_count > 0
+            [qty_count, '个']
+          else
+            [0, 'm²']
+          end
+
+        # P2: row-level confidence —— 有任何启发式判定的面就标 heuristic
+        any_heuristic = face_items.any? { |i| i.source == :heuristic }
+        confidence = any_heuristic ? 'heuristic' : 'explicit'
 
         faces_detail = face_items.map { |i|
           {
             face_id: i.face_id,
             path_ids: i.component_path_ids,
             width: i.width&.round(2),
-            height: i.height&.round(2),
+            height: (i.qty_length || i.height)&.round(4),
+            volume: i.qty_volume&.round(4),
             area: i.qty.round(3),
             kind: i.kind,
-            part: Calculator.face_orientation(i.normal)
+            part: Calculator.face_orientation(i.normal),
+            resolved_method: i.resolved_method&.to_s,
+            source: i.source&.to_s
           }
         }
 
         {
           entity_id: eid,
           su_material: su_mat,
-          unit: unit,
-          qty: qty,
+          unit: primary_unit,
+          qty: primary_qty.round(4),
+          qty_area: qty_area.round(4),
+          qty_length: qty_length.round(4),
+          qty_volume: qty_volume.round(4),
+          qty_count: qty_count.round(4),
           face_count: face_items.size,
           by_part: part_counts.transform_values { |v| v.round(2) },
           is_instance: is_instance,
-          faces: faces_detail
+          faces: faces_detail,
+          confidence: confidence
         }
+      end
+
+      puts "[Dialog] geometry_usages_list: #{geometry_usages_list.size} 条" if Scanner::DEBUG
+      geometry_usages_list.each do |u|
+        puts "  eid=#{u[:entity_id]} su_mat=#{u[:su_material]} unit=#{u[:unit]} qty=#{u[:qty]} qty_area=#{u[:qty_area]} qty_length=#{u[:qty_length]} faces=#{u[:face_count]}" if Scanner::DEBUG
       end
 
       data = {
@@ -235,6 +302,7 @@ module SuTakeoff
         usages: usages.map(&:to_h),
         hierarchy: @last_scan[:hierarchy],
         geometry_usages: geometry_usages_list,
+        tag_defs: PluginState.instance.config['tag_defs'] || {},
         by_material: {}
       }
       @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
@@ -485,12 +553,75 @@ module SuTakeoff
       send_workbench_state if @last_scan
     end
 
+    def send_tag_mappings
+      state = PluginState.instance
+      layer_rules = state.config['layer_rules'] || {}
+
+      model = Sketchup.active_model
+      model_layers = Set.new
+      collect_model_layers(model.entities, model_layers)
+
+      all_layers = (model_layers.to_a + layer_rules.keys).uniq.sort
+
+      rows = all_layers.map do |layer|
+        {
+          name: layer,
+          kind: 'layer',
+          method: layer_rules[layer],
+          in_model: model_layers.include?(layer)
+        }
+      end
+
+      @dialog.execute_script("window.renderTagMappings(#{JSON.generate(rows)})")
+    end
+
+    def collect_model_layers(entities, layers)
+      entities.each do |e|
+        if e.respond_to?(:layer) && e.layer
+          name = e.layer.name
+          layers.add(name) if name && !name.empty? && name != 'Layer0'
+        end
+        if e.is_a?(Sketchup::Group)
+          collect_model_layers(e.entities, layers)
+        elsif e.is_a?(Sketchup::ComponentInstance)
+          collect_model_layers(e.definition.entities, layers)
+        end
+      end
+    end
+
+    def save_tag_mapping(json)
+      data = JSON.parse(json)
+      name = data['name']
+      method = data['method']
+      return unless name && !name.empty?
+
+      state = PluginState.instance
+      state.config['layer_rules'] ||= {}
+      if method.nil? || method.empty?
+        state.config['layer_rules'].delete(name)
+      else
+        state.config['layer_rules'][name] = method
+      end
+      path = PluginState.config_path
+      File.write(path, JSON.pretty_generate(state.config))
+      send_tag_mappings
+      send_workbench_state if @last_scan
+    end
+
     def send_component_mappings
       mappings = PluginState.instance.component_mapping.all.map(&:to_h)
-      # Collect all component/group definition names from the model
       model = Sketchup.active_model
-      def_names = model.definitions.reject(&:group?).map(&:name).reject { |n| n.nil? || n.empty? }.uniq.sort
-      # Read config for category and unit lists
+      # 组件定义名 (kind: 'component')
+      comp_names = model.definitions.reject(&:group?).map(&:name).reject { |n| n.nil? || n.empty? }.uniq
+      # 群组名 (kind: 'group')
+      group_set = Set.new
+      collect_group_names(model.entities, group_set)
+      group_names = group_set.to_a
+      # 合并：带 kind 信息
+      entries = comp_names.map { |n| { name: n, kind: 'component' } } +
+                group_names.map { |n| { name: n, kind: 'group' } }
+      entries.sort_by! { |e| e[:name] }
+      # Read config
       cfg = if File.exist?(PluginState.config_path)
               JSON.parse(File.read(PluginState.config_path))
             else
@@ -500,7 +631,19 @@ module SuTakeoff
         category_units: cfg['component_category_units'] || [],
         config_units: cfg['units'] || []
       }
-      @dialog.execute_script("window.renderComponentMappings(#{JSON.generate(mappings)}, #{JSON.generate(def_names)}, #{JSON.generate(config)})")
+      @dialog.execute_script("window.renderComponentMappings(#{JSON.generate(mappings)}, #{JSON.generate(entries)}, #{JSON.generate(config)})")
+    end
+
+    def collect_group_names(entities, result)
+      entities.each do |e|
+        if e.is_a?(Sketchup::Group)
+          name = e.name
+          result.add(name) if name && !name.empty?
+          collect_group_names(e.entities, result)
+        elsif e.is_a?(Sketchup::ComponentInstance)
+          collect_group_names(e.definition.entities, result)
+        end
+      end
     end
 
     def save_component_mapping(json)
@@ -554,7 +697,12 @@ module SuTakeoff
         component_category_units: state.config['component_category_units'] || [],
         config_units: state.config['units'] || [],
         length_units: state.config['length_units'] || [],
-        count_units: state.config['count_units'] || []
+        count_units: state.config['count_units'] || [],
+        volume_units: state.config['volume_units'] || [],
+        layer_rules: state.config['layer_rules'] || {},
+        tag_defs: state.config['tag_defs'] || {},
+        heuristics_enabled: state.config.fetch('heuristics_enabled', true),
+        heuristic_thresholds: state.config['heuristic_thresholds'] || {}
       }
       @dialog.execute_script("window.renderProcesses(#{JSON.generate(data)})")
     end
@@ -566,8 +714,14 @@ module SuTakeoff
         data['component_category_units'] || [],
         data['units'] || [],
         data['length_units'],
-        data['count_units']
+        data['count_units'],
+        data['layer_rules'],
+        data['heuristics_enabled'],
+        data['volume_units'],
+        data['heuristic_thresholds'],
+        data['tag_defs']
       )
+      send_workbench_state if @last_scan
     end
     def save_process(json)
       data = JSON.parse(json)
@@ -601,6 +755,80 @@ module SuTakeoff
     def clear_ignored
       PluginState.instance.set_ignored!([])
       send_processes
+    end
+
+    # P2 新增：把红行确认结果写回 entity 的 AttributeDictionary。
+    # 入参 JSON：
+    #   { face_ids: [123, 456], path_ids: [[101], [101]], method: 'length' }
+    # 行为：
+    #   - 对每对 (face_id, path_ids) 通过 path_ids 导航到正确容器后定位 entity
+    #   - 写 entity.set_attribute('su_takeoff', 'method', method)
+    #   - method == 'clear' 时删除该字段
+    #   - 完成后重跑 Calculator + 推前端，红行升级为白行（confidence: explicit, source: attr）
+    def set_takeoff_method_batch(json)
+      data = JSON.parse(json)
+      method = data['method']
+      face_ids = data['face_ids'] || []
+      path_ids_list = data['path_ids_list'] || []
+      return if face_ids.empty?
+
+      model = Sketchup.active_model
+      face_ids.each_with_index do |fid, i|
+        path_ids = path_ids_list[i] || []
+        entities = nil
+        if path_ids.any?
+          inner = model.find_entity_by_id(path_ids.last)
+          if inner&.respond_to?(:definition)
+            entities = inner.definition.entities
+          elsif inner&.respond_to?(:entities)
+            entities = inner.entities
+          end
+        end
+        entities ||= model.entities
+        entity = find_face(entities, fid.to_i)
+        next unless entity
+
+        if method == 'clear'
+          entity.delete_attribute('su_takeoff', 'method') rescue nil
+        else
+          entity.set_attribute('su_takeoff', 'method', method)
+        end
+      end
+
+      # 重新扫描以拾取最新的 attr dict 标签（标签在 Scanner.read_takeoff_tags 读取）
+      do_scan(selection_only: false)
+    rescue => e
+      msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
+      @dialog.execute_script("window.renderWorkbenchError(#{msg})")
+    end
+
+    def set_entity_tag(json)
+      data = JSON.parse(json)
+      entity_id = data['entity_id'].to_i
+      tag_name = data['tag_name']  # nil / '' 表示清除
+
+      model = Sketchup.active_model
+      entity = model.find_entity_by_id(entity_id)
+      return unless entity
+      return unless entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+
+      model.start_operation('设置标记', true)
+      if tag_name.nil? || tag_name.empty?
+        entity.delete_attribute('su_takeoff', 'tag') rescue nil
+        entity.delete_attribute('su_takeoff', 'method') rescue nil
+        entity.delete_attribute('su_takeoff', 'material') rescue nil
+      else
+        tag_defs = PluginState.instance.config['tag_defs'] || {}
+        method = tag_defs[tag_name]
+        entity.set_attribute('su_takeoff', 'tag', tag_name)
+        entity.set_attribute('su_takeoff', 'method', method) if method
+      end
+      model.commit_operation
+
+      do_scan(selection_only: false)
+    rescue => e
+      msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
+      @dialog.execute_script("window.renderWorkbenchError(#{msg})")
     end
 
   end
