@@ -268,7 +268,7 @@ function renderToolbar(data, container, mode) {
 
 // ---------------- Position mode: tree table ----------------
 // Sortable column keys mapped to column index
-var POS_SORT_COLS = { 1: 'name', 2: 'tag', 3: 'area', 4: 'length', 5: 'volume', 6: 'count', 7: 'floor', 8: 'wall', 9: 'ceiling', 10: 'unresolved' };
+var POS_SORT_COLS = { 1: 'name', 3: 'tag', 4: 'area', 5: 'length', 6: 'volume', 7: 'count', 8: 'floor', 9: 'wall', 10: 'ceiling', 11: 'unresolved' };
 
 function renderPositionTable(data, container) {
   var cls = data._classification;
@@ -289,10 +289,10 @@ function renderPositionTable(data, container) {
   // Header with sort indicators
   var thead = document.createElement('thead');
   var hrow = document.createElement('tr');
-  var cols = ['#', '名称 / 材质', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理', '操作'];
+  var cols = ['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理', '操作'];
   cols.forEach(function(c, i) {
     var th = document.createElement('th');
-    if (i >= 2 && i <= 8) th.className = 'mv-th-num';
+    if (i >= 3 && i <= 9) th.className = 'mv-th-num';
     var sortKey = POS_SORT_COLS[i];
     if (sortKey) {
       th.className = (th.className ? th.className + ' ' : '') + 'mv-th-sortable';
@@ -458,6 +458,9 @@ function renderSpecGroupRow(dimLabel, faces, usage, depth, matKey, tbody) {
   tdName.appendChild(cnt);
   row.appendChild(tdName);
 
+  var tdInfo = document.createElement('td');
+  row.appendChild(tdInfo);
+
   var tdTag = document.createElement('td');
   tdTag.className = 'mv-col-tag';
   row.appendChild(tdTag);
@@ -523,6 +526,10 @@ function renderFaceDetailRow(face, usage, depth, tbody) {
   var dims = (face.width && face.height) ? '  ' + Math.round(face.width * 1000) + '×' + Math.round(face.height * 1000) + ' mm' : '';
   tdName.appendChild(document.createTextNode('#' + face.face_id + dims));
   row.appendChild(tdName);
+
+  // 产品信息（空白列）
+  var tdInfo = document.createElement('td');
+  row.appendChild(tdInfo);
 
   // 空标记列（面对齐表头）
   var tdTag = document.createElement('td');
@@ -651,6 +658,10 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   tdName.appendChild(faceCountSpan);
 
   row.appendChild(tdName);
+
+  // 产品信息（空白列）
+  var tdInfo = document.createElement('td');
+  row.appendChild(tdInfo);
 
   // 空标记列（对齐表头）
   var tdTag = document.createElement('td');
@@ -855,6 +866,10 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
 
   row.appendChild(tdName);
 
+  // 产品信息（空白列）
+  var tdInfo = document.createElement('td');
+  row.appendChild(tdInfo);
+
   // Tag column
   var tdTag = document.createElement('td');
   tdTag.className = 'mv-col-tag';
@@ -1050,6 +1065,10 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
   }
 
   row.appendChild(tdName);
+
+  // 产品信息（空白列）
+  var tdInfo = document.createElement('td');
+  row.appendChild(tdInfo);
 
   // Tag column
   var tdTag = document.createElement('td');
@@ -1603,7 +1622,7 @@ function exportModelCsv(data, mode) {
   var groupLabel = mode === 'position' ? '按位置' : '按材料';
 
   if (mode === 'position') {
-    rows.push(['#', '名称 / 材质', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理']);
+    rows.push(['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理']);
     var seq = 0;
     collectPositionCsvRows(data.hierarchy, data, rows, seq);
   } else {
@@ -1698,6 +1717,7 @@ function collectPositionCsvRows(node, data, rows, seq) {
   rows.push([
     seq,
     node.name,
+    '',
     node.tag || '',
     fmtNum(stats.area),
     fmtNum(stats.length),
