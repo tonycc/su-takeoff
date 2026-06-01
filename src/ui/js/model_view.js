@@ -1,4 +1,4 @@
-// src/ui/js/model_view.js — 模型视图：统一树 + 聚合档位 + 按位置/按材料分组
+// src/ui/js/model_view.js — 模型视图：统一树 + 聚合档位 + 按位置分组
 
 // ---------------- State ----------------
 window._mv = {
@@ -7,9 +7,7 @@ window._mv = {
   showHidden: false,
   mergeSame: false,
   searchQuery: '',
-  materialFilter: 'all',
   expandedNodes: {},
-  expandedMaterials: {},
   sortCol: null,
   sortDir: 'asc'
 };
@@ -172,7 +170,7 @@ function rollupStats(node, data) {
 }
 
 // ---------------- Default level ----------------
-function renderToolbar(data, container, mode) {
+function renderToolbar(data, container) {
   var tb = document.createElement('div');
   tb.className = 'mv-toolbar';
 
@@ -198,10 +196,9 @@ function renderToolbar(data, container, mode) {
     cb.checked = _mv[sw.key];
     cb.className = 'mv-switch';
     cb.id = 'mv-sw-' + sw.key;
-    var renderFn = mode === 'position' ? renderPositionView : renderMaterialView;
     cb.onchange = function() {
       _mv[sw.key] = cb.checked;
-      renderFn(data);
+      renderPositionView(data);
     };
     var lbl = document.createElement('label');
     lbl.className = 'mv-switch-label';
@@ -220,10 +217,9 @@ function renderToolbar(data, container, mode) {
   searchInput.className = 'mv-search';
   searchInput.placeholder = '搜索名称/材质…';
   searchInput.value = _mv.searchQuery;
-  var renderFn = mode === 'position' ? renderPositionView : renderMaterialView;
   searchInput.oninput = function() {
     _mv.searchQuery = searchInput.value.trim();
-    renderFn(data);
+    renderPositionView(data);
   };
   searchWrap.appendChild(searchInput);
   row2.appendChild(searchWrap);
@@ -232,36 +228,9 @@ function renderToolbar(data, container, mode) {
   var exportBtn = document.createElement('button');
   exportBtn.className = 'mv-export-btn';
   exportBtn.textContent = '⤓ 导出';
-  exportBtn.onclick = function() { exportModelCsv(data, mode); };
+  exportBtn.onclick = function() { exportModelCsv(data); };
   row2.appendChild(exportBtn);
   tb.appendChild(row2);
-
-  // Material filter (material mode only)
-  if (mode === 'material') {
-    var filterRow = document.createElement('div');
-    filterRow.className = 'mv-toolbar-row';
-    var filterWrap = document.createElement('div');
-    filterWrap.className = 'mv-filter-tabs';
-    var fLabel = document.createElement('span');
-    fLabel.className = 'mv-toolbar-label';
-    fLabel.textContent = '筛选:';
-    filterWrap.appendChild(fLabel);
-
-    var filters = ['all', 'unresolved', 'mapped', 'ignored'];
-    var filterLabels = { all: '全部', unresolved: '待映射', mapped: '已映射', ignored: '已忽略' };
-    filters.forEach(function(f) {
-      var btn = document.createElement('button');
-      btn.className = 'mv-filter-btn' + ((_mv.materialFilter === f) ? ' active' : '');
-      btn.textContent = filterLabels[f];
-      btn.onclick = function() {
-        _mv.materialFilter = f;
-        renderMaterialView(data);
-      };
-      filterWrap.appendChild(btn);
-    });
-    filterRow.appendChild(filterWrap);
-    tb.appendChild(filterRow);
-  }
 
   container.appendChild(tb);
 }
@@ -1193,365 +1162,6 @@ function renderPartBadge(stats, isSelf) {
   return badge;
 }
 
-// ---------------- Material mode: flat table ----------------
-var MAT_SORT_COLS = { 2: 'su_material', 3: 'qty', 4: 'face_count', 5: 'locationCount', 7: 'materialName' };
-
-function renderMaterialTable(data, container) {
-  var hierarchy = data.hierarchy;
-  var usagesByEid = data._usagesByEntityId;
-  var materialsInfo = data.materials_info || [];
-  var unresolved = data.unresolved || [];
-  var ignored = data.ignored || [];
-  var mapping = {};
-  materialsInfo.forEach(function(m) { mapping[m.su_name] = m; });
-
-  // Group geometry_usages by su_material (non-instance only)
-  var byMaterial = {};
-  var instanceCount = 0;
-  (data.geometry_usages || []).forEach(function(u) {
-    if (u.is_instance) { instanceCount++; return; }
-    var key = u.su_material || '(无材质)';
-    byMaterial[key] = byMaterial[key] || [];
-    byMaterial[key].push(u);
-  });
-
-  // Determine status
-  var unresolvedSet = {};
-  unresolved.forEach(function(n) { unresolvedSet[n] = true; });
-  var ignoredSet = {};
-  ignored.forEach(function(n) { ignoredSet[n] = true; });
-
-  // Apply filter
-  var filter = _mv.materialFilter;
-  var materialKeys = Object.keys(byMaterial);
-  if (filter !== 'all') {
-    materialKeys = materialKeys.filter(function(key) {
-      var status = getMaterialStatus(key, unresolvedSet, ignoredSet, mapping);
-      if (filter === 'unresolved' && status !== 'unresolved') return false;
-      if (filter === 'mapped' && status !== 'mapped') return false;
-      if (filter === 'ignored' && status !== 'ignored') return false;
-      return true;
-    });
-  }
-
-  // Search
-  if (_mv.searchQuery) {
-    var q = _mv.searchQuery.toLowerCase();
-    materialKeys = materialKeys.filter(function(key) {
-      return key.toLowerCase().indexOf(q) >= 0;
-    });
-  }
-
-  // Pre-compute aggregates for sorting
-  var matAgg = {};
-  materialKeys.forEach(function(key) {
-    var usages = byMaterial[key];
-    var info = mapping[key] || {};
-    var totalArea = 0, totalLength = 0, totalVolume = 0, totalFace = 0;
-    var partFloor = 0, partWall = 0, partCeil = 0;
-    var locations = {};
-    usages.forEach(function(u) {
-      totalFace += u.face_count || 0;
-      // 优先用新字段 qty_area / qty_length / qty_volume，回退旧 unit+qty
-      if (u.qty_area || u.qty_length || u.qty_volume || u.qty_count) {
-        totalArea += u.qty_area || 0;
-        totalLength += (u.qty_length || 0) * 1000;
-        totalVolume += u.qty_volume || 0;
-      } else {
-        if (u.unit === 'm') totalLength += u.qty * 1000;
-        else if (u.unit === 'm³') totalVolume += u.qty;
-        else totalArea += u.qty;
-      }
-      partFloor += (u.by_part && u.by_part.floor) || 0;
-      partWall += (u.by_part && u.by_part.wall) || 0;
-      partCeil += (u.by_part && u.by_part.ceiling) || 0;
-      var topGroup = findTopLevelGroup(u.entity_id, hierarchy);
-      if (topGroup) locations[topGroup.name] = true;
-    });
-    var mainQty = totalArea > 0 ? totalArea : (totalVolume > 0 ? totalVolume : totalLength);
-    matAgg[key] = {
-      totalArea: totalArea, totalLength: totalLength, totalVolume: totalVolume, totalFace: totalFace,
-      partFloor: partFloor, partWall: partWall, partCeil: partCeil,
-      locations: locations, info: info,
-      qty: mainQty,
-      locationCount: Object.keys(locations).length,
-      materialName: info.material_name || ''
-    };
-  });
-
-  // Sort material keys
-  if (_mv.sortCol) {
-    materialKeys.sort(function(a, b) {
-      var aggA = matAgg[a], aggB = matAgg[b];
-      var aVal, bVal;
-      if (_mv.sortCol === 'su_material') { aVal = a; bVal = b; }
-      else if (_mv.sortCol === 'qty') { aVal = aggA.qty; bVal = aggB.qty; }
-      else if (_mv.sortCol === 'face_count') { aVal = aggA.totalFace; bVal = aggB.totalFace; }
-      else if (_mv.sortCol === 'locationCount') { aVal = aggA.locationCount; bVal = aggB.locationCount; }
-      else if (_mv.sortCol === 'materialName') { aVal = aggA.materialName; bVal = aggB.materialName; }
-      else { aVal = 0; bVal = 0; }
-      var cmp = 0;
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        cmp = aVal.localeCompare(bVal, 'zh');
-      } else {
-        cmp = (aVal || 0) - (bVal || 0);
-      }
-      return _mv.sortDir === 'desc' ? -cmp : cmp;
-    });
-  }
-
-  // Instance banner
-  if (instanceCount > 0) {
-    var banner = document.createElement('div');
-    banner.className = 'mv-banner';
-    banner.textContent = '另含 ' + instanceCount + ' 个组件实例（见按位置模式）';
-    container.appendChild(banner);
-  }
-
-  // Table with sortable headers
-  var table = document.createElement('table');
-  table.className = 'mv-table mv-material-table';
-
-  var thead = document.createElement('thead');
-  var hrow = document.createElement('tr');
-  var mCols = ['#', '状态', 'SU材质', '面数/用量', '部位分布', '位置数', '位置', '真实材料', '操作'];
-  mCols.forEach(function(c, i) {
-    var th = document.createElement('th');
-    var sortKey = MAT_SORT_COLS[i];
-    if (sortKey) {
-      th.className = 'mv-th-sortable';
-      th.onclick = function() {
-        if (_mv.sortCol === sortKey) {
-          _mv.sortDir = _mv.sortDir === 'asc' ? 'desc' : 'asc';
-        } else {
-          _mv.sortCol = sortKey;
-          _mv.sortDir = 'asc';
-        }
-        renderModelView(data || window._workbench);
-      };
-      if (_mv.sortCol === sortKey) {
-        var indicator = document.createElement('span');
-        indicator.className = 'mv-sort-indicator';
-        indicator.textContent = _mv.sortDir === 'asc' ? ' ↑' : ' ↓';
-        th.appendChild(document.createTextNode(c));
-        th.appendChild(indicator);
-      } else {
-        th.textContent = c;
-      }
-    } else {
-      th.textContent = c;
-    }
-    hrow.appendChild(th);
-  });
-  thead.appendChild(hrow);
-  table.appendChild(thead);
-
-  var tbody = document.createElement('tbody');
-  materialKeys.forEach(function(key, idx) {
-    var usages = byMaterial[key];
-    var agg = matAgg[key];
-    var info = agg.info;
-    var status = getMaterialStatus(key, unresolvedSet, ignoredSet, mapping);
-    var totalArea = agg.totalArea, totalLength = agg.totalLength, totalFace = agg.totalFace;
-    var partFloor = agg.partFloor, partWall = agg.partWall, partCeil = agg.partCeil;
-    var locNames = Object.keys(agg.locations);
-
-    // P2: 该材料下是否有启发式判定的 usage（红行）
-    var hasHeuristic = usages.some(function(u) { return u.confidence === 'heuristic'; });
-    var heuristicFaceCount = usages.reduce(function(n, u) {
-      return n + (u.confidence === 'heuristic' ? (u.face_count || 0) : 0);
-    }, 0);
-
-    var row = document.createElement('tr');
-    row.className = 'mv-row mv-mat-row mv-mat-' + status;
-    if (hasHeuristic) row.classList.add('mv-mat-heuristic');
-
-    // Seq
-    var tdSeq = document.createElement('td');
-    tdSeq.textContent = idx + 1;
-    row.appendChild(tdSeq);
-
-    // Status
-    var tdStatus = document.createElement('td');
-    var statusTag = document.createElement('span');
-    statusTag.className = 'tag tag-' + status;
-    var statusLabels = { mapped: '已映射', unresolved: '待', ignored: '已忽略' };
-    statusTag.textContent = statusLabels[status];
-    tdStatus.appendChild(statusTag);
-    if (hasHeuristic) {
-      var hTag = document.createElement('span');
-      hTag.className = 'tag tag-heuristic';
-      hTag.textContent = '待确认 ' + heuristicFaceCount;
-      hTag.title = '此材料下有 ' + heuristicFaceCount + ' 个面是启发式判定，建议确认计量方式';
-      hTag.style.marginLeft = '4px';
-      tdStatus.appendChild(hTag);
-    }
-    row.appendChild(tdStatus);
-
-    // SU Material
-    var tdMat = document.createElement('td');
-    tdMat.className = 'mv-col-mat';
-    if (info.color) {
-      var swatch = document.createElement('span');
-      swatch.className = 'swatch';
-      swatch.style.background = info.color;
-      tdMat.appendChild(swatch);
-      tdMat.appendChild(document.createTextNode(' '));
-    }
-    var matName = document.createElement('span');
-    matName.textContent = key;
-    tdMat.appendChild(matName);
-    row.appendChild(tdMat);
-
-    // Face count / qty
-    var tdQty = document.createElement('td');
-    var mainQty;
-    if (totalArea > 0) {
-      mainQty = fmtNum(totalArea) + ' m²';
-    } else if (agg.totalVolume > 0) {
-      mainQty = fmtNum(agg.totalVolume) + ' m³';
-    } else {
-      mainQty = fmtNum(totalLength) + ' mm';
-    }
-    tdQty.textContent = totalFace + ' 面 / ' + mainQty;
-    row.appendChild(tdQty);
-
-    // Part distribution
-    var tdPart = document.createElement('td');
-    tdPart.className = 'mv-col-parts';
-    if (partFloor > 0) { var p = document.createElement('span'); p.className = 'pill pill-floor'; p.textContent = '地 ' + fmtNum(partFloor); tdPart.appendChild(p); }
-    if (partWall > 0) { var p2 = document.createElement('span'); p2.className = 'pill pill-wall'; p2.textContent = '墙 ' + fmtNum(partWall); tdPart.appendChild(p2); }
-    if (partCeil > 0) { var p3 = document.createElement('span'); p3.className = 'pill pill-ceiling'; p3.textContent = '天 ' + fmtNum(partCeil); tdPart.appendChild(p3); }
-    row.appendChild(tdPart);
-
-    // Location count
-    var tdLocCount = document.createElement('td');
-    tdLocCount.textContent = agg.locationCount;
-    row.appendChild(tdLocCount);
-
-    // Top locations
-    var tdLoc = document.createElement('td');
-    var locText = locNames.slice(0, 3).join(', ');
-    if (locNames.length > 3) locText += ' 等 ' + locNames.length + ' 处';
-    tdLoc.textContent = locText;
-    row.appendChild(tdLoc);
-
-    // Real material name
-    var tdReal = document.createElement('td');
-    tdReal.textContent = info.material_name || '—';
-    row.appendChild(tdReal);
-
-    // Actions
-    var tdAct = document.createElement('td');
-    var locateBtn = document.createElement('button');
-    locateBtn.className = 'mv-locate-btn';
-    locateBtn.textContent = '⌖';
-    locateBtn.title = '定位材质';
-    locateBtn.onclick = function() { callSketchUp('locate_material', key); };
-    tdAct.appendChild(locateBtn);
-
-    if (hasHeuristic) {
-      // P2: 红行确认按钮组。点击写 AttrDict 后重扫，红行升级为 attr 显式判定。
-      var confirmBtn = document.createElement('button');
-      confirmBtn.className = 'mv-confirm-btn';
-      confirmBtn.textContent = '✓按长度';
-      confirmBtn.title = '确认这些面按长度计量（写入模型属性）';
-      confirmBtn.style.marginLeft = '4px';
-      confirmBtn.onclick = function() { confirmTakeoffMethod(key, 'length', usages); };
-      tdAct.appendChild(confirmBtn);
-
-      var areaBtn = document.createElement('button');
-      areaBtn.className = 'mv-confirm-btn';
-      areaBtn.textContent = '改面积';
-      areaBtn.title = '改判为按面积计量';
-      areaBtn.style.marginLeft = '2px';
-      areaBtn.onclick = function() { confirmTakeoffMethod(key, 'area', usages); };
-      tdAct.appendChild(areaBtn);
-
-      var skipBtn = document.createElement('button');
-      skipBtn.className = 'mv-confirm-btn';
-      skipBtn.textContent = '跳过';
-      skipBtn.title = '不计入算量';
-      skipBtn.style.marginLeft = '2px';
-      skipBtn.onclick = function() { confirmTakeoffMethod(key, 'skip', usages); };
-      tdAct.appendChild(skipBtn);
-    }
-    row.appendChild(tdAct);
-
-    tbody.appendChild(row);
-  });
-  table.appendChild(tbody);
-  container.appendChild(table);
-
-  if (materialKeys.length === 0) {
-    var empty = document.createElement('div');
-    empty.className = 'mv-empty';
-    empty.textContent = _mv.searchQuery ? '无匹配，调整搜索词或开关' : '无面材数据';
-    container.appendChild(empty);
-  }
-}
-
-function getMaterialStatus(name, unresolvedSet, ignoredSet, mapping) {
-  if (ignoredSet[name]) return 'ignored';
-  if (unresolvedSet[name]) return 'unresolved';
-  var info = mapping[name];
-  if (info && info.material_name) return 'mapped';
-  return 'unresolved';
-}
-
-// P2: 收集材料下所有启发式判定的 face 信息（face_id + path_ids），
-// 供红行确认按钮把决策写回 entity AttrDict。
-function collectHeuristicFaces(usages) {
-  var faces = [];
-  (usages || []).forEach(function(u) {
-    if (u.confidence !== 'heuristic') return;
-    (u.faces || []).forEach(function(f) {
-      if (f.source === 'heuristic') {
-        faces.push({ face_id: f.face_id, path_ids: f.path_ids || [] });
-      }
-    });
-  });
-  return faces;
-}
-
-function confirmTakeoffMethod(suMaterial, method, usages) {
-  var faces = collectHeuristicFaces(usages);
-  if (faces.length === 0) return;
-  var label = { length: '按长度', area: '按面积', volume: '按体积', skip: '跳过' }[method] || method;
-  if (!confirm('将 ' + suMaterial + ' 的 ' + faces.length + ' 个待确认面标记为「' + label + '」？\n该决定会写入模型属性，跟随 SKP 文件保存。')) return;
-  callSketchUp('set_takeoff_method_batch', JSON.stringify({
-    method: method,
-    face_ids: faces.map(function(f) { return f.face_id; }),
-    path_ids_list: faces.map(function(f) { return f.path_ids; })
-  }));
-}
-
-function findTopLevelGroup(entityId, hierarchy) {
-  // Find the topmost (depth=1) group that contains this entity_id
-  var byId = window._workbench._byEntityId || {};
-  var node = byId[entityId];
-  if (!node) return null;
-  // Walk up the hierarchy to find the depth=1 ancestor
-  return findAncestorAtDepth(hierarchy, entityId, 1);
-}
-
-function findAncestorAtDepth(root, targetEid, targetDepth) {
-  // DFS: track ancestor chain
-  function walk(node, ancestors) {
-    if (node.entity_id === targetEid) {
-      // Found, return ancestor at targetDepth
-      return ancestors.filter(function(a) { return a.depth === targetDepth; })[0] || root;
-    }
-    var newAncestors = ancestors.concat([node]);
-    for (var i = 0; i < node.children.length; i++) {
-      var result = walk(node.children[i], newAncestors);
-      if (result) return result;
-    }
-    return null;
-  }
-  return walk(root, []);
-}
-
 // ---------------- Main entries ----------------
 function renderPositionView(data) {
   if (!data || !data.hierarchy) {
@@ -1572,115 +1182,27 @@ function renderPositionView(data) {
   }
   container.innerHTML = '';
 
-  renderToolbar(data, container, 'position');
+  renderToolbar(data, container);
   renderPositionTable(data, container);
 }
 
-function renderMaterialView(data) {
-  if (!data || !data.hierarchy) {
-    var container = document.getElementById('page-material');
-    container.innerHTML = '<div class="mv-error">需要更新插件（hierarchy 数据缺失）</div>';
-    return;
-  }
-
-  classifyNodes(data);
-
-  var container = document.getElementById('page-material');
-  var existingEmpty = container.querySelector('.empty-state');
-  if (existingEmpty && !data.geometry_usages.length) {
-    return;
-  }
-  container.innerHTML = '';
-
-  renderToolbar(data, container, 'material');
-  renderMaterialTable(data, container);
-}
-
-// Legacy entry — routes based on current page
+// Legacy entry
 function renderModelView(data) {
   try {
-    var page = window._currentPage;
-    if (page === 'material') renderMaterialView(data);
-    else renderPositionView(data);
+    renderPositionView(data);
   } catch(e) {
     console.error('renderModelView error:', e);
-    var containerId = 'page-' + (window._currentPage === 'material' ? 'material' : 'position');
-    var container = document.getElementById(containerId);
+    var container = document.getElementById('page-position');
     container.innerHTML = '<div class="mv-error">渲染错误: ' + e.message + '</div>';
   }
 }
 
-// ---------------- Filter setter ----------------
-function setModelFilter(filter) {
-  _mv.materialFilter = filter;
-  if (window._workbench) renderMaterialView(window._workbench);
-}
-
 // ---------------- CSV export ----------------
-function exportModelCsv(data, mode) {
+function exportModelCsv(data) {
   var rows = [];
-  var groupLabel = mode === 'position' ? '按位置' : '按材料';
-
-  if (mode === 'position') {
-    rows.push(['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理']);
-    var seq = 0;
-    collectPositionCsvRows(data.hierarchy, data, rows, seq);
-  } else {
-    rows.push(['#', '状态', 'SU材质', '面数/用量', '部位分布', '位置数', '位置', '真实材料']);
-    var materialsInfo = data.materials_info || [];
-    var unresolved = data.unresolved || [];
-    var ignored = data.ignored || [];
-    var unresolvedSet = {};
-    unresolved.forEach(function(n) { unresolvedSet[n] = true; });
-    var ignoredSet = {};
-    ignored.forEach(function(n) { ignoredSet[n] = true; });
-    var mapping = {};
-    materialsInfo.forEach(function(m) { mapping[m.su_name] = m; });
-
-    var byMaterial = {};
-    (data.geometry_usages || []).forEach(function(u) {
-      if (u.is_instance) return;
-      var key = u.su_material || '(无材质)';
-      byMaterial[key] = byMaterial[key] || [];
-      byMaterial[key].push(u);
-    });
-
-    Object.keys(byMaterial).forEach(function(key, idx) {
-      var usages = byMaterial[key];
-      var info = mapping[key] || {};
-      var status = getMaterialStatus(key, unresolvedSet, ignoredSet, mapping);
-      var totalArea = 0, totalLength = 0, totalVolume = 0, totalFace = 0;
-      var partFloor = 0, partWall = 0, partCeil = 0;
-      var locs = {};
-      usages.forEach(function(u) {
-        totalFace += u.face_count || 0;
-        if (u.qty_area || u.qty_length || u.qty_volume || u.qty_count) {
-          totalArea += u.qty_area || 0;
-          totalLength += (u.qty_length || 0) * 1000;
-          totalVolume += u.qty_volume || 0;
-        } else {
-          if (u.unit === 'm') totalLength += u.qty * 1000;
-          else if (u.unit === 'm³') totalVolume += u.qty;
-          else totalArea += u.qty;
-        }
-        partFloor += (u.by_part && u.by_part.floor) || 0;
-        partWall += (u.by_part && u.by_part.wall) || 0;
-        partCeil += (u.by_part && u.by_part.ceiling) || 0;
-        var top = findTopLevelGroup(u.entity_id, data.hierarchy);
-        if (top) locs[top.name] = true;
-      });
-      var mainQty;
-      if (totalArea > 0) mainQty = fmtNum(totalArea) + ' m²';
-      else if (totalVolume > 0) mainQty = fmtNum(totalVolume) + ' m³';
-      else mainQty = fmtNum(totalLength) + ' mm';
-      var parts = '';
-      if (partFloor > 0) parts += '地' + fmtNum(partFloor) + ' ';
-      if (partWall > 0) parts += '墙' + fmtNum(partWall) + ' ';
-      if (partCeil > 0) parts += '天' + fmtNum(partCeil);
-      var locNames = Object.keys(locs);
-      rows.push([idx + 1, status, key, totalFace + '面/' + mainQty, parts, locNames.length, locNames.slice(0, 3).join(','), info.material_name || '—']);
-    });
-  }
+  rows.push(['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理']);
+  var seq = 0;
+  collectPositionCsvRows(data.hierarchy, data, rows, seq);
 
   var csv = '﻿'; // BOM
   rows.forEach(function(r) {
@@ -1689,7 +1211,7 @@ function exportModelCsv(data, mode) {
   var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'model_view_完整_' + groupLabel + '.csv';
+  a.download = 'model_view_按组件.csv';
   a.click();
 }
 

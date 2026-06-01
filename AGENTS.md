@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-本文件为 Claude Code（claude.ai/code）在此仓库中工作时提供指导。
+本文件为 Codex（Codex.ai/code）在此仓库中工作时提供指导。
 
 ## 项目概述
 
@@ -41,7 +41,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 - **`calculator.rb`** — `compute_geometry_only`：纯几何计算，含洞口扣减、薄板去重、面/线材识别。未映射材质也产出记录。不应用损耗率与工艺派生。
 - **`mapping.rb`** — SU 材质 → 真实材料映射（分类、单位、规格、损耗率）。
 - **`component_mapping.rb`** — 组件定义名 → 材料映射。`counting_method`: `expand` 展开统计面材 / `aggregate` 整件统计个数。
-- **`process_library.rb`** — 按分类的工艺做法，提供替代损耗率与派生项（前端工艺管理页编辑，计算结果仅在几何量视图中展示）。
+- **`process_library.rb`** — 按分类的工艺做法，提供替代损耗率与派生项（前端工艺管理页编辑）。
 - **`formula.rb`** — 派生项公式求值（变量 `area/length/volume/count` + 基础算术 + `ceil/floor/round/min/max`）。自实现递归下降解析器，不依赖 `eval`。
 
 ### SU 运行时层（依赖 SketchUp API）

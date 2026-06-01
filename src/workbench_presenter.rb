@@ -1,5 +1,5 @@
 module SuTakeoff
-  # 构建前端工作台所需的全部数据（usages、geometry_usages、materials_info、overview 等）。
+  # 构建前端工作台所需的全部数据（geometry_usages、hierarchy、overview 等）。
   # Dialog 不再重复做 policy 决议、unit 选择、geometry 聚合，只负责 IO。
   class WorkbenchPresenter
     def initialize(items:, openings:, hierarchy:, colors:,
@@ -24,14 +24,10 @@ module SuTakeoff
         openings: @openings.map(&:to_h),
         ignored: ignored_names,
         unresolved: unresolved_names,
-        materials_info: build_materials_info,
         categories: @processes.all_categories,
-        length_units: @policy.length_units,
-        usages: usages.map(&:to_h),
         hierarchy: @hierarchy,
         geometry_usages: build_geometry_usages,
-        tag_defs: @tag_defs,
-        by_material: {}
+        tag_defs: @tag_defs
       }
     end
 
@@ -63,10 +59,6 @@ module SuTakeoff
 
     def calc
       @calc ||= Calculator.new(@mapping, @processes, @component_mapping, policy: @policy)
-    end
-
-    def usages
-      @usages ||= calc.compute(@items, @openings, {})
     end
 
     # ---- overview ----
@@ -139,10 +131,7 @@ module SuTakeoff
 
     def method_from_usage(usage)
       unit = usage.unit
-      return :length if @policy.length_units.include?(unit)
-      return :volume if @policy.volume_units.include?(unit)
-      return :count  if @policy.count_units.include?(unit)
-      :area
+      TakeoffPolicy.classify_unit(unit)
     end
 
     def build_opening_area_map
@@ -244,47 +233,5 @@ module SuTakeoff
       end
     end
 
-    # ---- materials_info ----
-
-    def build_materials_info
-      by_name = Hash.new { |h, k| h[k] = [] }
-      face_items.each { |it| by_name[it.su_material] << it if it.su_material }
-
-      used_names.map do |name|
-        group = by_name[name] || []
-        parts = Hash.new(0.0)
-        spaces = Hash.new(0.0)
-        linear_count = 0
-        total_length = 0.0
-        group.each do |it|
-          parts[Calculator.face_orientation(it.normal)] += it.qty
-          spaces[Calculator.extract_space(it)] += it.qty
-          if it.width && it.width > 0 && it.height && (it.height / it.width) > 15
-            linear_count += 1
-            total_length += it.height
-          end
-        end
-        suggested_unit = (group.size > 0 && linear_count.to_f / group.size > 0.5) ? 'm' : 'm²'
-        record = @mapping.get(name)
-        color = @colors[name] || @colors.values.first || { r: 128, g: 128, b: 128, a: 255 }
-
-        {
-          su_name: name,
-          material_name: record&.material_name || '',
-          category: record&.category || '',
-          mapped_unit: record&.unit,
-          spec: record&.spec || '',
-          waste_rate: record&.default_waste_rate || 0.0,
-          face_count: group.size,
-          total_area: group.sum(&:qty).round(2),
-          total_length: total_length.round(2),
-          linear_count: linear_count,
-          parts: parts.transform_values { |v| v.round(2) },
-          spaces: spaces.sort_by { |_, a| -a }.first(3).map { |s, a| { name: s, area: a.round(2) } },
-          suggested_unit: suggested_unit,
-          color: color
-        }
-      end
-    end
   end
 end

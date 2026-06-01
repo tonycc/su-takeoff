@@ -15,34 +15,29 @@ module SuTakeoff
 
     METHODS = %i[area length volume count skip].freeze
 
-    DEFAULT_LENGTH_UNITS = %w[m mm cm dm km].freeze
-    DEFAULT_COUNT_UNITS  = %w[个 件 套 组 台 只].freeze
-    DEFAULT_VOLUME_UNITS = %w[m³ m3 L 立方].freeze
+    # 单位 → 计量方式启发（直接匹配单位字符串，不需要额外配置）
+    LENGTH_UNITS = %w[m mm cm dm km].freeze
+    COUNT_UNITS  = %w[个 件 套 组 台 只 根 把 支 块 条 片 张 卷 桶 包 箱 瓶 罐 袋 盒].freeze
+    # 体积：含 ³ / 3 / L / 立方 等
 
     DEFAULT_MIN_ASPECT           = 15
     DEFAULT_MAX_SHORT_EDGE       = 0.2  # m
     DEFAULT_VERTICAL_SLAB_GAP    = 0.05 # m
     DEFAULT_VERTICAL_SLAB_TOL    = 0.02
 
-    attr_reader :length_units, :count_units, :volume_units,
-                :vertical_slab_gap, :vertical_slab_area_tol
+    attr_reader :vertical_slab_gap, :vertical_slab_area_tol
 
     # mapping: MaterialMapping 实例（用于 unit 兜底）
     # layer_rules: { '线条' => :length, '砌体' => :volume, ... }
     #              值可以是 String 或 Symbol，内部归一为 Symbol
     # heuristics_enabled: 启发式开关
-    # length_units / count_units / volume_units: unit 词表（nil 用默认）
     # thresholds: { linear_min_aspect_ratio:, linear_max_short_edge_m: }
     def initialize(mapping:, layer_rules: {}, heuristics_enabled: true,
-                   length_units: nil, count_units: nil, volume_units: nil,
                    tag_defs: {}, thresholds: {})
       @mapping = mapping
       @layer_rules = normalize_layer_rules(layer_rules)
       @tag_defs = tag_defs || {}
       @heuristics = heuristics_enabled
-      @length_units = (length_units && !length_units.empty?) ? length_units : DEFAULT_LENGTH_UNITS
-      @count_units  = (count_units  && !count_units.empty?)  ? count_units  : DEFAULT_COUNT_UNITS
-      @volume_units = (volume_units && !volume_units.empty?) ? volume_units : DEFAULT_VOLUME_UNITS
       @min_aspect      = thresholds[:linear_min_aspect_ratio] || DEFAULT_MIN_ASPECT
       @max_short_edge  = thresholds[:linear_max_short_edge_m] || DEFAULT_MAX_SHORT_EDGE
       @vertical_slab_gap     = thresholds[:vertical_slab_gap_m] || DEFAULT_VERTICAL_SLAB_GAP
@@ -117,11 +112,17 @@ module SuTakeoff
       @tag_defs.key?(tag_name)
     end
 
-    # 将单位转为计量方式（供 Scanner 传播组件映射的 unit → method）
+    # 单位 → 计量方式（供 Scanner 传播组件映射的 unit → method）
     def method_for_unit(unit)
-      return :length if @length_units.include?(unit)
-      return :volume if @volume_units.include?(unit)
-      return :count  if @count_units.include?(unit)
+      self.class.classify_unit(unit)
+    end
+
+    # 单位字符串直接推导计量方式，无需分类配置列表。
+    def self.classify_unit(unit)
+      return :area   if unit.nil? || unit.empty?
+      return :volume if unit.match?(/[³3]/) || unit == 'L' || unit == '立方'
+      return :count  if COUNT_UNITS.include?(unit)
+      return :length if LENGTH_UNITS.include?(unit)
       :area
     end
 
@@ -143,10 +144,7 @@ module SuTakeoff
     end
 
     def method_from_unit(unit)
-      return :length if @length_units.include?(unit)
-      return :volume if @volume_units.include?(unit)
-      return :count  if @count_units.include?(unit)
-      :area
+      self.class.classify_unit(unit)
     end
 
     def normalize_layer_rules(rules)

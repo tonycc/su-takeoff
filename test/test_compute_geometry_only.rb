@@ -23,19 +23,6 @@ module SuTakeoff
       @calc = Calculator.new(@mapping, @processes, @cm)
     end
 
-    def test_net_area_same_as_compute
-      items = [
-        ScanItem.new(1, 'tile_302', 27.0, 'm2', :face, [0,0,1], 3, 9, 'Layer0', ['客厅'], [101], 0),
-        ScanItem.new(2, 'tile_302', 20.0, 'm2', :face, [0,0,1], 4, 5, 'Layer0', ['主卧'], [102], 0),
-      ]
-      geo = @calc.compute_geometry_only(items, [])
-      full = @calc.compute(items, [], {})
-
-      geo_net = geo.sum(&:net_area)
-      full_net = full.select { |u| u.layer.empty? }.sum(&:net_area)
-      assert_in_delta geo_net, full_net, 0.01
-    end
-
     def test_purchase_qty_equals_net_area
       items = [
         ScanItem.new(1, 'tile_302', 100.0, 'm2', :face, [0,0,1], 10, 10, 'Layer0', ['客厅'], [101], 0),

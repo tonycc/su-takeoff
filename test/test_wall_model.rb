@@ -181,31 +181,17 @@ module SuTakeoff
       assert_equal 5, all_openings.size
     end
 
-    def test_all_mapped_materials_present
-      result = @calc.compute(all_items, all_openings, {})
-      refute_empty result, '至少应有已映射材质的结果'
-
-      names = result.map(&:material_name).uniq
-      assert_includes names, '爵士白大理石'
-      assert_includes names, '多乐士净味白'
-      assert_includes names, '马可波罗灰砖'
-      assert_includes names, '橡木复合地板'
-      assert_includes names, '实木踢脚线'
-    end
-
     def test_living_room_marble_floor
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
       floor_usage = result.find { |u| u.space == '客厅' && u.part == 'floor' }
 
       refute_nil floor_usage
       assert_equal '爵士白大理石', floor_usage.material_name
       assert_in_delta 40.0, floor_usage.net_area, 0.01
-      # 石材干挂损耗率 0.08 → 40 * 1.08 = 43.2
-      assert_in_delta 43.2, floor_usage.purchase_qty, 0.01
     end
 
     def test_living_room_walls_with_opening_deduction
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       # 客厅墙面: paint_w, 四面总计 22.4+22.4+14+14 = 72.8 m² 毛面积
       # 扣减: 南墙门 2.1m² + 东墙窗户 3.0m² = 5.1m²
@@ -217,18 +203,16 @@ module SuTakeoff
     end
 
     def test_bedroom_wood_floor
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
       floor_usage = result.find { |u| u.space == '主卧' && u.part == 'floor' }
 
       refute_nil floor_usage
       assert_equal '橡木复合地板', floor_usage.material_name
       assert_in_delta 20.0, floor_usage.net_area, 0.01
-      # 木材悬浮铺装损耗率 0.05 → 20 * 1.05 = 21.0
-      assert_in_delta 21.0, floor_usage.purchase_qty, 0.01
     end
 
     def test_bedroom_walls_with_opening_deduction
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       # 主卧墙面: 北14 + 南14 + 东11.2 + 西11.2 = 50.4 m² 毛面积
       # 扣减: 南墙窗户 2.25m² + 西墙门 2.1m² = 4.35m²
@@ -240,7 +224,7 @@ module SuTakeoff
     end
 
     def test_bathroom_full_tile
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       # 卫生间: 地面 6m² marble → tile_302, 墙面 8.4+8.4+5.6+5.6 = 28m² tile_302
       # 扣减: 东墙门 1.68m² → 净墙面 = 28 - 1.68 = 26.32m²
@@ -250,8 +234,6 @@ module SuTakeoff
       refute_nil bathroom_floor
       assert_equal '马可波罗灰砖', bathroom_floor.material_name
       assert_in_delta 6.0, bathroom_floor.net_area, 0.01
-      # 瓷砖密缝铺贴损耗率 0.05 → 6 * 1.05 = 6.3
-      assert_in_delta 6.3, bathroom_floor.purchase_qty, 0.01
 
       bathroom_walls = result.select { |u| u.space == '卫生间' && u.part == 'wall' && u.material_name == '马可波罗灰砖' }
       net_wall = bathroom_walls.sum(&:net_area).round(2)
@@ -259,7 +241,7 @@ module SuTakeoff
     end
 
     def test_bathroom_ceiling_paint
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
       ceiling = result.find { |u| u.space == '卫生间' && u.part == 'ceiling' }
 
       refute_nil ceiling
@@ -268,7 +250,7 @@ module SuTakeoff
     end
 
     def test_total_paint_wall_area_across_all_rooms
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       # 客厅墙面净 67.7 + 主卧墙面净 46.05 = 113.75 m² paint_w
       all_paint_walls = result.select { |u| u.part == 'wall' && u.material_name == '多乐士净味白' }
@@ -277,7 +259,7 @@ module SuTakeoff
     end
 
     def test_skirting_linear_material
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       # 踢脚线: unit == 'm', 累加 height (即墙面长度)
       # 客厅四面踢脚线: 8+8+5+5 = 26m
@@ -288,28 +270,8 @@ module SuTakeoff
       assert_in_delta 26.0, total_length, 0.01
     end
 
-    def test_group_by_material_aggregation
-      result = @calc.compute(all_items, all_openings, {})
-      groups = @calc.group_by_material(result)
-
-      # 涂料（多乐士净味白）应覆盖三个房间的天花 + 两个房间的墙面
-      assert groups.key?('多乐士净味白')
-      # 客厅天花40 + 主卧天花20 + 卫生间天花6 + 墙面净 ≈ 113.75 = ~179.75
-      paint_net = groups['多乐士净味白'][:net_area]
-      assert_in_delta 179.75, paint_net, 1.0
-
-      # 瓷砖（马可波罗灰砖）应覆盖卫生间全部
-      assert groups.key?('马可波罗灰砖')
-      tile_net = groups['马可波罗灰砖'][:net_area]
-      assert_in_delta 32.32, tile_net, 0.5 # 地面6 + 墙面净26.32
-
-      # 石材（爵士白大理石）仅客厅地面
-      assert groups.key?('爵士白大理石')
-      assert_in_delta 40.0, groups['爵士白大理石'][:net_area], 0.01
-    end
-
     def test_material_count_in_result
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       # 材料种类: 爵士白大理石(1) + 多乐士净味白(3 ceiling + 2 wall) + 马可波罗灰砖(2) + 橡木复合地板(1) + 实木踢脚线(1)
       # = 至少 10 条 usage
@@ -317,7 +279,7 @@ module SuTakeoff
     end
 
     def test_component_path_preserved
-      result = @calc.compute(all_items, [], {})
+      result = @calc.compute_geometry_only(all_items, [])
 
       living_usages = result.select { |u| u.space == '客厅' }
       refute_empty living_usages
@@ -325,7 +287,7 @@ module SuTakeoff
     end
 
     def test_ceiling_paint_in_all_rooms
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
 
       %w[客厅 主卧 卫生间].each do |room|
         ceiling = result.find { |u| u.space == room && u.part == 'ceiling' }
@@ -336,7 +298,7 @@ module SuTakeoff
 
     def test_no_ceiling_openings_deduction
       # 天花不应有洞口扣减（洞口在墙上）
-      result = @calc.compute(all_items, all_openings, {})
+      result = @calc.compute_geometry_only(all_items, all_openings)
       result.select { |u| u.part == 'ceiling' }.each do |ceiling|
         assert_equal ceiling.net_area, ceiling.net_area, "#{ceiling.space} 天花不应被扣减"
       end

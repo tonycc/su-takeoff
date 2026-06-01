@@ -10,11 +10,6 @@ module SuTakeoff
     VERTICAL_SLAB_AREA_TOLERANCE = 0.02
     VERTICAL_SLAB_GAP_M = 0.05      # 5 cm 薄板厚度
 
-    # Fallback constants used when config.json is unavailable (e.g. tests).
-    # In production, unit classification comes from config.json.
-    FALLBACK_LENGTH_UNITS = %w[m mm cm dm km].freeze
-    FALLBACK_COUNT_UNITS = %w[个 件 套 组 台 只].freeze
-
     def initialize(mapping, process_library, component_mapping = nil, policy: nil)
       @mapping = mapping
       @processes = process_library
@@ -23,129 +18,6 @@ module SuTakeoff
     end
 
     attr_accessor :policy
-
-    # Returns Array of MaterialUsage
-    # items: Array of ScanItem
-    # openings: Array of Opening
-    # process_overrides: Hash { su_material_name => process_name }
-    def compute(items, openings, process_overrides)
-      opening_area_by_face, openings_by_face = build_opening_index(openings)
-
-      # 薄板去重（水平楼板/天花板 + 竖直薄板踢脚线）
-      items = dedup_thin_slabs(items)
-      items = dedup_vertical_slabs(items)
-
-      # Group items by (space, part, su_material_name, method, confidence, source)
-      groups = Hash.new { |h, k| h[k] = [] }
-      items.each do |item|
-        if item.kind == :instance
-          # 纯边线组件无映射也算件数，不跳过
-        elsif item.kind == :count_solid || item.kind == :linear_solid || item.kind == :solid
-          # layer rule / 标签 容器级整体量取，无需 mapping 检查
-        else
-          next unless @mapping.get(item.su_material)
-        end
-
-        method, confidence, source = resolve_method(item)
-        next if method == :skip
-
-        part = self.class.face_orientation(item.normal)
-        space = self.class.extract_space(item)
-        key = [space, part, item.su_material, item.unit, method, confidence, source]
-        groups[key] << item
-      end
-
-      # Build MaterialUsage for each group (fan-out via derivations)
-      usages = groups.flat_map do |key, grp_items|
-        space, part, su_mat, item_unit, method, confidence, source = key
-        first_item = grp_items.first
-        is_instance = first_item&.kind == :instance
-
-        record = if is_instance
-          component_mapping.get(su_mat)
-        else
-          @mapping.get(su_mat)
-        end
-        # :count_solid from layer rule may not be mapped; guard with safe navigation below
-
-        geom = build_geometry(method, grp_items, opening_area_by_face, openings_by_face)
-        is_count  = (method == :count)
-        is_linear = (method == :length)
-
-        # Find the process (with optional override)
-        process = if process_overrides[su_mat]
-          @processes.processes_for(record&.category || '').find { |p|
-            p.name == process_overrides[su_mat]
-          }
-        else
-          @processes.processes_for(record&.category || '').first
-        end
-
-        waste_rate = record&.default_waste_rate || 0.0
-        detail = if is_count
-          { gross: geom[:gross], deduction: 0, instance_count: grp_items.size,
-            instances: geom[:faces_detail] }
-        else
-          { gross: geom[:gross].round(3), deduction: geom[:total_deduction].round(3),
-            face_count: grp_items.size, faces: geom[:faces_detail] }
-        end
-
-        primary = MaterialUsage.new(
-          space: space, part: part,
-          material_name: record&.material_name || su_mat,
-          category: record&.category || '',
-          spec: record&.spec || '',
-          net_area: geom[:net_area].round(is_count ? 0 : 4),
-          waste_rate: process&.waste_rate || waste_rate,
-          su_material_name: su_mat,
-          unit: unit_for_method(method, record, source, item_unit),
-          detail: detail,
-          confidence: confidence,
-          source: source
-        )
-        primary.items = grp_items
-        usages = [primary]
-
-        # Fan-out derivations as additional usages
-        if process && process.derivations && !process.derivations.empty?
-          process.derivations.each do |deriv|
-            # 派生公式上下文按 method 注入：area/length/volume 取对应几何量，
-            # 其余维度为 0。允许公式跨维度（如 volume*0.06 求砂浆 m³）。
-            base_ctx = {
-              area:   (method == :area)   ? geom[:net_area] : 0,
-              length: (method == :length) ? geom[:net_area] : 0,
-              volume: (method == :volume) ? geom[:net_area] : 0,
-              count:  (method == :count)  ? geom[:net_area] : 0
-            }
-            deriv_qty = eval_formula(deriv.formula, base_ctx)
-            derived = MaterialUsage.new(
-              space: space, part: part,
-              material_name: deriv.layer,
-              category: deriv.category,
-              spec: record&.spec || '',
-              net_area: deriv_qty.round(4),
-              waste_rate: deriv.waste_rate,
-              su_material_name: su_mat,
-              layer: deriv.layer,
-              parent_su_material: su_mat,
-              unit: deriv.unit,
-              detail: {
-                formula: deriv.formula,
-                base_value: geom[:net_area].round(is_count ? 0 : 3),
-                base_unit: is_count ? record.unit : base_unit_for(method),
-                instance_count: grp_items.size
-              },
-              confidence: confidence, source: source
-            )
-            derived.items = grp_items
-            usages << derived
-          end
-        end
-        usages
-      end
-
-      usages
-    end
 
     # 几何用量计算：含洞口扣减、薄板去重、面/线材识别，不含损耗率与工艺做法
     # 不接受 process_overrides 参数，内部不使用 @processes
@@ -211,21 +83,6 @@ module SuTakeoff
       end
     end
 
-    # Returns Hash { material_name => { net_area:, purchase_qty:, items: [MaterialUsage] } }
-    def group_by_material(usages)
-      grouped = Hash.new { |h, k| h[k] = { net_area: 0.0, purchase_qty: 0.0, items: [] } }
-      usages.each do |u|
-        grouped[u.material_name][:net_area] += u.net_area
-        grouped[u.material_name][:purchase_qty] += u.purchase_qty
-        grouped[u.material_name][:items] << u
-      end
-      grouped.each_value do |v|
-        v[:net_area] = v[:net_area].round(2)
-        v[:purchase_qty] = v[:purchase_qty].round(2)
-      end
-      grouped
-    end
-
     # Returns the unmapped material names from items
     def unmapped_materials(items)
       @mapping.unmapped_materials(items.map(&:su_material).compact)
@@ -251,72 +108,11 @@ module SuTakeoff
 
     private
 
-    def length_units
-      @policy&.length_units || FALLBACK_LENGTH_UNITS
-    end
-
-    def count_units
-      @policy&.count_units || FALLBACK_COUNT_UNITS
-    end
-
     def component_mapping
       @component_mapping
     end
 
-    def eval_formula(formula, geom)
-      ctx =
-        if geom.is_a?(Hash)
-          {
-            area:   geom[:area]   || geom[:net_area] || 0,
-            length: geom[:length] || geom[:net_length] || 0,
-            volume: geom[:volume] || geom[:net_volume] || 0,
-            count:  geom[:count]  || 0
-          }
-        else
-          # 兼容老调用：传单个数字时按 area 处理
-          { area: geom, length: 0, volume: 0, count: 0 }
-        end
-      Formula.eval(formula, ctx)
-    end
-
-    # ---- 方法决议 ----
-    # 返回 [method, confidence, source]
-    #
-    # 有 policy 时走 4 档优先级。无 policy 时按映射 unit 兜底（与 P1 之前的行为
-    # 等价），便于现有调用零变更。
-    def resolve_method(item)
-      if @policy
-        r = @policy.resolve(item)
-        confidence = (r.source == :heuristic) ? :heuristic : :explicit
-        return [r.method, confidence, r.source]
-      end
-
-      record = if item.kind == :instance
-        component_mapping.get(item.su_material)
-      else
-        @mapping.get(item.su_material)
-      end
-
-      # 纯边线组件无映射默认按件数统计
-      if item.kind == :instance && record.nil?
-        return [:count, :explicit, :mapping]
-      end
-
-      return [:skip, :explicit, :default] unless record
-
-      method =
-        if item.kind == :instance || count_units.include?(record.unit)
-          :count
-        elsif length_units.include?(record.unit)
-          :length
-        else
-          :area
-        end
-      [method, :explicit, :mapping]
-    end
-
-    # compute_geometry_only 专用：允许未映射面 item，按面长宽比兜底判定线材。
-    # 与 resolve_method 的差异：未映射时不返回 :skip，而是按几何特征判定。
+    # compute_geometry_only 专用：决议方法，允许未映射面 item。
     def resolve_method_geometry(item)
       if @policy
         r = @policy.resolve(item)
@@ -337,12 +133,10 @@ module SuTakeoff
 
       if record
         method =
-          if item.kind == :instance || count_units.include?(record.unit)
+          if item.kind == :instance
             :count
-          elsif length_units.include?(record.unit)
-            :length
           else
-            :area
+            TakeoffPolicy.classify_unit(record.unit)
           end
         [method, :explicit, :mapping]
       else
@@ -371,16 +165,6 @@ module SuTakeoff
       end
     end
 
-    # 派生项展示用的基准单位标签
-    def base_unit_for(method)
-      case method
-      when :length then 'm'
-      when :volume then 'm³'
-      when :count  then '件'
-      else 'm²'
-      end
-    end
-
     # 单位显示：method 决定语义，source 决定细节
     #   :count   → record.unit（个/件/套），缺省回退 item_unit
     #   :length  → mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位强制 'm'
@@ -391,7 +175,7 @@ module SuTakeoff
       when :count
         record&.unit || item_unit || '个'
       when :length
-        if source == :mapping && record && length_units.include?(record.unit)
+        if source == :mapping && record && TakeoffPolicy.classify_unit(record.unit) == :length
           record.unit
         else
           'm'

@@ -1,8 +1,7 @@
 // src/ui/app.js — 核心：导航、桥接、状态、工具函数
 
 function renderWorkbenchError(info) {
-  var pageId = 'page-' + (window._currentPage === 'material' ? 'material' : 'position');
-  var container = document.getElementById(pageId);
+  var container = document.getElementById('page-position');
   container.innerHTML = '<div class="mv-error">' + esc(info.error) + '<br><small>' +
     (info.backtrace || []).map(esc).join('<br>') + '</small></div>';
   console.error('Workbench error:', info);
@@ -23,7 +22,6 @@ function switchPage(page) {
   document.getElementById('page-' + page).style.display = 'block';
   if (page === 'mapping') callSketchUp('get_mappings');
   if (page === 'comp-mapping') callSketchUp('get_component_mappings');
-  if (page === 'tag-mapping') callSketchUp('get_tag_mappings');
   if (page === 'settings') callSketchUp('get_processes');
   if (isView) renderCurrentPage();
 }
@@ -51,13 +49,11 @@ function renderWorkbench(data) {
     buildWorkbenchIndexes(data);
     // 保留已有展开状态（标签/映射变更触发重扫时避免折叠）
     if (!_mv.expandedNodes) _mv.expandedNodes = {};
-    if (!_mv.expandedMaterials) _mv.expandedMaterials = {};
     if (!_mv.expandedSpecs) _mv.expandedSpecs = {};
     document.querySelectorAll('.page-content .empty-state').forEach(function(el) { el.style.display = 'none'; });
     renderCurrentPage();
   } catch(e) {
-    var pageId = 'page-' + (window._currentPage === 'material' ? 'material' : 'position');
-    var container = document.getElementById(pageId);
+    var container = document.getElementById('page-position');
     container.innerHTML = '<div class="mv-error">渲染错误: ' + e.message + '</div>';
     console.error('renderWorkbench error:', e);
   }
@@ -99,7 +95,6 @@ function renderCurrentPage() {
   if (!window._workbench) return;
   var page = window._currentPage;
   if (page === 'position') renderPositionView(window._workbench);
-  else if (page === 'material') renderMaterialView(window._workbench);
 }
 
 // ---------------- Shared helpers ----------------
@@ -134,7 +129,6 @@ function locateEntity(entityId) {
 
 // ---------------- Model → UI face highlight ----------------
 window.highlightFaceInUI = function(faceId, activePathIds) {
-  if (window._currentPage !== 'position') return;
   if (!window._workbench) return;
 
   var data = window._workbench;
@@ -160,10 +154,6 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
 
   // 展开从根到目标 entity 路径上的所有祖先节点
   expandAncestorsToEntity(data.hierarchy, targetEntityId);
-
-  // 展开包含该面的材质汇总行（面明细行是材质汇汇总行的子行）
-  var matKey = targetEntityId + ':' + targetUsage.su_material;
-  _mv.expandedMaterials[matKey] = true;
 
   // 设置高亮面 key（face_id + 路径）并重绘
   _mv.highlightFaceKey = faceId + ':' + pathIds.join(',');

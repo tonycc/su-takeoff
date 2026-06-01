@@ -9,9 +9,6 @@ function renderProcesses(data) {
   html += '<div class="settings-card">' + renderCategoryUnitConfig('材料分类', 'material_category_units', data.material_category_units || data.category_units || []) + '</div>';
   html += '<div class="settings-card">' + renderCategoryUnitConfig('组件分类', 'component_category_units', data.component_category_units || []) + '</div>';
   html += '<div class="settings-card">' + renderUnitTagConfig(data.config_units || []) + '</div>';
-  html += '<div class="settings-card">' + renderUnitClassConfig('长度单位', 'length_units', data.length_units || [], 'length') + '</div>';
-  html += '<div class="settings-card">' + renderUnitClassConfig('件数单位', 'count_units', data.count_units || [], 'count') + '</div>';
-  html += '<div class="settings-card">' + renderUnitClassConfig('体积单位', 'volume_units', data.volume_units || [], 'volume') + '</div>';
   html += '<div class="settings-card">' + renderTagDefsConfig(data.tag_defs || {}) + '</div>';
   html += '<div class="settings-card">' + renderHeuristicsConfig(data.heuristics_enabled !== false) + '</div>';
   html += '<div class="settings-card">' + renderHeuristicThresholdsConfig(data.heuristic_thresholds || {}) + '</div>';
@@ -71,58 +68,6 @@ function addCategoryUnit(key) {
   unitSelect.selectedIndex = 0;
 }
 
-// ---------------- Unit classification config ----------------
-function renderUnitClassConfig(title, key, items, typeName) {
-  var cfg = window._processData || {};
-  var allUnits = cfg.config_units || [];
-
-  var html = '<div class="sc-head">' + title + ' <span style="font-weight:normal;font-size:11px;color:#6c7086">（' + typeName + '）</span></div>';
-  html += '<div class="sc-body">';
-  html += '<div class="tag-list" id="' + key + '-list">';
-  items.forEach(function(u) {
-    html += '<span class="tag-chip">' + esc(u) +
-      '<button onclick="removeUnitClass(\'' + key + '\', \'' + escAttr(u) + '\')" class="tag-chip-del">×</button></span>';
-  });
-  html += '</div>';
-  html += '<div class="cu-add-row" style="margin-top:8px">' +
-    '<select id="' + key + '-select" style="width:120px">' +
-      '<option value="">选择单位...</option>' +
-      allUnits.map(function(u) { return '<option value="' + esc(u) + '">' + esc(u) + '</option>'; }).join('') +
-    '</select>' +
-    '<button onclick="addUnitClass(\'' + key + '\')" class="primary-btn">添加</button>' +
-    '</div>';
-  html += '</div>';
-  return html;
-}
-
-function addUnitClass(key) {
-  var sel = document.getElementById(key + '-select');
-  var val = sel.value;
-  if (!val) return;
-  var data = window._processData;
-  var list = data[key] || [];
-  if (list.indexOf(val) >= 0) return;
-  list.push(val);
-  data[key] = list;
-  persistConfig();
-  var chip = document.createElement('span');
-  chip.className = 'tag-chip';
-  chip.innerHTML = esc(val) + ' <button onclick="removeUnitClass(\'' + key + '\', \'' + escAttr(val) + '\')" class="tag-chip-del">×</button>';
-  document.getElementById(key + '-list').appendChild(chip);
-  sel.selectedIndex = 0;
-}
-
-function removeUnitClass(key, val) {
-  var data = window._processData;
-  var list = data[key] || [];
-  var idx = list.indexOf(val);
-  if (idx >= 0) list.splice(idx, 1);
-  persistConfig();
-  document.querySelectorAll('#' + key + '-list .tag-chip').forEach(function(chip) {
-    if (chip.textContent.indexOf(val) >= 0) chip.remove();
-  });
-}
-
 // ---------------- Unit tag config ----------------
 function renderUnitTagConfig(units) {
   var html = '<div class="sc-head">可选单位</div>';
@@ -179,10 +124,6 @@ function persistConfig() {
     material_category_units: data.material_category_units || [],
     component_category_units: data.component_category_units || [],
     units: data.config_units || [],
-    length_units: data.length_units || [],
-    count_units: data.count_units || [],
-    volume_units: data.volume_units || [],
-    layer_rules: data.layer_rules || {},
     heuristics_enabled: data.heuristics_enabled !== false,
     heuristic_thresholds: data.heuristic_thresholds || {},
     tag_defs: data.tag_defs || {}
@@ -317,123 +258,6 @@ function refreshTagDefsCard() {
   if (!container) return;
   var data = window._processData;
   container.innerHTML = renderTagDefsInner(data.tag_defs || {});
-}
-
-// ---------------- Layer rules config ----------------
-// 图层 → 计量方式（area/length/volume/count）。
-// 这是 Policy 优先级第 2 档「图层规则」的数据来源。
-function renderLayerRulesInner(rules) {
-  var keys = Object.keys(rules || {});
-  if (keys.length === 0) {
-    return '<p class="hint">未配置图层规则。例如：把"线条"图层强制按长度计算。</p>';
-  }
-  var html = '<table style="width:100%"><thead><tr>' +
-    '<th style="width:60%">图层名</th><th>计量方式</th><th style="width:80px"></th>' +
-    '</tr></thead><tbody>';
-  keys.forEach(function(layer) {
-    html += renderLayerRuleRow(layer, rules[layer]);
-  });
-  html += '</tbody></table>';
-  return html;
-}
-
-function refreshLayerRulesCard() {
-  var container = document.getElementById('layer-rules-list');
-  if (!container) return;
-  var data = window._tagMappingData || window._processData;
-  if (!data) return;
-  container.innerHTML = renderLayerRulesInner(data.layer_rules || {});
-}
-
-function renderLayerRulesConfig(rules) {
-  var html = '<div class="sc-head">图层算量规则 ' +
-    '<span style="font-weight:normal;font-size:11px;color:#6c7086">' +
-    '（指定图层下的面/构件按特定方式计量；优先级低于实例标签，高于材质映射）' +
-    '</span></div>';
-  html += '<div class="sc-body">';
-  html += '<div id="layer-rules-list">' + renderLayerRulesInner(rules) + '</div>';
-  html += '<div class="cu-add-row" style="margin-top:8px">' +
-    '<input type="text" id="lr-new-layer" placeholder="图层名" style="width:200px">' +
-    '<select id="lr-new-method">' +
-      '<option value="area">面积 (area)</option>' +
-      '<option value="length">长度 (length)</option>' +
-      '<option value="volume">体积 (volume)</option>' +
-      '<option value="count">件数 (count)</option>' +
-    '</select>' +
-    '<button onclick="addLayerRule()" class="primary-btn">添加</button>' +
-    '</div>';
-  html += '</div>';
-  return html;
-}
-
-function renderLayerRuleRow(layer, method) {
-  return '<tr data-layer="' + escAttr(layer) + '">' +
-    '<td>' + esc(layer) + '</td>' +
-    '<td>' +
-      '<select onchange="updateLayerRule(\'' + escAttr(layer) + '\', this.value)">' +
-        ['area','length','volume','count'].map(function(m) {
-          var s = m === method ? ' selected' : '';
-          return '<option value="' + m + '"' + s + '>' + m + '</option>';
-        }).join('') +
-      '</select>' +
-    '</td>' +
-    '<td><button onclick="removeLayerRule(\'' + escAttr(layer) + '\')">删除</button></td>' +
-    '</tr>';
-}
-
-function addLayerRule() {
-  var input = document.getElementById('lr-new-layer');
-  var sel = document.getElementById('lr-new-method');
-  var layer = input.value.trim();
-  var method = sel.value;
-  if (!layer) return;
-  var data = window._processData;
-  data.layer_rules = data.layer_rules || {};
-  data.layer_rules[layer] = method;
-  persistConfig();
-  // 重渲染本卡片即可
-  refreshLayerRulesCard();
-  input.value = '';
-}
-
-function updateLayerRule(layer, method) {
-  var data = window._processData;
-  data.layer_rules = data.layer_rules || {};
-  data.layer_rules[layer] = method;
-  persistConfig();
-}
-
-function removeLayerRule(layer) {
-  var data = window._processData;
-  if (data.layer_rules) {
-    delete data.layer_rules[layer];
-  }
-  persistConfig();
-  refreshLayerRulesCard();
-}
-
-function refreshLayerRulesCard() {
-  // 简单粗暴：找到当前的卡片重新渲染整片
-  var card = document.getElementById('layer-rules-list');
-  if (!card) return;
-  var data = window._processData;
-  card.outerHTML = '<div id="layer-rules-list">' +
-    renderLayerRulesInner(data.layer_rules || {}) + '</div>';
-}
-
-function renderLayerRulesInner(rules) {
-  var keys = Object.keys(rules || {});
-  if (keys.length === 0) {
-    return '<p class="hint">未配置图层规则。例如：把"线条"图层强制按长度计算。</p>';
-  }
-  var html = '<table style="width:100%"><thead><tr>' +
-    '<th style="width:60%">图层名</th><th>计量方式</th><th style="width:80px"></th>' +
-    '</tr></thead><tbody>';
-  keys.forEach(function(layer) {
-    html += renderLayerRuleRow(layer, rules[layer]);
-  });
-  html += '</tbody></table>';
-  return html;
 }
 
 // ---------------- Heuristics toggle ----------------
@@ -726,93 +550,6 @@ function deleteProcess(category, name) {
 
 function unignoreMaterial(name) {
   callSketchUp('unignore', name);
-}
-
-// ---------------- 标记映射页（独立菜单） ----------------
-// 自动识别模型中的图层，为每个图层配置计量方式
-window.renderTagMappings = function(rows) {
-  var container = document.getElementById('tag-mapping-content');
-  if (!container) return;
-
-  var layers = rows.filter(function(r) { return r.kind === 'layer'; });
-
-  var html = '';
-
-  html += '<div class="sc-card">';
-  html += '<div class="sc-head">标记/图层映射 ' +
-    '<span style="font-weight:normal;font-size:11px;color:#6c7086">' +
-    '（自动识别模型中使用的图层（不含 Layer0），为每个图层配置计量方式）' +
-    '</span></div>';
-  html += '<div class="sc-body">';
-  if (layers.length === 0) {
-    html += '<p class="hint">模型中未发现非默认图层。请在 SketchUp 中为构件分配图层。</p>';
-  } else {
-    html += renderMappingTable(layers);
-  }
-  html += '</div></div>';
-
-  container.innerHTML = html;
-};
-
-function renderMappingTable(rows) {
-  var html = '<table style="width:100%"><thead><tr>' +
-    '<th style="width:30%">标记/图层名</th>' +
-    '<th style="width:20%">状态</th>' +
-    '<th>计量方式</th>' +
-    '<th style="width:60px">操作</th>' +
-    '</tr></thead><tbody>';
-
-  rows.forEach(function(row) {
-    var statusHtml;
-    if (!row.in_model) {
-      statusHtml = '<span class="tag tag-unresolved" style="font-size:10px">不在模型中</span>';
-    } else if (!row.method) {
-      statusHtml = '<span class="tag tag-heuristic" style="font-size:10px">待配置</span>';
-    } else {
-      statusHtml = '<span class="tag tag-mapped" style="font-size:10px">已配置</span>';
-    }
-
-    var name = row.name;
-    var method = row.method || '';
-
-    html += '<tr>' +
-      '<td>' + esc(name) + (row.in_model ? '' : ' <span style="color:#6c7086;font-size:10px">(历史)</span>') + '</td>' +
-      '<td>' + statusHtml + '</td>' +
-      '<td>' +
-        '<select>' +
-          '<option value="" ' + (method === '' ? 'selected' : '') + '>未设置</option>' +
-          ['area','length','volume','count'].map(function(m) {
-            var label = { area: '面积', length: '长度', volume: '体积', count: '件数' }[m];
-            return '<option value="' + m + '"' + (m === method ? ' selected' : '') + '>' + label + ' (' + m + ')</option>';
-          }).join('') +
-        '</select>' +
-      '</td>' +
-      '<td>' +
-        '<button onclick="saveTagMapping(this, \'' + escAttr(name) + '\')" class="primary-btn" style="font-size:11px">保存</button>' +
-      '</td>' +
-      '</tr>';
-  });
-
-  html += '</tbody></table>';
-  return html;
-}
-
-function saveTagMapping(btn, name) {
-  var tr = btn.parentNode.parentNode;
-  var sel = tr.querySelector('select');
-  if (!sel) return;
-  callSketchUp('save_tag_mapping', JSON.stringify({
-    name: name,
-    method: sel.value
-  }));
-}
-
-function removeTagMapping(btn, name) {
-  if (!confirm('确认删除 "' + name + '" 的映射配置？')) return;
-  callSketchUp('save_tag_mapping', JSON.stringify({
-    name: name,
-    method: ''
-  }));
 }
 
 function clearAllIgnored() {

@@ -64,8 +64,6 @@ module SuTakeoff
       @dialog.add_action_callback('save_config') { |_ctx, json| save_config(json) }
 
       @dialog.add_action_callback('get_component_mappings') { |_ctx| send_component_mappings }
-      @dialog.add_action_callback('get_tag_mappings') { |_ctx| send_tag_mappings }
-      @dialog.add_action_callback('save_tag_mapping') { |_ctx, json| save_tag_mapping(json) }
       @dialog.add_action_callback('save_component_mapping') { |_ctx, json| save_component_mapping(json) }
       @dialog.add_action_callback('delete_component_mapping') { |_ctx, def_name| delete_component_mapping(def_name) }
 
@@ -332,62 +330,6 @@ module SuTakeoff
       send_workbench_state if @last_scan
     end
 
-    def send_tag_mappings
-      state = PluginState.instance
-      layer_rules = state.config['layer_rules'] || {}
-
-      model = Sketchup.active_model
-      model_layers = Set.new
-      collect_model_layers(model.entities, model_layers)
-
-      all_layers = (model_layers.to_a + layer_rules.keys).uniq.sort
-
-      rows = all_layers.map do |layer|
-        {
-          name: layer,
-          kind: 'layer',
-          method: layer_rules[layer],
-          in_model: model_layers.include?(layer)
-        }
-      end
-
-      @dialog.execute_script("window.renderTagMappings(#{JSON.generate(rows)})")
-    end
-
-    def collect_model_layers(entities, layers)
-      entities.each do |e|
-        if e.respond_to?(:layer) && e.layer
-          name = e.layer.name
-          layers.add(name) if name && !name.empty? && name != 'Layer0'
-        end
-        if e.is_a?(Sketchup::Group)
-          collect_model_layers(e.entities, layers)
-        elsif e.is_a?(Sketchup::ComponentInstance)
-          collect_model_layers(e.definition.entities, layers)
-        end
-      end
-    end
-
-    def save_tag_mapping(json)
-      data = JSON.parse(json)
-      name = data['name']
-      method = data['method']
-      return unless name && !name.empty?
-
-      state = PluginState.instance
-      state.config['layer_rules'] ||= {}
-      if method.nil? || method.empty?
-        state.config['layer_rules'].delete(name)
-      else
-        state.config['layer_rules'][name] = method
-      end
-      path = PluginState.config_path
-      File.write(path, JSON.pretty_generate(state.config))
-      PluginState.instance.save_config_to_model_dict
-      send_tag_mappings
-      send_workbench_state if @last_scan
-    end
-
     def send_component_mappings
       mappings = PluginState.instance.component_mapping.all.map(&:to_h)
       model = Sketchup.active_model
@@ -479,10 +421,6 @@ module SuTakeoff
         material_category_units: state.config['material_category_units'] || [],
         component_category_units: state.config['component_category_units'] || [],
         config_units: state.config['units'] || [],
-        length_units: state.config['length_units'] || [],
-        count_units: state.config['count_units'] || [],
-        volume_units: state.config['volume_units'] || [],
-        layer_rules: state.config['layer_rules'] || {},
         tag_defs: state.config['tag_defs'] || {},
         heuristics_enabled: state.config.fetch('heuristics_enabled', true),
         heuristic_thresholds: state.config['heuristic_thresholds'] || {}
@@ -496,11 +434,11 @@ module SuTakeoff
         data['material_category_units'] || data['category_units'] || [],
         data['component_category_units'] || [],
         data['units'] || [],
-        data['length_units'],
-        data['count_units'],
-        data['layer_rules'],
+        nil,
+        nil,
+        nil,
         data['heuristics_enabled'],
-        data['volume_units'],
+        nil,
         data['heuristic_thresholds'],
         data['tag_defs']
       )
