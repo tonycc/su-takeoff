@@ -34,22 +34,21 @@ module SuTakeoff
 
     # 构造一个 :solid kind 的 ScanItem
     def make_solid(face_id:, su_material:, volume:, w: 1.0, h: 2.0, d: 0.24)
-      it = ScanItem.new(face_id, su_material, 0, 'm³', :solid,
-                        nil, w, h, 'Layer0', ['客厅'], [101], 1.5)
-      it.qty_volume = volume
-      it.qty_area = 0
-      it.qty_length = h
-      it.depth = d
-      it
+      ScanItem.solid(
+        face_id: face_id, su_material: su_material, volume: volume,
+        width: w, height: h, depth: d,
+        layer_name: 'Layer0', component_path: ['客厅'],
+        component_path_ids: [101], z_center: 1.5
+      )
     end
 
     def make_linear_solid(face_id:, su_material:, length:)
-      it = ScanItem.new(face_id, su_material, 0, 'm', :linear_solid,
-                        nil, 0.06, length, 'Layer0', ['客厅'], [101], 1.5)
-      it.qty_length = length
-      it.qty_area = 0
-      it.qty_volume = 0
-      it
+      ScanItem.linear_solid(
+        face_id: face_id, su_material: su_material, length: length,
+        width: 0.06, height: length,
+        layer_name: 'Layer0', component_path: ['客厅'],
+        component_path_ids: [101], z_center: 1.5
+      )
     end
 
     def test_solid_volume_accumulation

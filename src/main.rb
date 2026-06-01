@@ -97,6 +97,43 @@ module SuTakeoff
                   'heuristic_thresholds' => heuristic_thresholds }
       path = self.class.config_path
       File.write(path, JSON.pretty_generate(@config))
+      save_config_to_model_dict
+    end
+
+    def save_config_to_model_dict
+      model = Sketchup.active_model
+      dict = model.attribute_dictionary(DICT_NAME, true)
+      dict['config'] = JSON.generate(@config)
+    rescue
+      # 模型可能未保存或无写入权限，静默回退
+    end
+
+    def save_mapping_to_model_dict
+      model = Sketchup.active_model
+      dict = model.attribute_dictionary(DICT_NAME, true)
+      dict['mapping'] = @mapping.save_json_string
+    rescue
+    end
+
+    def save_processes_to_model_dict
+      model = Sketchup.active_model
+      dict = model.attribute_dictionary(DICT_NAME, true)
+      dict['processes'] = @processes.save_json_string
+    rescue
+    end
+
+    def save_component_mapping_to_model_dict
+      model = Sketchup.active_model
+      dict = model.attribute_dictionary(DICT_NAME, true)
+      dict['component_mapping'] = @component_mapping.save_json_string
+    rescue
+    end
+
+    def save_ignored_to_model_dict
+      model = Sketchup.active_model
+      dict = model.attribute_dictionary(DICT_NAME, true)
+      dict['ignored'] = JSON.generate(@ignored)
+    rescue
     end
 
     private
@@ -129,30 +166,33 @@ module SuTakeoff
         @ignored = JSON.parse(File.read(self.class.ignored_path))
       end
 
-      if File.exist?(self.class.config_path)
+      if model_dict[:config]
+        @config = JSON.parse(model_dict[:config])
+      elsif File.exist?(self.class.config_path)
         @config = JSON.parse(File.read(self.class.config_path))
-        # Migrate old single category_units to material_category_units
-        if @config['category_units'] && !@config['material_category_units']
-          @config['material_category_units'] = @config['category_units']
-        end
-        @config['material_category_units'] ||= []
-        @config['component_category_units'] ||= []
-        # P2 新增字段，老 config.json 缺失时回填默认
-        @config['length_units']        ||= %w[m mm cm dm km]
-        @config['count_units']         ||= %w[个 件 套 组 台 只]
-        @config['volume_units']        ||= %w[m³ m3 L 立方]
-        @config['layer_rules']         ||= {}
-        # 首次迁移：layer_rules 非空且 tag_defs 不存在时，复制为初始标记
-        if @config['layer_rules'] && !@config['layer_rules'].empty? && !@config['tag_defs']
-          @config['tag_defs'] = @config['layer_rules'].dup
-        end
-        @config['tag_defs']            ||= {}
-        @config['heuristics_enabled']    = true if @config['heuristics_enabled'].nil?
       end
+      # Migrate old single category_units to material_category_units
+      if @config['category_units'] && !@config['material_category_units']
+        @config['material_category_units'] = @config['category_units']
+      end
+      @config['material_category_units'] ||= []
+      @config['component_category_units'] ||= []
+      # P2 新增字段，老 config.json 缺失时回填默认
+      @config['length_units']        ||= %w[m mm cm dm km]
+      @config['count_units']         ||= %w[个 件 套 组 台 只]
+      @config['volume_units']        ||= %w[m³ m3 L 立方]
+      @config['layer_rules']         ||= {}
+      # 首次迁移：layer_rules 非空且 tag_defs 不存在时，复制为初始标记
+      if @config['layer_rules'] && !@config['layer_rules'].empty? && !@config['tag_defs']
+        @config['tag_defs'] = @config['layer_rules'].dup
+      end
+      @config['tag_defs']            ||= {}
+      @config['heuristics_enabled']    = true if @config['heuristics_enabled'].nil?
     end
 
     def save_ignored
       File.write(self.class.ignored_path, JSON.pretty_generate(@ignored))
+      save_ignored_to_model_dict
     end
 
     def load_from_model_dict
@@ -165,6 +205,7 @@ module SuTakeoff
       result[:processes] = dict['processes'] if dict['processes']
       result[:component_mapping] = dict['component_mapping'] if dict['component_mapping']
       result[:ignored] = dict['ignored'] if dict['ignored']
+      result[:config] = dict['config'] if dict['config']
       result
     end
   end

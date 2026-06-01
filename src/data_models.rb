@@ -39,6 +39,97 @@ module SuTakeoff
     :center_y        # P4: bbox 中心世界坐标 Y（米）
   )
 
+  # ---- Keyword factories for ScanItem ----
+  # 推荐使用以下工厂方法替代直接 ScanItem.new，一次调用完成所有字段初始化。
+
+  class ScanItem
+    def self.face(face_id:, su_material:, area:, normal:, width:, height:,
+                  layer_name:, component_path:, component_path_ids:,
+                  z_center: 0, tags: nil, tag: nil, center_x: nil, center_y: nil)
+      item = new(
+        face_id, su_material, area, 'm²', :face,
+        normal, width, height, layer_name,
+        component_path, component_path_ids, z_center
+      )
+      item.qty_area = area
+      item.qty_length = height
+      item.qty_count = 0
+      item.tags = tags
+      item.tag = tag
+      item.center_x = center_x
+      item.center_y = center_y
+      item
+    end
+
+    def self.instance(face_id:, su_material:, unit: '个',
+                      layer_name:, component_path:, component_path_ids:,
+                      tags: nil, tag: nil)
+      item = new(
+        face_id, su_material, 1, unit, :instance,
+        nil, 0, 0, layer_name,
+        component_path, component_path_ids, 0
+      )
+      item.qty_count = 1
+      item.qty_area = 0
+      item.qty_length = 0
+      item.tags = tags
+      item.tag = tag
+      item
+    end
+
+    def self.solid(face_id:, su_material:, volume:, width:, height:, depth:,
+                   layer_name:, component_path:, component_path_ids:,
+                   z_center: 0, tags: nil, tag: nil)
+      item = new(
+        face_id, su_material, 0, 'm³', :solid,
+        nil, width, height, layer_name,
+        component_path, component_path_ids, z_center
+      )
+      item.qty_volume = volume
+      item.qty_area = 0
+      item.qty_length = depth
+      item.depth = depth
+      item.tags = tags
+      item.tag = tag
+      item
+    end
+
+    def self.linear_solid(face_id:, su_material:, length:,
+                          width: 0, height: 0, depth: 0,
+                          layer_name:, component_path:, component_path_ids:,
+                          z_center: 0, tags: nil, tag: nil)
+      item = new(
+        face_id, su_material, 0, 'm', :linear_solid,
+        nil, width, height, layer_name,
+        component_path, component_path_ids, z_center
+      )
+      item.qty_length = length
+      item.qty_area = 0
+      item.qty_volume = 0
+      item.depth = depth
+      item.tags = tags
+      item.tag = tag
+      item
+    end
+
+    def self.count_solid(face_id:, su_material:, unit: '个',
+                         layer_name:, component_path:, component_path_ids:,
+                         tags: nil, tag: nil)
+      item = new(
+        face_id, su_material, 1, unit, :count_solid,
+        nil, 0, 0, layer_name,
+        component_path, component_path_ids, 0
+      )
+      item.qty_count = 1
+      item.qty_area = 0
+      item.qty_length = 0
+      item.qty_volume = 0
+      item.tags = tags
+      item.tag = tag
+      item
+    end
+  end
+
   # One derived material item from a process/工艺
   Derivation = Struct.new(:layer, :unit, :formula, :waste_rate, :category, keyword_init: true)
 

@@ -19,8 +19,13 @@ module SuTakeoff
     DEFAULT_COUNT_UNITS  = %w[个 件 套 组 台 只].freeze
     DEFAULT_VOLUME_UNITS = %w[m³ m3 L 立方].freeze
 
-    DEFAULT_MIN_ASPECT      = 15
-    DEFAULT_MAX_SHORT_EDGE  = 0.2  # m
+    DEFAULT_MIN_ASPECT           = 15
+    DEFAULT_MAX_SHORT_EDGE       = 0.2  # m
+    DEFAULT_VERTICAL_SLAB_GAP    = 0.05 # m
+    DEFAULT_VERTICAL_SLAB_TOL    = 0.02
+
+    attr_reader :length_units, :count_units, :volume_units,
+                :vertical_slab_gap, :vertical_slab_area_tol
 
     # mapping: MaterialMapping 实例（用于 unit 兜底）
     # layer_rules: { '线条' => :length, '砌体' => :volume, ... }
@@ -40,6 +45,8 @@ module SuTakeoff
       @volume_units = (volume_units && !volume_units.empty?) ? volume_units : DEFAULT_VOLUME_UNITS
       @min_aspect      = thresholds[:linear_min_aspect_ratio] || DEFAULT_MIN_ASPECT
       @max_short_edge  = thresholds[:linear_max_short_edge_m] || DEFAULT_MAX_SHORT_EDGE
+      @vertical_slab_gap     = thresholds[:vertical_slab_gap_m] || DEFAULT_VERTICAL_SLAB_GAP
+      @vertical_slab_area_tol = thresholds[:vertical_slab_area_tolerance] || DEFAULT_VERTICAL_SLAB_TOL
     end
 
     # 面级判定。返回 ResolveResult。

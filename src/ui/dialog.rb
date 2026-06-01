@@ -111,247 +111,24 @@ module SuTakeoff
     def send_workbench_state
       return unless @last_scan
       begin
-      mapping = PluginState.instance.mapping
-      ignored = PluginState.instance.ignored
-      processes = PluginState.instance.processes
-      all_items = @last_scan[:items]
-      face_items = all_items.reject { |it| it.kind == :instance }
-      instance_items = all_items.select { |it| it.kind == :instance }
-
-      used_names = face_items.map(&:su_material).compact.uniq
-      unresolved = used_names.reject { |n| mapping.get(n) || ignored.include?(n) }
-      mapped_names = used_names.select { |n| mapping.get(n) }
-      ignored_names = ignored & used_names
-
-      # Recompute usages for all mapped materials. Unmapped materials are
-      # filtered by Calculator (no record in mapping → skipped).
-      policy = PluginState.instance.takeoff_policy
-      calc = Calculator.new(mapping, processes, PluginState.instance.component_mapping, policy: policy)
-      usages = calc.compute(all_items, @last_scan[:openings], {})
-      info = build_material_info(used_names, all_items, @last_scan[:colors])
-
-      # 几何用量（不含损耗率），直接从 items 按 (entity_id, su_material, unit) 聚合
-      # 先跑 compute_geometry_only 获取去重后的 items 列表
-      geo_usages = calc.compute_geometry_only(all_items, @last_scan[:openings])
-      deduped_items = geo_usages.flat_map(&:items)
-
-      # 构建洞口扣减 map
-      opening_area_by_face = {}
-      @last_scan[:openings].each do |op|
-        op.host_face_ids.each do |fid|
-          opening_area_by_face[fid] ||= 0.0
-          opening_area_by_face[fid] += op.area
-        end
-      end
-
-      # 按 entity_id 分组，再按 su_material 子分组（同材质不同计量方式合并）
-      geo_agg = {}
-      deduped_items.each do |it|
-        next if it.su_material.nil?
-        # 取最内层容器的 entityID（嵌套群组时面归属到直接父容器）
-        eid = it.component_path_ids.last || 0
-        if it.kind == :instance
-          cm_rec = PluginState.instance.component_mapping.get(it.su_material)
-          unit = cm_rec ? cm_rec.unit : '个'
-        else
-          # P2: 走 policy 决议 unit，与 Calculator 保持一致
-          r = policy.resolve(it)
-          method = r.method
-          map_rec = PluginState.instance.mapping.get(it.su_material)
-          unit =
-            case method
-            when :length then 'm'
-            when :volume then 'm³'
-            when :count  then (map_rec&.unit || '个')
-            else (map_rec&.unit || 'm²')
-            end
-          # 把决议结果暂存到 item，供下面按面渲染
-          it.resolved_method = method
-          it.source = r.source
-        end
-        key = [eid, it.su_material]
-        geo_agg[key] ||= []
-        geo_agg[key] << it
-      end
-
-      puts "[Dialog] geo_agg 分组: #{geo_agg.size} 个 (eid, su_mat) 键" if Scanner::DEBUG
-      geo_agg.each do |(eid, su_mat), mat_items|
-        kinds = mat_items.map(&:kind).uniq.join(',')
-        puts "  eid=#{eid} su_mat=\"#{su_mat}\" items=#{mat_items.size} kinds=#{kinds}" if Scanner::DEBUG
-      end
-
-      geometry_usages_list = geo_agg.map do |(eid, su_mat), mat_items|
-        face_items = mat_items.reject { |i| i.kind == :instance }
-        is_instance = mat_items.any? { |i| i.kind == :instance } && face_items.empty?
-
-        part_counts = Hash.new(0.0)
-        face_items.each do |i|
-          part_counts[Calculator.face_orientation(i.normal)] += i.qty if i.kind == :face
-        end
-
-        # 按 resolved_method 分别累加各量纲（同材质合并后不再由 unit 主导）
-        qty_area = 0.0
-        qty_length = 0.0
-        qty_volume = 0.0
-        qty_count = 0
-
-        if is_instance
-          qty_count = mat_items.sum { |i| i.qty.to_f }
-        else
-          face_items.each do |i|
-            case i.resolved_method
-            when :length
-              qty_length += (i.qty_length || i.height || 0).to_f
-            when :volume
-              qty_volume += (i.qty_volume || 0).to_f
-            when :count
-              # face 每面算 1 件；instance/linear_solid 用自带的 qty_count/qty
-              qty_count += if i.kind == :face
-                1.0
-              else
-                (i.qty_count || i.qty || 0).to_f
-              end
-            else
-              deduction = opening_area_by_face[i.face_id] || 0.0
-              qty_area += [i.qty - deduction, 0.0].max
-            end
-          end
-        end
-
-        primary_qty, primary_unit =
-          if qty_area > 0
-            [qty_area, 'm²']
-          elsif qty_length > 0
-            [qty_length, 'm']
-          elsif qty_volume > 0
-            [qty_volume, 'm³']
-          elsif qty_count > 0
-            [qty_count, '个']
-          else
-            [0, 'm²']
-          end
-
-        # P2: row-level confidence —— 有任何启发式判定的面就标 heuristic
-        any_heuristic = face_items.any? { |i| i.source == :heuristic }
-        confidence = any_heuristic ? 'heuristic' : 'explicit'
-
-        faces_detail = face_items.map { |i|
-          {
-            face_id: i.face_id,
-            path_ids: i.component_path_ids,
-            width: i.width&.round(2),
-            height: (i.qty_length || i.height)&.round(4),
-            volume: i.qty_volume&.round(4),
-            area: i.qty.round(3),
-            kind: i.kind,
-            part: Calculator.face_orientation(i.normal),
-            resolved_method: i.resolved_method&.to_s,
-            source: i.source&.to_s
-          }
-        }
-
-        {
-          entity_id: eid,
-          su_material: su_mat,
-          unit: primary_unit,
-          qty: primary_qty.round(4),
-          qty_area: qty_area.round(4),
-          qty_length: qty_length.round(4),
-          qty_volume: qty_volume.round(4),
-          qty_count: qty_count.round(4),
-          face_count: face_items.size,
-          by_part: part_counts.transform_values { |v| v.round(2) },
-          is_instance: is_instance,
-          faces: faces_detail,
-          confidence: confidence
-        }
-      end
-
-      puts "[Dialog] geometry_usages_list: #{geometry_usages_list.size} 条" if Scanner::DEBUG
-      geometry_usages_list.each do |u|
-        puts "  eid=#{u[:entity_id]} su_mat=#{u[:su_material]} unit=#{u[:unit]} qty=#{u[:qty]} qty_area=#{u[:qty_area]} qty_length=#{u[:qty_length]} faces=#{u[:face_count]}" if Scanner::DEBUG
-      end
-
-      data = {
-        overview: {
-          total_faces: face_items.size,
-          total_area: face_items.sum(&:qty).round(2),
-          instance_count: instance_items.size,
-          instance_total: instance_items.sum(&:qty).round(0),
-          total_openings: @last_scan[:openings].size,
-          total_opening_area: @last_scan[:openings].sum(&:area).round(2),
-          material_count: used_names.size,
-          mapped: mapped_names.size,
-          ignored_count: ignored_names.size,
-          unresolved_count: unresolved.size
-        },
-        items: all_items.map { |it|
-          h = it.to_h
-          h[:normal] = it.normal
-          h[:component_path] = it.component_path
-          h[:component_path_ids] = it.component_path_ids
-          h[:part] = Calculator.face_orientation(it.normal)
-          h
-        },
-        openings: @last_scan[:openings].map(&:to_h),
-        ignored: ignored_names,
-        unresolved: unresolved,
-        materials_info: info,
-        categories: processes.all_categories,
-        length_units: PluginState.instance.config['length_units'] || [],
-        usages: usages.map(&:to_h),
+      data = WorkbenchPresenter.new(
+        items: @last_scan[:items],
+        openings: @last_scan[:openings],
         hierarchy: @last_scan[:hierarchy],
-        geometry_usages: geometry_usages_list,
-        tag_defs: PluginState.instance.config['tag_defs'] || {},
-        by_material: {}
-      }
+        colors: @last_scan[:colors],
+        mapping: PluginState.instance.mapping,
+        component_mapping: PluginState.instance.component_mapping,
+        policy: PluginState.instance.takeoff_policy,
+        processes: PluginState.instance.processes,
+        ignored: PluginState.instance.ignored,
+        tag_defs: PluginState.instance.config['tag_defs'] || {}
+      ).build
       @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
       send_mappings
       send_component_mappings
       rescue => e
         msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
         @dialog.execute_script("window.renderWorkbenchError(#{msg})")
-      end
-    end
-
-    # Build per-material context (faces / area / part breakdown / spaces / color / suggested unit)
-    def build_material_info(names, items, colors)
-      mapping = PluginState.instance.mapping
-      face_items = items.reject { |it| it.kind == :instance }
-      by_name = Hash.new { |h, k| h[k] = [] }
-      face_items.each { |it| by_name[it.su_material] << it if it.su_material }
-
-      names.map do |name|
-        group = by_name[name] || []
-        parts = Hash.new(0.0)
-        spaces = Hash.new(0.0)
-        linear_count = 0
-        total_length = 0.0
-        group.each do |it|
-          parts[Calculator.face_orientation(it.normal)] += it.qty
-          spaces[Calculator.extract_space(it)] += it.qty
-          if it.width && it.width > 0 && it.height && (it.height / it.width) > 15
-            linear_count += 1
-            total_length += it.height
-          end
-        end
-        suggested_unit = (group.size > 0 && linear_count.to_f / group.size > 0.5) ? 'm' : 'm²'
-        record = mapping.get(name)
-        {
-          su_name: name,
-          face_count: group.size,
-          total_area: group.sum(&:qty).round(2),
-          total_length: total_length.round(2),
-          parts: parts.transform_values { |a| a.round(2) },
-          spaces: spaces.sort_by { |_, a| -a }.first(3).map { |s, a| { name: s, area: a.round(2) } },
-          color: colors[name],
-          suggested_unit: suggested_unit,
-          mapped_unit: record&.unit,
-          material_name: record&.material_name,
-          category: record&.category,
-          spec: record&.spec,
-          waste_rate: record&.default_waste_rate
-        }
       end
     end
 
@@ -541,6 +318,7 @@ module SuTakeoff
       m.add(data['su_name'], data['material_name'], data['category'],
             data['unit'], data['spec'], data['waste_rate'].to_f)
       m.save_json(PluginState.mapping_path)
+      PluginState.instance.save_mapping_to_model_dict
       send_mappings
       send_workbench_state if @last_scan
     end
@@ -549,6 +327,7 @@ module SuTakeoff
       m = PluginState.instance.mapping
       m.delete(su_name)
       m.save_json(PluginState.mapping_path)
+      PluginState.instance.save_mapping_to_model_dict
       send_mappings
       send_workbench_state if @last_scan
     end
@@ -604,6 +383,7 @@ module SuTakeoff
       end
       path = PluginState.config_path
       File.write(path, JSON.pretty_generate(state.config))
+      PluginState.instance.save_config_to_model_dict
       send_tag_mappings
       send_workbench_state if @last_scan
     end
@@ -653,6 +433,7 @@ module SuTakeoff
              data['unit'] || '个', data['spec'] || '', data['waste_rate'].to_f,
              data['counting_method'] || 'expand')
       cm.save_json(PluginState.component_mapping_path)
+      PluginState.instance.save_component_mapping_to_model_dict
       send_component_mappings
       send_workbench_state if @last_scan
     end
@@ -661,6 +442,7 @@ module SuTakeoff
       cm = PluginState.instance.component_mapping
       cm.delete(def_name)
       cm.save_json(PluginState.component_mapping_path)
+      PluginState.instance.save_component_mapping_to_model_dict
       send_component_mappings
       send_workbench_state if @last_scan
     end
@@ -670,6 +452,7 @@ module SuTakeoff
       return unless path
       PluginState.instance.mapping.import_csv(path)
       PluginState.instance.mapping.save_json(PluginState.mapping_path)
+      PluginState.instance.save_mapping_to_model_dict
       send_mappings
     end
 
@@ -732,6 +515,7 @@ module SuTakeoff
       p.add_process(data['category'], data['name'], data['waste_rate'].to_f,
                     data['derivations'] || [])
       p.save_json(PluginState.processes_path)
+      PluginState.instance.save_processes_to_model_dict
       send_processes
     end
 
@@ -739,6 +523,7 @@ module SuTakeoff
       data = JSON.parse(json)
       PluginState.instance.processes.delete_process(data['category'], data['name'])
       PluginState.instance.processes.save_json(PluginState.processes_path)
+      PluginState.instance.save_processes_to_model_dict
       send_processes
     end
 

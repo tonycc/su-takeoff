@@ -9,6 +9,7 @@ require_relative 'src/process_library'
 require_relative 'src/component_mapping'
 require_relative 'src/takeoff_policy'
 require_relative 'src/calculator'
+require_relative 'src/workbench_presenter'
 require_relative 'src/scanner'
 
 require_relative 'src/ui/dialog'

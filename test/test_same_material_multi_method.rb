@@ -20,12 +20,14 @@ module SuTakeoff
     end
 
     def make_face(face_id:, normal:, width:, height:, layer:, su_material: 'marble_01')
-      it = ScanItem.new(face_id, su_material, width * height, 'm2', :face,
-                        normal, width, height, layer,
-                        ['客厅'], [101], 1.5)
-      it.qty_area = width * height
-      it.qty_length = height
-      it
+      ScanItem.face(
+        face_id: face_id, su_material: su_material,
+        area: width * height, normal: normal,
+        width: width, height: height,
+        layer_name: layer,
+        component_path: ['客厅'], component_path_ids: [101],
+        z_center: 1.5
+      )
     end
 
     # 场景：客厅墙面有一张大板（5×3 = 15m²）和一根条（0.05×8 = 0.4m²）

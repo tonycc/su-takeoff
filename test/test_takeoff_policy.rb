@@ -11,17 +11,18 @@ module SuTakeoff
       @mapping.add('lamp_01', '台灯', '灯具', '个', '', 0)
     end
 
-    # 构造一个 ScanItem。新字段用 keyword_set 风格便于测试。
-    def make_item(kind: :face, su_material: 'marble_01',
+    # 构造一个 :face ScanItem。所有调用都使用默认 kind: :face。
+    def make_item(su_material: 'marble_01',
                   normal: [0, 1, 0], width: 5.0, height: 3.0,
                   layer_name: 'Layer0', tags: nil)
-      item = ScanItem.new(1, su_material, width * height, 'm2', kind,
-                          normal, width, height, layer_name,
-                          ['客厅'], [101], 1.5)
-      item.qty_area = width * height
-      item.qty_length = height
-      item.tags = tags
-      item
+      ScanItem.face(
+        face_id: 1, su_material: su_material,
+        area: width * height, normal: normal,
+        width: width, height: height,
+        layer_name: layer_name,
+        component_path: ['客厅'], component_path_ids: [101],
+        z_center: 1.5, tags: tags
+      )
     end
 
     # ---- 优先级 1: AttrDict ----

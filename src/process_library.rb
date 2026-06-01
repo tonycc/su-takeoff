@@ -13,6 +13,7 @@ module SuTakeoff
     end
 
     def add_process(category, name, waste_rate, derivations = [])
+      derivations = build_derivations(derivations) if derivations.any? { |d| d.is_a?(Hash) }
       @processes << ProcessDef.new(category: category, name: name, waste_rate: waste_rate, derivations: derivations)
     end
 

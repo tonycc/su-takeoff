@@ -31,6 +31,10 @@ module SuTakeoff
     def compute(items, openings, process_overrides)
       opening_area_by_face, openings_by_face = build_opening_index(openings)
 
+      # 薄板去重（水平楼板/天花板 + 竖直薄板踢脚线）
+      items = dedup_thin_slabs(items)
+      items = dedup_vertical_slabs(items)
+
       # Group items by (space, part, su_material_name, method, confidence, source)
       groups = Hash.new { |h, k| h[k] = [] }
       items.each do |item|
@@ -149,6 +153,10 @@ module SuTakeoff
     def compute_geometry_only(items, openings)
       opening_area_by_face, openings_by_face = build_opening_index(openings)
 
+      # 薄板去重（水平楼板/天花板 + 竖直薄板踢脚线）
+      items = dedup_thin_slabs(items)
+      items = dedup_vertical_slabs(items)
+
       groups = Hash.new { |h, k| h[k] = [] }
       items.each do |item|
         # nil su_material 无意义，跳过（instance 类由 def_name 填充，不为 nil）
@@ -244,17 +252,15 @@ module SuTakeoff
     private
 
     def length_units
-      cfg = PluginState.instance.config rescue {}
-      cfg['length_units'] || FALLBACK_LENGTH_UNITS
+      @policy&.length_units || FALLBACK_LENGTH_UNITS
     end
 
     def count_units
-      cfg = PluginState.instance.config rescue {}
-      cfg['count_units'] || FALLBACK_COUNT_UNITS
+      @policy&.count_units || FALLBACK_COUNT_UNITS
     end
 
     def component_mapping
-      @component_mapping || PluginState.instance.component_mapping
+      @component_mapping
     end
 
     def eval_formula(formula, geom)
@@ -642,15 +648,11 @@ module SuTakeoff
     end
 
     def vertical_slab_gap
-      cfg = PluginState.instance.config rescue {}
-      th = cfg['heuristic_thresholds'] || {}
-      th['vertical_slab_gap_m'] || VERTICAL_SLAB_GAP_M
+      @policy&.vertical_slab_gap || VERTICAL_SLAB_GAP_M
     end
 
     def vertical_slab_area_tol
-      cfg = PluginState.instance.config rescue {}
-      th = cfg['heuristic_thresholds'] || {}
-      th['vertical_slab_area_tolerance'] || VERTICAL_SLAB_AREA_TOLERANCE
+      @policy&.vertical_slab_area_tol || VERTICAL_SLAB_AREA_TOLERANCE
     end
   end
 end

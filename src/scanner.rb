@@ -146,36 +146,30 @@ module SuTakeoff
         w = (dims[-2] || 0) * 0.0254
         h = (dims[-1] || 0) * 0.0254
 
-        face_item = ScanItem.new(
-          entity.entityID,
-          mat_name,
-          area_m2,
-          'm2',
-          :face,
-          [world_normal.x, world_normal.y, world_normal.z],
-          w.round(4),
-          h.round(4),
-          effective_layer || entity.layer.name,
-          comp_path,
-          comp_path_ids,
-          z_center_m.round(4)
-        )
-        # P1: 同时填充按量纲拆分的字段。Calculator 优先使用 qty_*，回退 qty。
-        face_item.qty_area = area_m2
-        face_item.qty_length = h.round(4)
-        face_item.qty_count = 0
-        # P2: 读取 entity 的算量标签（AttributeDictionary）。
-        face_item.tags = read_takeoff_tags(entity)
-        # 面自身无 method 时，继承容器的组件映射方法（expand 模式下的 unit → method）
-        if effective_method && (face_item.tags.nil? || !face_item.tags[:method])
-          face_item.tags ||= {}
-          face_item.tags[:method] = effective_method.to_s
+        # 读取 entity 的算量标签，合并容器传播的 method 覆盖
+        face_tags = read_takeoff_tags(entity)
+        if effective_method && (face_tags.nil? || !face_tags[:method])
+          face_tags ||= {}
+          face_tags[:method] = effective_method.to_s
         end
-        # 面自身的标记优先，否则继承父容器传播的标记
-        face_item.tag = (face_item.tags && face_item.tags[:tag]) || effective_tag
-        # P4: bbox 中心 xy（米），供竖直薄板配对判定。
-        face_item.center_x = (bb_center_world.x * 0.0254).round(4)
-        face_item.center_y = (bb_center_world.y * 0.0254).round(4)
+        face_tag = (face_tags && face_tags[:tag]) || effective_tag
+
+        face_item = ScanItem.face(
+          face_id: entity.entityID,
+          su_material: mat_name,
+          area: area_m2,
+          normal: [world_normal.x, world_normal.y, world_normal.z],
+          width: w.round(4),
+          height: h.round(4),
+          layer_name: effective_layer || entity.layer.name,
+          component_path: comp_path,
+          component_path_ids: comp_path_ids,
+          z_center: z_center_m.round(4),
+          tags: face_tags,
+          tag: face_tag,
+          center_x: (bb_center_world.x * 0.0254).round(4),
+          center_y: (bb_center_world.y * 0.0254).round(4)
+        )
         items << face_item
 
       when Sketchup::ComponentInstance
@@ -201,23 +195,14 @@ module SuTakeoff
         if cm_record && cm_record.counting_method == 'aggregate' && def_name && !def_name.empty?
           comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
           comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
-          inst_item = ScanItem.new(
-            entity.entityID,
-            def_name,
-            1,
-            cm_record.unit || '个',
-            :instance,
-            nil,
-            0,
-            0,
-            entity.layer.name,
-            comp_path,
-            comp_path_ids,
-            0
+          inst_item = ScanItem.instance(
+            face_id: entity.entityID,
+            su_material: def_name,
+            unit: cm_record.unit || '个',
+            layer_name: entity.layer.name,
+            component_path: comp_path,
+            component_path_ids: comp_path_ids
           )
-          inst_item.qty_count = 1
-          inst_item.qty_area = 0
-          inst_item.qty_length = 0
           items << inst_item
           return
         end
@@ -307,23 +292,14 @@ module SuTakeoff
         if cm_record && cm_record.counting_method == 'aggregate' && def_name && !def_name.empty?
           comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
           comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
-          grp_item = ScanItem.new(
-            entity.entityID,
-            def_name,
-            1,
-            cm_record.unit || '个',
-            :instance,
-            nil,
-            0,
-            0,
-            entity.layer.name,
-            comp_path,
-            comp_path_ids,
-            0
+          grp_item = ScanItem.instance(
+            face_id: entity.entityID,
+            su_material: def_name,
+            unit: cm_record.unit || '个',
+            layer_name: entity.layer.name,
+            component_path: comp_path,
+            component_path_ids: comp_path_ids
           )
-          grp_item.qty_count = 1
-          grp_item.qty_area = 0
-          grp_item.qty_length = 0
           items << grp_item
           return
         end
@@ -459,54 +435,58 @@ module SuTakeoff
       z_center_m = bb_center_world.z * 0.0254
       layer = entity.layer && entity.layer.name
 
+      item_tag = (tags && tags[:tag]) || effective_tag
+
       case method
       when :length
         length_m = compute_linear_length(entity, scale) || d
-        item = ScanItem.new(
-          entity.entityID, mat_name, 0, 'm', :linear_solid,
-          nil, w.round(4), length_m.round(4), layer,
-          comp_path, comp_path_ids, z_center_m.round(4)
+        item = ScanItem.linear_solid(
+          face_id: entity.entityID,
+          su_material: mat_name,
+          length: length_m.round(4),
+          width: w.round(4),
+          height: h.round(4),
+          depth: h.round(4),
+          layer_name: layer,
+          component_path: comp_path,
+          component_path_ids: comp_path_ids,
+          z_center: z_center_m.round(4),
+          tags: tags,
+          tag: item_tag
         )
-        item.qty_length = length_m.round(4)
-        item.qty_area = 0
-        item.qty_volume = 0
-        item.depth = h.round(4)
-        item.tags = tags
-        item.tag = (tags && tags[:tag]) || effective_tag
         puts "[Scanner] emit_solid_by_method :length → qty_length=#{item.qty_length}m bbox w=#{w.round(4)} h=#{h.round(4)} d=#{d.round(4)} mat=#{mat_name}" if DEBUG
         item
       when :volume
         vol_in3 = entity.respond_to?(:volume) ? entity.volume : 0
-        if vol_in3.is_a?(Numeric) && vol_in3 > 0
-          vol_m3 = vol_in3 * 1.6387e-5 * (scale**3)
-        else
-          vol_m3 = w * h * d
-        end
-        item = ScanItem.new(
-          entity.entityID, mat_name, 0, 'm³', :solid,
-          nil, w.round(4), h.round(4), layer,
-          comp_path, comp_path_ids, z_center_m.round(4)
+        vol_m3 = if vol_in3.is_a?(Numeric) && vol_in3 > 0
+                   vol_in3 * 1.6387e-5 * (scale**3)
+                 else
+                   w * h * d
+                 end
+        ScanItem.solid(
+          face_id: entity.entityID,
+          su_material: mat_name,
+          volume: vol_m3.round(4),
+          width: w.round(4),
+          height: h.round(4),
+          depth: d.round(4),
+          layer_name: layer,
+          component_path: comp_path,
+          component_path_ids: comp_path_ids,
+          z_center: z_center_m.round(4),
+          tags: tags,
+          tag: item_tag
         )
-        item.qty_volume = vol_m3.round(4)
-        item.qty_area = 0
-        item.qty_length = d.round(4)
-        item.depth = d.round(4)
-        item.tags = tags
-        item.tag = (tags && tags[:tag]) || effective_tag
-        item
       when :count
-        item = ScanItem.new(
-          entity.entityID, mat_name, 1, '个', :count_solid,
-          nil, 0, 0, layer,
-          comp_path, comp_path_ids, 0
+        ScanItem.count_solid(
+          face_id: entity.entityID,
+          su_material: mat_name,
+          layer_name: layer,
+          component_path: comp_path,
+          component_path_ids: comp_path_ids,
+          tags: tags,
+          tag: item_tag
         )
-        item.qty_count = 1
-        item.qty_area = 0
-        item.qty_length = 0
-        item.qty_volume = 0
-        item.tags = tags
-        item.tag = (tags && tags[:tag]) || effective_tag
-        item
       end
     end
 
@@ -703,6 +683,7 @@ module SuTakeoff
       # 直接以各向最长累加作为长度，不除以 4（÷4 假设 4 条平行边，圆柱等几何不适用）
       result = long_groups.map { |es| es.map { |e| e[:len] }.max }.sum
       puts "[linear_length] 各向最长累加=#{result.round(4)}m" if DEBUG
+      result.round(4)
     end
 
     def find_edge_by_id(entities, target_id)
@@ -778,21 +759,14 @@ module SuTakeoff
       comp_path = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
 
-      item = ScanItem.new(
-        entity.entityID,
-        mat_name,
-        1, '个', :instance,
-        nil, 0, 0,
-        entity.layer.name,
-        comp_path,
-        comp_path_ids,
-        0
+      ScanItem.instance(
+        face_id: entity.entityID,
+        su_material: mat_name,
+        layer_name: entity.layer.name,
+        component_path: comp_path,
+        component_path_ids: comp_path_ids,
+        tag: (tags && tags[:tag]) || effective_tag
       )
-      item.qty_count = 1
-      item.qty_area = 0
-      item.qty_length = 0
-      item.tag = (tags && tags[:tag]) || effective_tag
-      item
     end
 
     # 检查名称是否匹配门窗关键词。用 .include? 避免 SketchUp 内嵌 Ruby 的正则编码问题。
