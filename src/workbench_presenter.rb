@@ -168,7 +168,7 @@ module SuTakeoff
                                       [i.qty - d, 0.0].max
                                     }
           end
-          # :skip および未知 method はスキップ（理論上ここには来ない）
+          # :skip 及未知 method 跳过（理论上不会到这里 —— cache_resolve 已过滤）
         end
       end
 
