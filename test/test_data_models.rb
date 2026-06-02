@@ -14,6 +14,17 @@ module SuTakeoff
       assert_equal 5.0, item.qty
       assert_equal [101], item.component_path_ids
     end
+
+    def test_strategy_name_defaults_nil_and_is_settable
+      item = ScanItem.face(
+        face_id: 1, su_material: 'x', area: 1.0,
+        normal: [0, 0, 1], width: 1, height: 1,
+        layer_name: 'L', component_path: ['R'], component_path_ids: [1]
+      )
+      assert_nil item.strategy_name
+      item.strategy_name = :face_area
+      assert_equal :face_area, item.strategy_name
+    end
   end
 
   class TestOpening < Minitest::Test

@@ -11,6 +11,9 @@ module SuTakeoff
   #   tags    AttributeDictionary 读出的覆盖标签 { method:, material: }
   #   resolved_method / source
   #     Policy 决议结果占位（P2 启用）
+  #   strategy_name
+  #     Policy 决议得到的 Strategy 名称（Symbol，如 :face_area / :solid_linear）
+  #     由 Calculator#cache_resolve 写入，Presenter 用于调试输出。
   ScanItem = Struct.new(
     :face_id,
     :su_material,
@@ -35,6 +38,7 @@ module SuTakeoff
     :source,
     :center_x,       # P4: bbox 中心世界坐标 X（米）—— 竖直薄板配对用
     :center_y,       # P4: bbox 中心世界坐标 Y（米）
+    :strategy_name,  # Stage 3: Strategy 名称（Symbol）
     keyword_init: true
   )
 
