@@ -20,6 +20,8 @@ module SuTakeoff
                   'tag_defs' => {},
                   'heuristics_enabled' => true }
       load_data
+      # 注册内置策略（幂等：Registry.register 同对象重复注册是 no-op）
+      Strategies::Builtin.register_all! if Strategies::Registry.all.empty?
     end
 
     # 算量策略：基于当前 mapping + config 构造一个 TakeoffPolicy。

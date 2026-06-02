@@ -112,25 +112,27 @@ module SuTakeoff
     end
 
     # 单位选择：method 决定语义，source/record 决定细节。
-    #   :count   → record.unit（个/件/套），缺省回退 item.unit
-    #   :length  → mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位强制 'm'
-    #   :volume  → 强制 'm³'
-    #   :area    → record.unit（m²），缺省回退 item.unit / 'm²'
+    #   :count   → record.unit（个/件/套），缺省回退 item.unit → Registry.default_for(:count)
+    #   :length  → mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位用 Registry 默认
+    #   :volume  → Registry.default_for(:volume)（'m³'）
+    #   :area    → record.unit（m²），缺省回退 item.unit → Registry.default_for(:area)
     def unit_for(item, method, source, record = nil)
       record ||= lookup_record(item)
       case method
-      when :count
-        record&.unit || item.unit || '个'
       when :length
+        # mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位用 strategy 默认
         if source == :mapping && record && TakeoffPolicy.classify_unit(record.unit) == :length
           record.unit
         else
-          'm'
+          Strategies::Registry.default_for(:length)&.default_unit || 'm'
         end
-      when :volume
-        'm³'
+      when :count
+        record&.unit || item.unit || Strategies::Registry.default_for(:count)&.default_unit || '个'
+      when :area
+        record&.unit || item.unit || Strategies::Registry.default_for(:area)&.default_unit || 'm²'
       else
-        record&.unit || item.unit || 'm²'
+        # :volume :skip 等
+        Strategies::Registry.default_for(method)&.default_unit || ''
       end
     end
 
