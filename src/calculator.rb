@@ -1,86 +1,48 @@
 module SuTakeoff
+  # Calculator 只负责两件事：
+  #   1. 薄板去重（水平楼板 + 竖直薄板）
+  #   2. 走 Policy 决议每个 item 的计量方式
+  #
+  # 不再做"按 (space, part, material) 聚合"——产品已删除该视图。
+  # 量纲累加、洞口扣减、单位选择都交给消费方（WorkbenchPresenter）。
   class Calculator
-    # Two horizontal faces with same material, near-equal area and close z_center
-    # are treated as two sides of a thin slab (e.g. floor plate, ceiling plate).
+    # 两个同材质水平面，面积近似且 z_center 接近，视为薄板的两面（楼板/天花板）。
     SLAB_AREA_TOLERANCE = 0.02      # 2% area diff
     SLAB_Z_TOLERANCE_M = 0.15       # 15 cm thickness max
 
-    # P4: Vertical slab dedup —— 散面踢脚线/装饰条建模时常出现的薄板背靠背两面同材质场景。
-    # 配对要求：法线反向 + 面积近似相等 + 两面 bbox 中心距 ≤ 此阈值。
+    # 竖直薄板（散面建模的踢脚线/装饰条）背靠背两面的配对阈值。
     VERTICAL_SLAB_AREA_TOLERANCE = 0.02
     VERTICAL_SLAB_GAP_M = 0.05      # 5 cm 薄板厚度
 
-    def initialize(mapping, process_library, component_mapping = nil, policy: nil)
+    def initialize(mapping, component_mapping = nil, policy: nil)
       @mapping = mapping
-      @processes = process_library
       @component_mapping = component_mapping
       @policy = policy
     end
 
     attr_accessor :policy
 
-    # 几何用量计算：含洞口扣减、薄板去重、面/线材识别，不含损耗率与工艺做法
-    # 不接受 process_overrides 参数，内部不使用 @processes
-    # 与 compute 的关键差异：面 item 不要求映射，未映射材质也产出记录
-    def compute_geometry_only(items, openings)
-      opening_area_by_face, openings_by_face = build_opening_index(openings)
-
-      # 薄板去重（水平楼板/天花板 + 竖直薄板踢脚线）
+    # 几何决议：dedup + Policy 决议。
+    # 返回 [{ item: ScanItem, method: Symbol, source: Symbol, unit: String }, ...]
+    # —— 跳过 nil 材质和 :skip 决议；items 顺序保留。
+    def compute_geometry_only(items, _openings = nil)
       items = dedup_thin_slabs(items)
+      # 全量决议并缓存，供 dedup_vertical_slabs 直接读取
+      items.each { |it| cache_resolve(it) unless it.su_material.nil? }
       items = dedup_vertical_slabs(items)
-
-      groups = Hash.new { |h, k| h[k] = [] }
+      out = []
       items.each do |item|
-        # nil su_material 无意义，跳过（instance 类由 def_name 填充，不为 nil）
         next if item.su_material.nil?
-
-        method, confidence, source = resolve_method_geometry(item)
-        next if method == :skip
-
-        part = self.class.face_orientation(item.normal)
-        space = self.class.extract_space(item)
-        key = [space, part, item.su_material, method, confidence, source]
-        groups[key] << item
+        next unless item.resolved_method
+        next if item.resolved_method == :skip
+        out << {
+          item: item,
+          method: item.resolved_method,
+          source: item.source,
+          unit: unit_for(item, item.resolved_method, item.source)
+        }
       end
-
-      groups.map do |key, grp_items|
-        space, part, su_mat, method, confidence, source = key
-        first_item = grp_items.first
-        is_instance = first_item&.kind == :instance
-
-        record = if is_instance
-          component_mapping.get(su_mat)
-        else
-          @mapping.get(su_mat)
-        end
-
-        is_count = (method == :count)
-        unit = unit_for_method(method, record, source, nil)
-        geom = build_geometry(method, grp_items, opening_area_by_face, openings_by_face)
-
-        detail = if is_count
-          { gross: geom[:gross], deduction: 0, instance_count: grp_items.size,
-            instances: geom[:faces_detail] }
-        else
-          { gross: geom[:gross].round(3), deduction: geom[:total_deduction].round(3),
-            face_count: grp_items.size, faces: geom[:faces_detail] }
-        end
-
-        primary = MaterialUsage.new(
-          space: space, part: part,
-          material_name: record&.material_name || '',
-          category: record&.category || '',
-          spec: record&.spec || '',
-          net_area: geom[:net_area].round(is_count ? 0 : 4),
-          waste_rate: 0,
-          su_material_name: su_mat,
-          unit: unit,
-          detail: detail,
-          confidence: confidence, source: source
-        )
-        primary.items = grp_items
-        primary
-      end
+      out
     end
 
     # Returns the unmapped material names from items
@@ -108,37 +70,31 @@ module SuTakeoff
 
     private
 
-    def component_mapping
-      @component_mapping
+    # 把 Policy 决议结果写入 item.resolved_method / item.source（幂等，已缓存则跳过）
+    def cache_resolve(item)
+      return if item.resolved_method  # 已缓存
+      r = resolve_method(item)
+      item.resolved_method = r[:method]
+      item.source = r[:source]
     end
 
-    # compute_geometry_only 专用：决议方法，允许未映射面 item。
-    def resolve_method_geometry(item)
+    # 决议单个 item 的 method + source + unit。
+    # 优先走注入的 Policy；缺失时回到 mapping 兜底 + 未映射启发，保持旧调用兼容。
+    def resolve_method(item)
       if @policy
         r = @policy.resolve(item)
-        # 启发式或显式得到 :skip 也仍尝试出图（compute_geometry_only 兜底语义），
-        # 但若是 :skip 由 default 给出（无映射 + 无规则 + 启发式关），按面长宽比兜底
         if r.method == :skip && r.source == :default
           return geometry_unmapped_fallback(item)
         end
-        confidence = (r.source == :heuristic) ? :heuristic : :explicit
-        return [r.method, confidence, r.source]
+        return { method: r.method, source: r.source,
+                 unit: unit_for(item, r.method, r.source) }
       end
 
-      record = if item.kind == :instance
-        component_mapping.get(item.su_material)
-      else
-        @mapping.get(item.su_material)
-      end
-
+      record = lookup_record(item)
       if record
-        method =
-          if item.kind == :instance
-            :count
-          else
-            TakeoffPolicy.classify_unit(record.unit)
-          end
-        [method, :explicit, :mapping]
+        method = item.kind == :instance ? :count : TakeoffPolicy.classify_unit(record.unit)
+        { method: method, source: :mapping,
+          unit: unit_for(item, method, :mapping, record) }
       else
         geometry_unmapped_fallback(item)
       end
@@ -148,32 +104,21 @@ module SuTakeoff
     def geometry_unmapped_fallback(item)
       is_linear = item.kind == :face && item.width && item.width > 0 &&
                   item.height && (item.height / item.width) > 15
-      [is_linear ? :length : :area, :heuristic, :heuristic]
+      method = is_linear ? :length : :area
+      { method: method, source: :heuristic,
+        unit: method == :length ? 'm' : 'm²' }
     end
 
-    # 按 method 选择对应的 build_*_geometry 实现。
-    def build_geometry(method, grp_items, opening_area_by_face, openings_by_face)
-      case method
-      when :count
-        build_count_geometry(grp_items)
-      when :length
-        build_length_geometry(grp_items)
-      when :volume
-        build_volume_geometry(grp_items)
-      else
-        build_area_geometry(grp_items, opening_area_by_face, openings_by_face)
-      end
-    end
-
-    # 单位显示：method 决定语义，source 决定细节
-    #   :count   → record.unit（个/件/套），缺省回退 item_unit
+    # 单位选择：method 决定语义，source/record 决定细节。
+    #   :count   → record.unit（个/件/套），缺省回退 item.unit
     #   :length  → mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位强制 'm'
     #   :volume  → 强制 'm³'
-    #   :area    → record.unit（m²），缺省回退 item_unit / 'm²'
-    def unit_for_method(method, record, source, item_unit)
+    #   :area    → record.unit（m²），缺省回退 item.unit / 'm²'
+    def unit_for(item, method, source, record = nil)
+      record ||= lookup_record(item)
       case method
       when :count
-        record&.unit || item_unit || '个'
+        record&.unit || item.unit || '个'
       when :length
         if source == :mapping && record && TakeoffPolicy.classify_unit(record.unit) == :length
           record.unit
@@ -183,116 +128,23 @@ module SuTakeoff
       when :volume
         'm³'
       else
-        record&.unit || item_unit || 'm²'
+        record&.unit || item.unit || 'm²'
       end
     end
 
-    # ---- 量纲分支：build_*_geometry ----
-    #
-    # 把几何累加从 compute / compute_geometry_only 中抽出来。返回
-    #   { gross:, total_deduction:, net_area:, faces_detail: }
-    # 使二次调用 0 复制。新字段优先：qty_area / qty_length / qty_count；
-    # 老 ScanItem（位置参数构造、未填新字段）回退到 qty / height。
-
-    def build_count_geometry(grp_items)
-      gross = grp_items.sum { |it| count_qty(it) }.round(0)
-      faces_detail = grp_items.map { |it|
-        { face_id: it.face_id, count: count_qty(it),
-          component_path: it.component_path }
-      }
-      { gross: gross, total_deduction: 0.0, net_area: gross.to_f,
-        faces_detail: faces_detail }
+    def lookup_record(item)
+      if item.kind == :instance
+        @component_mapping&.get(item.su_material)
+      else
+        @mapping.get(item.su_material)
+      end
     end
 
-    def build_length_geometry(grp_items)
-      gross = grp_items.sum { |it| length_qty(it) }.round(3)
-      faces_detail = grp_items.map { |it|
-        { face_id: it.face_id, width: (it.width || 0).round(2),
-          height: (it.height || 0).round(4),
-          area: area_qty(it).round(3), length: length_qty(it).round(3),
-          part: Calculator.face_orientation(it.normal),
-          component_path: it.component_path }
-      }
-      { gross: gross, total_deduction: 0.0, net_area: gross,
-        faces_detail: faces_detail }
-    end
-
-    # P3: 体积统计 —— 累加 qty_volume，不扣洞口、不分朝向。
-    # 入参既可以是 :solid kind（容器整体量取），也可以是手工填了 qty_volume 的 :face。
-    def build_volume_geometry(grp_items)
-      gross = grp_items.sum { |it| volume_qty(it) }.round(4)
-      faces_detail = grp_items.map { |it|
-        { face_id: it.face_id,
-          width: (it.width || 0).round(4),
-          height: (it.height || 0).round(4),
-          depth: (it.depth || 0).round(4),
-          volume: volume_qty(it).round(4),
-          component_path: it.component_path }
-      }
-      { gross: gross, total_deduction: 0.0, net_area: gross,
-        faces_detail: faces_detail }
-    end
-
-    def build_area_geometry(grp_items, opening_area_by_face, openings_by_face)
-      gross = grp_items.sum { |it| area_qty(it) }.round(3)
-      total_deduction = grp_items.sum { |it|
-        opening_area_by_face[it.face_id] || 0.0
-      }.round(3)
-      net_area = grp_items.sum { |it|
-        deduction = opening_area_by_face[it.face_id] || 0.0
-        [area_qty(it) - deduction, 0.0].max
-      }
-      faces_detail = grp_items.map { |it|
-        a = area_qty(it)
-        d = (opening_area_by_face[it.face_id] || 0.0).round(3)
-        ops = openings_by_face[it.face_id] || []
-        { face_id: it.face_id, width: (it.width || 0).round(4),
-          height: (it.height || 0).round(4),
-          area: a.round(3), deduction: d, net: (a - d).round(3),
-          part: Calculator.face_orientation(it.normal),
-          component_path: it.component_path,
-          openings: ops }
-      }
-      { gross: gross, total_deduction: total_deduction, net_area: net_area,
-        faces_detail: faces_detail }
-    end
-
-    # 字段读取兜底：新字段优先，回退到老字段。
+    # ---- 字段读取兜底（仅 dedup 内部使用）----
     def area_qty(item)
       v = item.qty_area
       return v.to_f if v
       (item.qty || 0).to_f
-    end
-
-    def length_qty(item)
-      v = item.qty_length
-      return v.to_f if v
-      (item.height || 0).to_f
-    end
-
-    def count_qty(item)
-      v = item.qty_count
-      return v.to_f if v
-      (item.qty || 0).to_f
-    end
-
-    def volume_qty(item)
-      v = item.qty_volume
-      return v.to_f if v
-      0.0
-    end
-
-    def build_opening_index(openings)
-      opening_area_by_face = {}
-      openings_by_face = Hash.new { |h, k| h[k] = [] }
-      openings.each do |op|
-        op.host_face_ids.each do |fid|
-          opening_area_by_face[fid] ||= 0.0
-          opening_area_by_face[fid] += op.area
-          openings_by_face[fid] << { entity_id: op.entity_id, area: op.area.round(3) }
-        end
-      end
-      [opening_area_by_face, openings_by_face]
     end
 
     # Remove the "back side" of thin horizontal slabs.
@@ -383,7 +235,7 @@ module SuTakeoff
         next false if it.normal[2].abs >= 0.5
         next false unless area_qty(it) > 0
         next false if it.center_x.nil? || it.center_y.nil?
-        @policy.resolve(it).method == :length
+        it.resolved_method == :length
       end
       return items if candidates.size < 2
 
