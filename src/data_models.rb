@@ -52,7 +52,7 @@ module SuTakeoff
         layer_name: layer_name,
         component_path: component_path, component_path_ids: component_path_ids,
         z_center: z_center,
-        qty_area: area, qty_length: nil, qty_count: 0,
+        qty_area: area, qty_length: nil, qty_volume: 0, qty_count: 0,
         tags: tags, tag: tag,
         center_x: center_x, center_y: center_y
       )
@@ -68,7 +68,7 @@ module SuTakeoff
         layer_name: layer_name,
         component_path: component_path, component_path_ids: component_path_ids,
         z_center: 0,
-        qty_count: 1, qty_area: 0, qty_length: 0,
+        qty_count: 1, qty_area: 0, qty_length: 0, qty_volume: 0,
         tags: tags, tag: tag
       )
     end
@@ -83,7 +83,7 @@ module SuTakeoff
         layer_name: layer_name,
         component_path: component_path, component_path_ids: component_path_ids,
         z_center: z_center,
-        qty_volume: volume, qty_area: 0, qty_length: depth,
+        qty_volume: volume, qty_area: 0, qty_length: depth, qty_count: 0,
         depth: depth,
         tags: tags, tag: tag
       )
