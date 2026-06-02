@@ -9,8 +9,23 @@ module SuTakeoff
         def register(strategy, default_for: nil)
           @strategies ||= {}
           @defaults   ||= {}
+
+          # 同名重复：warn（允许覆盖，方便插件 reload 和 Loader 自定义策略覆盖内置）
+          if @strategies.key?(strategy.name) && @strategies[strategy.name] != strategy
+            warn "[SuTakeoff::Strategies::Registry] strategy :#{strategy.name} re-registered"
+          end
           @strategies[strategy.name] = strategy
-          @defaults[default_for] = strategy if default_for
+
+          # 同 method 默认覆盖：raise（这是配置 bug，应早暴露）
+          if default_for
+            existing = @defaults[default_for]
+            if existing && existing != strategy
+              raise ArgumentError,
+                    "default strategy for :#{default_for} already set to :#{existing.name}, " \
+                    "cannot override with :#{strategy.name}"
+            end
+            @defaults[default_for] = strategy
+          end
         end
 
         def get(name)
