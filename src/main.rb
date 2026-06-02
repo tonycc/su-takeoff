@@ -6,13 +6,12 @@ module SuTakeoff
   class PluginState
     include Singleton
 
-    attr_reader :mapping, :component_mapping, :processes, :ignored, :config
+    attr_reader :mapping, :component_mapping, :ignored, :config
 
     DICT_NAME = 'su_takeoff_data'
 
     def initialize
       @mapping = MaterialMapping.new
-      @processes = ProcessLibrary.new
       @component_mapping = ComponentMapping.new
       @ignored = []
       @config = { 'material_category_units' => [], 'component_category_units' => [],
@@ -56,10 +55,6 @@ module SuTakeoff
       File.join(PLUGIN_DIR, 'data', 'default_mapping.json')
     end
 
-    def self.processes_path
-      File.join(PLUGIN_DIR, 'data', 'default_processes.json')
-    end
-
     def self.component_mapping_path
       File.join(PLUGIN_DIR, 'data', 'default_component_mapping.json')
     end
@@ -72,20 +67,19 @@ module SuTakeoff
       File.join(PLUGIN_DIR, 'data', 'config.json')
     end
 
-    def save_config(material_category_units, component_category_units, units, _len = nil, _cnt = nil, layer_rules = nil, heuristics_enabled = nil, _vol = nil, heuristic_thresholds = nil, tag_defs = nil)
-      layer_rules = @config['layer_rules'] || {} if layer_rules.nil?
-      heuristics_enabled = @config.fetch('heuristics_enabled', true) if heuristics_enabled.nil?
-      heuristic_thresholds = @config['heuristic_thresholds'] || {} if heuristic_thresholds.nil?
-      tag_defs = @config['tag_defs'] || {} if tag_defs.nil?
-      @config = { 'material_category_units' => material_category_units,
-                  'component_category_units' => component_category_units,
-                  'units' => units,
-                  'layer_rules' => layer_rules,
-                  'tag_defs' => tag_defs,
-                  'heuristics_enabled' => heuristics_enabled,
-                  'heuristic_thresholds' => heuristic_thresholds }
-      path = self.class.config_path
-      File.write(path, JSON.pretty_generate(@config))
+    def save_config(material_category_units:, component_category_units:, units:,
+                    layer_rules: nil, heuristics_enabled: nil,
+                    heuristic_thresholds: nil, tag_defs: nil)
+      @config = {
+        'material_category_units' => material_category_units,
+        'component_category_units' => component_category_units,
+        'units' => units,
+        'layer_rules' => layer_rules || @config['layer_rules'] || {},
+        'tag_defs' => tag_defs || @config['tag_defs'] || {},
+        'heuristics_enabled' => heuristics_enabled.nil? ? @config.fetch('heuristics_enabled', true) : heuristics_enabled,
+        'heuristic_thresholds' => heuristic_thresholds || @config['heuristic_thresholds'] || {}
+      }
+      File.write(self.class.config_path, JSON.pretty_generate(@config))
       save_config_to_model_dict
     end
 
@@ -93,36 +87,32 @@ module SuTakeoff
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
       dict['config'] = JSON.generate(@config)
-    rescue
-      # 模型可能未保存或无写入权限，静默回退
+    rescue => e
+      puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
     end
 
     def save_mapping_to_model_dict
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
       dict['mapping'] = @mapping.save_json_string
-    rescue
-    end
-
-    def save_processes_to_model_dict
-      model = Sketchup.active_model
-      dict = model.attribute_dictionary(DICT_NAME, true)
-      dict['processes'] = @processes.save_json_string
-    rescue
+    rescue => e
+      puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
     end
 
     def save_component_mapping_to_model_dict
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
       dict['component_mapping'] = @component_mapping.save_json_string
-    rescue
+    rescue => e
+      puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
     end
 
     def save_ignored_to_model_dict
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
       dict['ignored'] = JSON.generate(@ignored)
-    rescue
+    rescue => e
+      puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
     end
 
     private
@@ -135,12 +125,6 @@ module SuTakeoff
         @mapping.load_json_string(model_dict[:mapping])
       else
         @mapping.load_json(self.class.mapping_path)
-      end
-
-      if model_dict[:processes]
-        @processes.load_json_string(model_dict[:processes])
-      else
-        @processes.load_json(self.class.processes_path)
       end
 
       if model_dict[:component_mapping]
@@ -187,7 +171,6 @@ module SuTakeoff
 
       result = {}
       result[:mapping] = dict['mapping'] if dict['mapping']
-      result[:processes] = dict['processes'] if dict['processes']
       result[:component_mapping] = dict['component_mapping'] if dict['component_mapping']
       result[:ignored] = dict['ignored'] if dict['ignored']
       result[:config] = dict['config'] if dict['config']
@@ -204,7 +187,6 @@ module SuTakeoff
       Dir.glob(File.join(PLUGIN_DIR, 'src/**/*.rb')).sort.each { |f| load f }
       # Reset singleton so PluginState picks up fresh data
       PluginState.instance.instance_variable_set(:@mapping, MaterialMapping.new)
-      PluginState.instance.instance_variable_set(:@processes, ProcessLibrary.new)
       PluginState.instance.instance_variable_set(:@component_mapping, ComponentMapping.new)
       PluginState.instance.instance_variable_set(:@ignored, [])
       PluginState.instance.send(:load_data)

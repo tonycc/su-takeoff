@@ -15,7 +15,12 @@ module SuTakeoff
       @model = Sketchup.active_model
       @material_colors = {}
       @component_mapping = PluginState.instance.component_mapping
-      @policy = PluginState.instance.takeoff_policy rescue nil
+      begin
+        @policy = PluginState.instance.takeoff_policy
+      rescue => e
+        puts "[SuTakeoff] Warning: failed to build TakeoffPolicy: #{e.message}"
+        @policy = nil
+      end
       # 模型单位 → 米的换算系数
       @model_unit_to_m = case (@model.options['UnitsOptions']['LengthUnit'] rescue 0)
         when 0 then 0.0254  # inches

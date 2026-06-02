@@ -45,19 +45,16 @@ module SuTakeoff
       @dialog.add_action_callback('scan_all') { |_ctx| do_scan(selection_only: false) }
       @dialog.add_action_callback('scan_selected') { |_ctx| do_scan(selection_only: true) }
 
-      @dialog.add_action_callback('set_ignored') { |_ctx, json| set_ignored(json) }
       @dialog.add_action_callback('get_mappings') { |_ctx| send_mappings }
       @dialog.add_action_callback('save_mapping') { |_ctx, json| save_mapping(json) }
       @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| delete_mapping(su_name) }
       @dialog.add_action_callback('import_csv') { |_ctx| import_csv_dialog }
       @dialog.add_action_callback('export_csv') { |_ctx| export_csv_dialog }
-      @dialog.add_action_callback('get_processes') { |_ctx| send_processes }
+      @dialog.add_action_callback('get_settings') { |_ctx| send_settings }
 
       @dialog.add_action_callback('locate_material') { |_ctx, su_name| locate_material(su_name) }
       @dialog.add_action_callback('locate_face') { |_ctx, json| locate_face(json) }
       @dialog.add_action_callback('locate_entity') { |_ctx, json| locate_entity(json) }
-      @dialog.add_action_callback('save_process') { |_ctx, json| save_process(json) }
-      @dialog.add_action_callback('delete_process') { |_ctx, json| delete_process(json) }
       @dialog.add_action_callback('ignore_material') { |_ctx, name| ignore_material(name) }
       @dialog.add_action_callback('unignore') { |_ctx, name| unignore(name) }
       @dialog.add_action_callback('clear_ignored') { |_ctx| clear_ignored }
@@ -67,8 +64,6 @@ module SuTakeoff
       @dialog.add_action_callback('save_component_mapping') { |_ctx, json| save_component_mapping(json) }
       @dialog.add_action_callback('delete_component_mapping') { |_ctx, def_name| delete_component_mapping(def_name) }
 
-      # P2: 红行确认 —— 把用户选择的计量方式写入对应 entity 的 AttributeDictionary
-      @dialog.add_action_callback('set_takeoff_method_batch') { |_ctx, json| set_takeoff_method_batch(json) }
       # 标记系统 —— 为群组/组件分配/清除标记
       @dialog.add_action_callback('set_entity_tag') { |_ctx, json| set_entity_tag(json) }
     end
@@ -117,23 +112,14 @@ module SuTakeoff
         mapping: PluginState.instance.mapping,
         component_mapping: PluginState.instance.component_mapping,
         policy: PluginState.instance.takeoff_policy,
-        processes: PluginState.instance.processes,
         ignored: PluginState.instance.ignored,
         tag_defs: PluginState.instance.config['tag_defs'] || {}
       ).build
       @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
-      send_mappings
-      send_component_mappings
       rescue => e
         msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
         @dialog.execute_script("window.renderWorkbenchError(#{msg})")
       end
-    end
-
-    def set_ignored(json)
-      names = JSON.parse(json)
-      PluginState.instance.set_ignored!(names)
-      send_workbench_state if @last_scan
     end
 
     def locate_material(su_name)
@@ -314,7 +300,7 @@ module SuTakeoff
       data = JSON.parse(json)
       m = PluginState.instance.mapping
       m.add(data['su_name'], data['material_name'], data['category'],
-            data['unit'], data['spec'], data['waste_rate'].to_f)
+            data['unit'], data['spec'], (data['waste_rate'] || 0.0).to_f)
       m.save_json(PluginState.mapping_path)
       PluginState.instance.save_mapping_to_model_dict
       send_mappings
@@ -404,19 +390,9 @@ module SuTakeoff
       PluginState.instance.mapping.export_csv(path)
     end
 
-    def send_processes
+    def send_settings
       state = PluginState.instance
       data = {
-        processes: state.processes.all_categories.map { |cat|
-          {
-            category: cat,
-            processes: state.processes.processes_for(cat).map { |p|
-              h = p.to_h
-              h[:derivations] = (p.derivations || []).map(&:to_h)
-              h
-            }
-          }
-        },
         ignored: state.ignored,
         material_category_units: state.config['material_category_units'] || [],
         component_category_units: state.config['component_category_units'] || [],
@@ -425,46 +401,21 @@ module SuTakeoff
         heuristics_enabled: state.config.fetch('heuristics_enabled', true),
         heuristic_thresholds: state.config['heuristic_thresholds'] || {}
       }
-      @dialog.execute_script("window.renderProcesses(#{JSON.generate(data)})")
+      @dialog.execute_script("window.renderSettings(#{JSON.generate(data)})")
     end
 
     def save_config(json)
       data = JSON.parse(json)
       PluginState.instance.save_config(
-        data['material_category_units'] || data['category_units'] || [],
-        data['component_category_units'] || [],
-        data['units'] || [],
-        nil,
-        nil,
-        nil,
-        data['heuristics_enabled'],
-        nil,
-        data['heuristic_thresholds'],
-        data['tag_defs']
+        material_category_units: data['material_category_units'] || data['category_units'] || [],
+        component_category_units: data['component_category_units'] || [],
+        units: data['units'] || [],
+        heuristics_enabled: data['heuristics_enabled'],
+        heuristic_thresholds: data['heuristic_thresholds'],
+        tag_defs: data['tag_defs']
       )
       send_workbench_state if @last_scan
     end
-    def save_process(json)
-      data = JSON.parse(json)
-      p = PluginState.instance.processes
-      old_cat = data['old_category'] || data['category']
-      old_name = data['old_name'] || data['name']
-      p.delete_process(old_cat, old_name)
-      p.add_process(data['category'], data['name'], data['waste_rate'].to_f,
-                    data['derivations'] || [])
-      p.save_json(PluginState.processes_path)
-      PluginState.instance.save_processes_to_model_dict
-      send_processes
-    end
-
-    def delete_process(json)
-      data = JSON.parse(json)
-      PluginState.instance.processes.delete_process(data['category'], data['name'])
-      PluginState.instance.processes.save_json(PluginState.processes_path)
-      PluginState.instance.save_processes_to_model_dict
-      send_processes
-    end
-
     def ignore_material(name)
       PluginState.instance.ignore!(name)
       send_workbench_state if @last_scan
@@ -472,12 +423,14 @@ module SuTakeoff
 
     def unignore(name)
       PluginState.instance.unignore!(name)
-      send_processes
+      send_settings
+      send_workbench_state if @last_scan
     end
 
     def clear_ignored
       PluginState.instance.set_ignored!([])
-      send_processes
+      send_settings
+      send_workbench_state if @last_scan
     end
 
     # P2 新增：把红行确认结果写回 entity 的 AttributeDictionary。
@@ -488,43 +441,6 @@ module SuTakeoff
     #   - 写 entity.set_attribute('su_takeoff', 'method', method)
     #   - method == 'clear' 时删除该字段
     #   - 完成后重跑 Calculator + 推前端，红行升级为白行（confidence: explicit, source: attr）
-    def set_takeoff_method_batch(json)
-      data = JSON.parse(json)
-      method = data['method']
-      face_ids = data['face_ids'] || []
-      path_ids_list = data['path_ids_list'] || []
-      return if face_ids.empty?
-
-      model = Sketchup.active_model
-      face_ids.each_with_index do |fid, i|
-        path_ids = path_ids_list[i] || []
-        entities = nil
-        if path_ids.any?
-          inner = model.find_entity_by_id(path_ids.last)
-          if inner&.respond_to?(:definition)
-            entities = inner.definition.entities
-          elsif inner&.respond_to?(:entities)
-            entities = inner.entities
-          end
-        end
-        entities ||= model.entities
-        entity = find_face(entities, fid.to_i)
-        next unless entity
-
-        if method == 'clear'
-          entity.delete_attribute('su_takeoff', 'method') rescue nil
-        else
-          entity.set_attribute('su_takeoff', 'method', method)
-        end
-      end
-
-      # 重新扫描以拾取最新的 attr dict 标签（标签在 Scanner.read_takeoff_tags 读取）
-      do_scan(selection_only: false)
-    rescue => e
-      msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
-      @dialog.execute_script("window.renderWorkbenchError(#{msg})")
-    end
-
     def set_entity_tag(json)
       data = JSON.parse(json)
       entity_id = data['entity_id'].to_i
