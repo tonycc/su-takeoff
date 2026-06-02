@@ -67,5 +67,21 @@ module SuTakeoff
       # default for :length 应仍是 SolidLinear（SkirtingLinear 没有设 default）
       assert_equal :solid_linear, Strategies::Registry.default_for(:length).name
     end
+
+    def test_skirting_linear_compute_length_returns_finite_for_l_shape
+      ctx = {
+        edges: [
+          { dkey: [1,0,0], len: 8.0 }, { dkey: [1,0,0], len: 8.0 },
+          { dkey: [1,0,0], len: 8.0 }, { dkey: [1,0,0], len: 8.0 },
+          { dkey: [0,1,0], len: 5.0 }, { dkey: [0,1,0], len: 5.0 },
+          { dkey: [0,1,0], len: 5.0 }, { dkey: [0,1,0], len: 5.0 },
+        ]
+      }
+      result = Strategies::SkirtingLinear.new.compute_length(nil, ctx)
+      refute_nil result
+      assert result > 0
+      # EdgeBased 各方向最长累加：8 + 5 = 13
+      assert_in_delta 13.0, result, 0.001
+    end
   end
 end

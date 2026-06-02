@@ -347,7 +347,8 @@ module SuTakeoff
 
       case method
       when :length
-        length_m = compute_linear_length(entity, scale) || d
+        length_m = compute_length_via_strategy(entity, scale) ||
+                   compute_linear_length(entity, scale) || d
         item = ScanItem.linear_solid(
           face_id: entity.entityID, su_material: mat_name,
           length: length_m.round(4), width: w.round(4), height: h.round(4), depth: h.round(4),
@@ -379,6 +380,29 @@ module SuTakeoff
           tags: tags, tag: item_tag
         )
       end
+    end
+
+    # 找匹配的 Strategy，如果它暴露 compute_length 就用，让专用算法生效
+    # （如 SkirtingLinear 强制 EdgeBased）。
+    # 找不到匹配策略或策略没有 compute_length 时返回 nil，
+    # 调用方走默认 compute_linear_length（Chained）。
+    def compute_length_via_strategy(entity, scale)
+      return nil unless @policy
+      def_name = container_definition_name(entity)
+      return nil if def_name.nil? || def_name.empty?
+
+      context = { definition_name: def_name, hint_method: :length }
+      default = Strategies::Registry.default_for(:length)
+      strategy = Strategies::Registry.all.find do |s|
+        s.method == :length &&
+          (default.nil? || s.name != default.name) &&
+          s.matches?(nil, context)
+      end
+      return nil unless strategy && strategy.respond_to?(:compute_length)
+
+      ctx = build_length_ctx(entity, scale)
+      return nil unless ctx
+      strategy.compute_length(entity, ctx)
     end
 
     def container_effective_layer(entity, parent_effective)
