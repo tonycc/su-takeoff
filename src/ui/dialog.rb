@@ -104,18 +104,18 @@ module SuTakeoff
     def send_workbench_state
       return unless @last_scan
       begin
-      data = WorkbenchPresenter.new(
-        items: @last_scan[:items],
-        openings: @last_scan[:openings],
-        hierarchy: @last_scan[:hierarchy],
-        colors: @last_scan[:colors],
-        mapping: PluginState.instance.mapping,
-        component_mapping: PluginState.instance.component_mapping,
-        policy: PluginState.instance.takeoff_policy,
-        ignored: PluginState.instance.ignored,
-        tag_defs: PluginState.instance.config['tag_defs'] || {}
-      ).build
-      @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
+        data = WorkbenchPresenter.new(
+          items: @last_scan[:items],
+          openings: @last_scan[:openings],
+          hierarchy: @last_scan[:hierarchy],
+          colors: @last_scan[:colors],
+          mapping: PluginState.instance.mapping,
+          component_mapping: PluginState.instance.component_mapping,
+          policy: PluginState.instance.takeoff_policy,
+          ignored: PluginState.instance.ignored,
+          tag_defs: PluginState.instance.config['tag_defs'] || {}
+        ).build
+        @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
       rescue => e
         msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
         @dialog.execute_script("window.renderWorkbenchError(#{msg})")
@@ -416,6 +416,7 @@ module SuTakeoff
       )
       send_workbench_state if @last_scan
     end
+
     def ignore_material(name)
       PluginState.instance.ignore!(name)
       send_workbench_state if @last_scan
