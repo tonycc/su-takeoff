@@ -335,5 +335,30 @@ module SuTakeoff
       assert_in_delta 1.0, u[:qty_count],  0.01, '件数应为 1'
       assert_in_delta 3.0, u[:qty_length], 0.01, '长度应为 3m'
     end
+
+    def test_geometry_usage_includes_strategy_debug_field
+      # Stage 3: geometry_usages 暴露 strategy_name 调试字段
+      usages = usages_for(all_items, [])
+      marble = find_usage(usages, LIVING_EID, 'marble_01')
+      refute_nil marble
+      refute_nil marble[:strategies]
+      assert_includes marble[:strategies], 'face_area'
+    end
+
+    def test_faces_detail_includes_strategy_name
+      usages = usages_for(all_items, [])
+      marble = find_usage(usages, LIVING_EID, 'marble_01')
+      face = marble[:faces].first
+      refute_nil face
+      assert_equal 'face_area', face[:strategy_name]
+    end
+
+    def test_skirting_strategy_name_in_geometry_usage
+      # 踢脚线 mapping unit='m' → solid_linear 默认策略
+      usages = usages_for(all_items, [])
+      skirting = find_usage(usages, LIVING_EID, 'skirting')
+      refute_nil skirting
+      assert_includes skirting[:strategies], 'solid_linear'
+    end
   end
 end

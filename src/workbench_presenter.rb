@@ -188,7 +188,8 @@ module SuTakeoff
           kind: i.kind,
           part: Calculator.face_orientation(i.normal),
           resolved_method: i.resolved_method&.to_s,
-          source: i.source&.to_s
+          source: i.source&.to_s,
+          strategy_name: i.strategy_name&.to_s
         }
       }
 
@@ -205,7 +206,9 @@ module SuTakeoff
         by_part: part_counts.transform_values { |v| v.round(2) },
         is_instance: is_instance,
         faces: faces_detail,
-        confidence: confidence
+        confidence: confidence,
+        # Stage 3 调试字段：本聚合涉及的全部策略（复合标签场景下可能多个）
+        strategies: face_items_in_group.map(&:strategy_name).compact.uniq.map(&:to_s)
       }
     end
 
