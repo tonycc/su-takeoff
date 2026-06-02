@@ -418,6 +418,21 @@ module SuTakeoff
       def_name = container_definition_name(entity)
       puts "[linear_length] ====== 实体: \"#{def_name}\" entityID=#{entity.entityID} ======" if DEBUG
 
+      ctx = build_length_ctx(entity, scale)
+      return nil unless ctx
+
+      chained = LengthCalculators::Chained.new(
+        LengthCalculators::Baseline.new,
+        LengthCalculators::VolumeBased.new,
+        LengthCalculators::EdgeBased.new
+      )
+      chained.compute(entity, ctx)
+    end
+
+    def build_length_ctx(entity, scale)
+      ents = definition_entities(entity)
+      return nil unless ents
+
       entity_scale = if entity.respond_to?(:transformation)
         t = entity.transformation
         [t.xscale.abs, t.yscale.abs, t.zscale.abs].max
@@ -426,36 +441,24 @@ module SuTakeoff
       end
       edge_scale = scale * entity_scale
 
-      if DEBUG
-        entity_type = entity.is_a?(Sketchup::ComponentInstance) ? 'ComponentInstance' :
-                      (entity.is_a?(Sketchup::Group) ? 'Group' : entity.class.to_s)
-        t = entity.respond_to?(:transformation) ? entity.transformation : nil
-        puts "[linear_length] entity_type=#{entity_type} parent_scale=#{scale} " \
-             "entity_scale=#{entity_scale} edge_scale=#{edge_scale}"
-        puts "[linear_length] entity.transformation=#{t ? t.to_a.inspect : 'nil'}"
-      end
+      edges = collect_edges(ents, edge_scale)
+      return nil if edges.empty?
 
-      ents = definition_entities(entity)
-      if DEBUG && ents
-        counts = Hash.new(0)
-        ents.each { |e| counts[e.class.to_s] += 1 }
-        puts "[linear_length] definition entities: #{counts.inspect}"
-      end
-      return nil unless ents
+      calibrate_inch_edges(edges, entity)
 
-      # ---- 1. Baseline ----
-      tags        = read_takeoff_tags(entity)
-      baseline_id = tags && tags[:baseline_id]
-      if baseline_id
-        baseline_edge = find_edge_by_id(ents, baseline_id.to_i)
-        if baseline_edge
-          len = baseline_edge.length.to_f * @model_unit_to_m * edge_scale
-          puts "[linear_length] baseline edge ##{baseline_id} = #{len.round(4)}m" if DEBUG
-          return len
-        end
-      end
+      tags = read_takeoff_tags(entity)
+      {
+        entities:        ents,
+        edges:           edges,
+        edge_scale:      edge_scale,
+        scale:           scale,
+        model_unit_to_m: @model_unit_to_m,
+        baseline_id:     tags && tags[:baseline_id],
+        debug:           DEBUG
+      }
+    end
 
-      # 收集所有边：方向、长度
+    def collect_edges(ents, edge_scale)
       edges = []
       ents.each do |e|
         next unless e.is_a?(Sketchup::Edge)
@@ -468,99 +471,25 @@ module SuTakeoff
                   len_raw.to_f * @model_unit_to_m
                 end
         dkey = [dir.x.round(3).abs, dir.y.round(3).abs, dir.z.round(3).abs]
-        puts "[linear_length]   边 ##{e.entityID}: 方向=#{dkey.inspect} 长=#{len_m.round(4)}m" if DEBUG
         edges << { dkey: dkey, len: len_m, len_raw: len_raw }
       end
-      return nil if edges.empty?
-
-      puts "[linear_length] bbox (in): #{[entity.bounds.width, entity.bounds.height, entity.bounds.depth].sort.map { |v| v.round(2) }.join(' x ')}, scale=#{scale}" if DEBUG
-
-      # 校准：用 bbox 最长边判断 Float 是否需从英寸换算
-      is_len_obj = defined?(Length) && edges.first && edges.first[:len_raw].is_a?(Length)
-      unless is_len_obj
-        bb        = entity.bounds
-        bb_max_m  = [bb.width, bb.height, bb.depth].max * 0.0254
-        edge_max  = edges.map { |e| e[:len] }.max
-        if edge_max > 0 && bb_max_m / edge_max > 10
-          puts "[linear_length] 校准: 边值=#{edge_max.round(4)}m, bbox=#{bb_max_m.round(4)}m → 改英寸换算" if DEBUG
-          edges.each { |e| e[:len] = e[:len_raw].to_f * 0.0254 }
-        end
-      end
-      puts "[linear_length] 总边数=#{edges.size} model_unit=#{@model.options['UnitsOptions']['LengthUnit']} factor=#{@model_unit_to_m}" if DEBUG
-
-      # 非方条形检测（圆柱/圆角等）
-      dir_groups      = edges.group_by { |e| e[:dkey] }
-      meaningful_groups = dir_groups.select { |_, es| es.size >= 4 }
-      if meaningful_groups.size > 5
-        sorted_maxes = meaningful_groups.map { |_, es| es.map { |e| e[:len] }.max }.sort.reverse
-        result = sorted_maxes.first || 0
-        sorted_maxes.each_cons(2) do |prev, cur|
-          break if prev / cur > 5
-          result += cur
-        end
-        puts "[linear_length] 非方条形（#{meaningful_groups.size}组≥4边）→ 累加=#{result.round(4)}m" if DEBUG
-        return result.round(4)
-      end
-
-      # ---- 2. Solid 体积法 ----
-      if entity.respond_to?(:volume) && entity.volume.is_a?(Numeric) && entity.volume > 0
-        groups     = edges.group_by { |e| e[:dkey] }
-        group_info = groups.map { |dkey, es| [dkey, es.map { |e| e[:len] }.max, es.size] }
-                           .sort_by { |_, m, _| m }
-        if DEBUG
-          puts "[linear_length] Solid 体积法 —— 方向组详情："
-          group_info.each do |dkey, max, cnt|
-            flag = cnt >= 4 ? (max < 0.1 ? '✓ 截面候选' : '  长边') : '  排除(边<4)'
-            puts "  #{flag} 方向#{dkey.inspect} max=#{max.round(6)}m edges=#{cnt}"
-          end
-        end
-        meaningful       = group_info.select { |_, _, cnt| cnt >= 4 }
-        short_meaningful = meaningful.select { |_, m, _| m >= 0.001 && m < 0.1 }
-        puts "[linear_length] 截面候选 meaningful=#{meaningful.size} short=#{short_meaningful.size}" if DEBUG
-        if short_meaningful.size >= 2
-          h_m    = short_meaningful[0][1]
-          t_m    = short_meaningful[1][1]
-          vol_m3 = entity.volume * 1.6387e-5 * (scale**3)
-          result = vol_m3 / h_m / t_m
-          puts "[linear_length] Solid 体积法: #{vol_m3.round(6)}m³ / #{h_m.round(4)}m / #{t_m.round(4)}m = #{result.round(4)}m" if DEBUG
-          return result.round(4)
-        else
-          puts "[linear_length] Solid 体积法：截面不足，退到边线法" if DEBUG
-        end
-      end
-
-      # ---- 3. 边线法 ----
-      groups      = edges.group_by { |e| e[:dkey] }
-      group_maxes = groups.map { |dkey, es| [dkey, es.map { |e| e[:len] }.max, es] }.sort_by { |_, m, _| -m }
-      puts "[linear_length] 方向组数=#{group_maxes.size} 各向最长(m)=#{group_maxes.map { |_, m| m.round(4) }.join(', ')}" if DEBUG
-      long_groups = []
-      last_max    = nil
-      group_maxes.each do |dkey, max, es|
-        if last_max.nil? || (last_max / max) < 5
-          long_groups << es
-          last_max = max
-        else
-          puts "[linear_length] 截面方向#{dkey.inspect} max=#{max.round(4)}m 排除" if DEBUG
-          break
-        end
-      end
-      result = long_groups.map { |es| es.map { |e| e[:len] }.max }.sum
-      puts "[linear_length] 各向最长累加=#{result.round(4)}m" if DEBUG
-      result.round(4)
+      edges
     end
 
-    def find_edge_by_id(entities, target_id)
-      entities.each do |e|
-        return e if e.is_a?(Sketchup::Edge) && e.entityID == target_id
-        if e.is_a?(Sketchup::Group)
-          found = find_edge_by_id(e.entities, target_id)
-          return found if found
-        elsif e.is_a?(Sketchup::ComponentInstance)
-          found = find_edge_by_id(e.definition.entities, target_id)
-          return found if found
-        end
-      end
-      nil
+    # 校准：当 e.length 返回原始 Float（非 Length 对象）且值与 bbox 不匹配时，
+    # bbox/edge > 10 → 视为单位混淆，强制按英寸换算。
+    def calibrate_inch_edges(edges, entity)
+      return if edges.empty?
+      is_len_obj = defined?(Length) && edges.first[:len_raw].is_a?(Length)
+      return if is_len_obj
+
+      bb = entity.bounds
+      bb_max_m = [bb.width, bb.height, bb.depth].max * 0.0254
+      edge_max = edges.map { |e| e[:len] }.max
+      return unless edge_max > 0 && bb_max_m / edge_max > 10
+
+      puts "[linear_length] 校准: 边值=#{edge_max.round(4)}m, bbox=#{bb_max_m.round(4)}m → 改英寸换算" if DEBUG
+      edges.each { |e| e[:len] = e[:len_raw].to_f * 0.0254 }
     end
 
     def first_child_face_material(entity)
