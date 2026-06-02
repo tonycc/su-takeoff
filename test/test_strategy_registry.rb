@@ -1,11 +1,25 @@
 require_relative 'test_helper'
 require 'src/strategies/base'
 require 'src/strategies/registry'
+require 'src/strategies/face_area'
+require 'src/strategies/face_linear'
+require 'src/strategies/instance_count'
+require 'src/strategies/solid_volume'
+require 'src/strategies/solid_linear'
+require 'src/strategies/solid_count'
+require 'src/strategies/skip'
+require 'src/strategies/builtin'
 
 module SuTakeoff
   class TestStrategyRegistry < Minitest::Test
     def setup
       Strategies::Registry.reset!
+    end
+
+    def teardown
+      # 恢复全局 Registry 到默认 builtin 状态，避免污染其他测试
+      Strategies::Registry.reset!
+      Strategies::Builtin.register_all!
     end
 
     def test_register_and_get

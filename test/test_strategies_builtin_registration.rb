@@ -17,6 +17,12 @@ module SuTakeoff
       Strategies::Builtin.register_all!
     end
 
+    def teardown
+      # 恢复全局 Registry 到默认 builtin 状态，避免污染其他测试
+      Strategies::Registry.reset!
+      Strategies::Builtin.register_all!
+    end
+
     def test_face_area_registered_and_default_for_area
       assert_kind_of Strategies::FaceArea, Strategies::Registry.get(:face_area)
       assert_equal :face_area, Strategies::Registry.default_for(:area).name

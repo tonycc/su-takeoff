@@ -238,5 +238,44 @@ module SuTakeoff
       assert_equal :length, r.method
       assert_equal :heuristic, r.source
     end
+
+    # ---- Stage 3: ResolveResult.strategy ----
+
+    def test_resolve_returns_strategy_for_mapped_material
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'marble_01')
+      r = policy.resolve(item)
+      refute_nil r.strategy
+      assert_equal :face_area, r.strategy.name
+      assert_equal :area, r.method  # method 字段从 strategy.method 派生
+    end
+
+    def test_resolve_returns_strategy_for_length_mapping
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'skirting_m')
+      r = policy.resolve(item)
+      assert_equal :solid_linear, r.strategy.name
+      assert_equal :length, r.method
+    end
+
+    def test_resolve_returns_face_linear_for_heuristic
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'unknown', normal: [0, 1, 0],
+                       width: 0.05, height: 8.0)
+      r = policy.resolve(item)
+      # 启发判定为线材时应用 face_linear（含 height fallback）
+      assert_equal :face_linear, r.strategy.name
+      assert_equal :length, r.method
+      assert_equal :heuristic, r.source
+    end
+
+    def test_resolve_instance_returns_solid_count_strategy
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = ScanItem.instance(face_id: 100, su_material: 'lamp_01', unit: '个',
+                               layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101])
+      r = policy.resolve(item)
+      assert_equal :solid_count, r.strategy.name
+      assert_equal :count, r.method
+    end
   end
 end

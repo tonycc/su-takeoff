@@ -11,7 +11,13 @@ module SuTakeoff
   # 不在内部读 PluginState/config.json，而是构造时注入 —— 单元测试可以直接造一个
   # Policy 实例不依赖 SU 运行时。
   class TakeoffPolicy
-    ResolveResult = Struct.new(:method, :source, keyword_init: true)
+    # Stage 3: ResolveResult 内部 strategy 是 Strategies::Base 对象。
+    # method 字段由 strategy.method 派生（向后兼容）。
+    ResolveResult = Struct.new(:strategy, :source, keyword_init: true) do
+      def method
+        strategy && strategy.method
+      end
+    end
 
     METHODS = %i[area length volume count skip].freeze
 
@@ -44,46 +50,48 @@ module SuTakeoff
       @vertical_slab_area_tol = thresholds[:vertical_slab_area_tolerance] || DEFAULT_VERTICAL_SLAB_TOL
     end
 
-    # 面级判定。返回 ResolveResult。
+    # 面级判定。返回 ResolveResult（携带 Strategy 对象）。
     def resolve(item)
       # instance：永远按整件统计，绕过 4 档策略
       if item.kind == :instance
-        return ResolveResult.new(method: :count, source: :mapping)
+        return result_for(:count, :mapping)
       end
 
       # P3: 容器级整体量取已固化为 ScanItem.kind，Calculator 直接信任。
       if item.kind == :solid
-        return ResolveResult.new(method: :volume, source: :layer)
+        return result_for(:volume, :layer)
       end
       if item.kind == :linear_solid
-        return ResolveResult.new(method: :length, source: :layer)
+        return result_for(:length, :layer)
       end
       if item.kind == :count_solid
-        return ResolveResult.new(method: :count, source: :layer)
+        return result_for(:count, :layer)
       end
 
       # 1. AttrDict 覆盖
       if item.tags && (m = item.tags[:method])
         sym = m.to_sym
-        return ResolveResult.new(method: sym, source: :attr) if METHODS.include?(sym)
+        return result_for(sym, :attr) if METHODS.include?(sym)
       end
 
       # 2. 图层规则
       if item.layer_name && (m = @layer_rules[item.layer_name])
-        return ResolveResult.new(method: m, source: :layer)
+        return result_for(m, :layer)
       end
 
       # 3. 材质映射 unit
       if @mapping && (record = @mapping.get(item.su_material))
-        return ResolveResult.new(method: method_from_unit(record.unit), source: :mapping)
+        return result_for(method_from_unit(record.unit), :mapping)
       end
 
       # 4. 启发式（弱信号，仅产生待确认建议；仅在没有显式配置时触发）
       if @heuristics && linear_face?(item)
-        return ResolveResult.new(method: :length, source: :heuristic)
+        # 启发判定线材：用 face_linear（含 height fallback）而非 solid_linear
+        strategy = Strategies::Registry.get(:face_linear) || Strategies::Registry.default_for(:length)
+        return ResolveResult.new(strategy: strategy, source: :heuristic)
       end
 
-      ResolveResult.new(method: :skip, source: :default)
+      result_for(:skip, :default)
     end
 
     # 容器级判定（Scanner 在 ComponentInstance/Group 分支调用）。
@@ -127,6 +135,12 @@ module SuTakeoff
     end
 
     private
+
+    # 根据 method 查 default strategy 构造 ResolveResult。
+    def result_for(method, source)
+      strategy = Strategies::Registry.default_for(method)
+      ResolveResult.new(strategy: strategy, source: source)
+    end
 
     # 严格的几何启发：必须是垂直面 + 横向窄长
     #   - |normal.z| < 0.5    排除水平面（地/顶不该被判线材）

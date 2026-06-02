@@ -23,11 +23,12 @@ module SuTakeoff
     attr_accessor :policy
 
     # 几何决议：dedup + Policy 决议。
-    # 返回 [{ item: ScanItem, method: Symbol, source: Symbol, unit: String }, ...]
+    # 返回 [{ item: ScanItem, method: Symbol, source: Symbol, unit: String,
+    #         strategy_name: Symbol }, ...]
     # —— 跳过 nil 材质和 :skip 决议；items 顺序保留。
     def compute_geometry_only(items, _openings = nil)
       # 清除上次调用写入的缓存，确保 settings 变更后重新决议
-      items.each { |it| it.resolved_method = nil; it.source = nil }
+      items.each { |it| it.resolved_method = nil; it.source = nil; it.strategy_name = nil }
       items = dedup_thin_slabs(items)
       # 全量决议并缓存，供 dedup_vertical_slabs 直接读取
       items.each { |it| cache_resolve(it) unless it.su_material.nil? }
@@ -41,7 +42,8 @@ module SuTakeoff
           item: item,
           method: item.resolved_method,
           source: item.source,
-          unit: unit_for(item, item.resolved_method, item.source)
+          unit: unit_for(item, item.resolved_method, item.source),
+          strategy_name: item.strategy_name
         }
       end
       out
@@ -72,34 +74,47 @@ module SuTakeoff
 
     private
 
-    # 把 Policy 决议结果写入 item.resolved_method / item.source（幂等，已缓存则跳过）
+    # 把 Policy 决议结果写入 item.resolved_method / item.source / item.strategy_name
+    # （幂等，已缓存则跳过）
     def cache_resolve(item)
       return if item.resolved_method  # 已缓存
       r = resolve_method(item)
       item.resolved_method = r[:method]
       item.source = r[:source]
+      item.strategy_name = r[:strategy_name]
     end
 
-    # 决议单个 item 的 method + source + unit。
+    # 决议单个 item 的 method + source + strategy_name + unit。
     # 优先走注入的 Policy；缺失时回到 mapping 兜底 + 未映射启发，保持旧调用兼容。
     def resolve_method(item)
       if @policy
         r = @policy.resolve(item)
+        # 启发兜底（policy 决议 :skip + :default）
         if r.method == :skip && r.source == :default
           return geometry_unmapped_fallback(item)
         end
-        return { method: r.method, source: r.source,
-                 unit: unit_for(item, r.method, r.source) }
+        return {
+          method: r.method,
+          source: r.source,
+          strategy_name: r.strategy && r.strategy.name,
+          unit: unit_for(item, r.method, r.source)
+        }
       end
 
+      # policy 缺失：mapping 兜底
       record = lookup_record(item)
       if record
         method = item.kind == :instance ? :count : TakeoffPolicy.classify_unit(record.unit)
-        { method: method, source: :mapping,
-          unit: unit_for(item, method, :mapping, record) }
-      else
-        geometry_unmapped_fallback(item)
+        strategy = Strategies::Registry.default_for(method)
+        return {
+          method: method,
+          source: :mapping,
+          strategy_name: strategy && strategy.name,
+          unit: unit_for(item, method, :mapping, record)
+        }
       end
+
+      geometry_unmapped_fallback(item)
     end
 
     # 未映射面 item 的兜底判定：长宽比 > 15 视为线材，否则面材。
@@ -107,8 +122,14 @@ module SuTakeoff
       is_linear = item.kind == :face && item.width && item.width > 0 &&
                   item.height && (item.height / item.width) > 15
       method = is_linear ? :length : :area
-      { method: method, source: :heuristic,
-        unit: method == :length ? 'm' : 'm²' }
+      # 启发线材用 face_linear（含 height fallback），启发面材用 face_area
+      strategy_name = is_linear ? :face_linear : :face_area
+      {
+        method: method,
+        source: :heuristic,
+        strategy_name: strategy_name,
+        unit: method == :length ? 'm' : 'm²'
+      }
     end
 
     # 单位选择：method 决定语义，source/record 决定细节。
