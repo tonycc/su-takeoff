@@ -26,6 +26,8 @@ module SuTakeoff
     # 返回 [{ item: ScanItem, method: Symbol, source: Symbol, unit: String }, ...]
     # —— 跳过 nil 材质和 :skip 决议；items 顺序保留。
     def compute_geometry_only(items, _openings = nil)
+      # 清除上次调用写入的缓存，确保 settings 变更后重新决议
+      items.each { |it| it.resolved_method = nil; it.source = nil }
       items = dedup_thin_slabs(items)
       # 全量决议并缓存，供 dedup_vertical_slabs 直接读取
       items.each { |it| cache_resolve(it) unless it.su_material.nil? }
