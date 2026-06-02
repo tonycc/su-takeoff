@@ -1,10 +1,14 @@
 require_relative 'test_helper'
 require 'src/calculator'
 require 'src/mapping'
-require 'src/process_library'
 require 'src/component_mapping'
+require 'src/takeoff_policy'
 
 module SuTakeoff
+  # Calculator 的新职责只剩两件事：
+  #   1. 薄板去重
+  #   2. 走 Policy 决议每个 item 的 method/source/unit
+  # 量纲累加、洞口扣减由 Presenter 负责，本测试只关心决议层面。
   class TestComputeGeometryOnly < Minitest::Test
     def setup
       @mapping = MaterialMapping.new
@@ -13,88 +17,113 @@ module SuTakeoff
       @mapping.add('paint_w', '多乐士净味白', '涂料', 'm²', '18L/桶', 0.05)
       @mapping.add('skirting_m', '踢脚线', '木材', 'm', '80mm', 0.05)
 
-      @processes = ProcessLibrary.new
-      @processes.add_process('瓷砖', '密缝铺贴', 0.05)
-      @processes.add_process('石材', '干挂', 0.08)
-
       @cm = ComponentMapping.new
       @cm.add('lamp_01', '台灯', '灯具', '个', '', 0.0, 'aggregate')
 
-      @calc = Calculator.new(@mapping, @processes, @cm)
+      @policy = TakeoffPolicy.new(mapping: @mapping)
+      @calc = Calculator.new(@mapping, @cm, policy: @policy)
     end
 
-    def test_purchase_qty_equals_net_area
+    def test_basic_area
       items = [
-        ScanItem.new(1, 'tile_302', 100.0, 'm2', :face, [0,0,1], 10, 10, 'Layer0', ['客厅'], [101], 0),
+        ScanItem.face(face_id: 1, su_material: 'tile_302', area: 100.0,
+                      normal: [0,0,1], width: 10, height: 10,
+                      layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101]),
       ]
       geo = @calc.compute_geometry_only(items, [])
       assert_equal 1, geo.size
-      assert_in_delta geo[0].net_area, geo[0].purchase_qty, 0.01
-    end
-
-    def test_waste_rate_is_zero
-      items = [
-        ScanItem.new(1, 'marble_01', 50.0, 'm2', :face, [0,0,1], 5, 10, 'Layer0', ['客厅'], [101], 0),
-      ]
-      geo = @calc.compute_geometry_only(items, [])
-      assert_equal 0, geo[0].waste_rate
-    end
-
-    def test_no_derivation_items
-      # 涂料 category has a process that could produce derivations
-      # but compute_geometry_only should not fan-out
-      @processes.add_process('涂料', '乳胶漆', 0.05, [
-        Derivation.new(layer: '底漆', unit: 'm²', formula: 'area*0.3', waste_rate: 0.02, category: '涂料')
-      ])
-      items = [
-        ScanItem.new(1, 'paint_w', 50.0, 'm2', :face, [0,1,0], 5, 10, 'Layer0', ['客厅'], [101], 1.5),
-      ]
-      geo = @calc.compute_geometry_only(items, [])
-      # Only primary item, no derivation fan-out
-      assert_equal 1, geo.size
-      assert_equal '', geo[0].layer
-    end
-
-    def test_opening_deduction_still_works
-      items = [
-        ScanItem.new(1, 'paint_w', 50.0, 'm2', :face, [0,1,0], 5, 10, 'Layer0', ['客厅'], [101], 1.5),
-      ]
-      openings = [Opening.new(10, 2.0, [1])]
-      geo = @calc.compute_geometry_only(items, openings)
-      wall = geo.find { |u| u.part == 'wall' }
-      refute_nil wall
-      assert_in_delta 48.0, wall.net_area, 0.01
+      assert_equal :area, geo[0][:method]
+      assert_equal :mapping, geo[0][:source]
+      assert_equal 'm²', geo[0][:unit]
+      assert_equal 'tile_302', geo[0][:item].su_material
     end
 
     def test_unmapped_materials_included
       items = [
-        ScanItem.new(1, 'unknown_mat', 10.0, 'm2', :face, [0,0,1], 2, 5, 'Layer0', ['客厅'], [101], 0),
+        ScanItem.face(face_id: 1, su_material: 'unknown_mat', area: 10.0,
+                      normal: [0,0,1], width: 2, height: 5,
+                      layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101]),
       ]
       geo = @calc.compute_geometry_only(items, [])
       assert_equal 1, geo.size
-      assert_equal 'unknown_mat', geo[0].su_material_name
-      assert_equal '', geo[0].material_name
-      assert_equal 'm²', geo[0].unit
-      assert_in_delta 10.0, geo[0].net_area, 0.01
+      assert_equal 'unknown_mat', geo[0][:item].su_material
+      # 未映射 + 非窄长 → 默认面材兜底（启发）
+      assert_equal :area, geo[0][:method]
+      assert_equal 'm²', geo[0][:unit]
     end
 
     def test_instance_counting
       items = [
-        ScanItem.new(100, 'lamp_01', 1, '个', :instance, nil, 0, 0, 'Layer0', ['客厅'], [103], 0),
+        ScanItem.instance(face_id: 100, su_material: 'lamp_01', unit: '个',
+                          layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [103]),
       ]
       geo = @calc.compute_geometry_only(items, [])
       assert_equal 1, geo.size
-      assert_equal '个', geo[0].unit
-      assert_in_delta 1, geo[0].net_area, 0.01
+      assert_equal :count, geo[0][:method]
+      assert_equal '个', geo[0][:unit]
     end
 
     def test_linear_length
       items = [
-        ScanItem.new(1, 'skirting_m', 2.0, 'm', :face, [0,1,0], 0.02, 10, 'Layer0', ['客厅'], [101], 0.5),
+        ScanItem.face(face_id: 1, su_material: 'skirting_m', area: 2.0,
+                      normal: [0,1,0], width: 0.02, height: 10,
+                      layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101],
+                      z_center: 0.5),
       ]
       geo = @calc.compute_geometry_only(items, [])
       assert_equal 1, geo.size
-      assert_equal 'm', geo[0].unit
+      assert_equal :length, geo[0][:method]
+      # mapping unit 是 'm'，应保留
+      assert_equal 'm', geo[0][:unit]
+    end
+
+    def test_nil_material_skipped
+      items = [
+        ScanItem.face(face_id: 1, su_material: nil, area: 10.0,
+                      normal: [0,0,1], width: 2, height: 5,
+                      layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101]),
+      ]
+      geo = @calc.compute_geometry_only(items, [])
+      assert_empty geo
+    end
+
+    def test_skip_method_filtered_out
+      # AttrDict 标记 skip 的 item 不应出现在结果中
+      item = ScanItem.face(
+        face_id: 1, su_material: 'marble_01', area: 5.0,
+        normal: [0, 1, 0], width: 2.0, height: 2.5,
+        layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101],
+        tags: { method: 'skip' }
+      )
+      geo = @calc.compute_geometry_only([item], [])
+      assert_empty geo
+    end
+
+    # ---- 决议结果不再依赖 policy 时的兼容路径 ----
+
+    def test_no_policy_falls_back_to_mapping
+      calc = Calculator.new(@mapping, @cm)  # 不传 policy
+      items = [
+        ScanItem.face(face_id: 1, su_material: 'marble_01', area: 10.0,
+                      normal: [0,0,1], width: 2, height: 5,
+                      layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101]),
+      ]
+      geo = calc.compute_geometry_only(items, [])
+      assert_equal :area, geo[0][:method]
+      assert_equal :mapping, geo[0][:source]
+    end
+
+    def test_no_policy_unmapped_uses_heuristic_fallback
+      calc = Calculator.new(@mapping, @cm)
+      # 长宽比 16，启发为线材
+      items = [
+        ScanItem.face(face_id: 1, su_material: 'unknown', area: 1.0,
+                      normal: [0,1,0], width: 0.05, height: 0.8,
+                      layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101]),
+      ]
+      geo = calc.compute_geometry_only(items, [])
+      assert_equal :length, geo[0][:method]
+      assert_equal 'm', geo[0][:unit]
     end
   end
 end

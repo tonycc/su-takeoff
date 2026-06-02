@@ -1,10 +1,16 @@
 require_relative 'test_helper'
 require 'src/calculator'
 require 'src/mapping'
-require 'src/process_library'
+require 'src/component_mapping'
+require 'src/takeoff_policy'
+require 'src/workbench_presenter'
 
 module SuTakeoff
   # 真实户型场景：客厅 + 主卧 + 卫生间，含门窗洞口、踢脚线等
+  #
+  # 按 (space, part, material) 聚合的视图已经下线，本测试改为通过
+  # WorkbenchPresenter 的 geometry_usages（按 entity_id × su_material 聚合）
+  # 验证：洞口扣减、薄板去重、踢脚线线材识别仍然正确。
   class TestWallModel < Minitest::Test
     def setup
       @mapping = MaterialMapping.new
@@ -14,137 +20,165 @@ module SuTakeoff
       @mapping.add('wood_oak',   '橡木复合地板',   '木材', 'm²', '1200×200', 0.05)
       @mapping.add('skirting',   '实木踢脚线',     '木材', 'm',  '80mm',     0.05)
 
-      @processes = ProcessLibrary.new
-      @processes.add_process('瓷砖', '密缝铺贴', 0.05)
-      @processes.add_process('石材', '干挂',     0.08)
-      @processes.add_process('木材', '悬浮铺装', 0.05)
-
-      @calc = Calculator.new(@mapping, @processes)
+      @cm = ComponentMapping.new
+      @policy = TakeoffPolicy.new(mapping: @mapping)
     end
+
+    # 各房间的 entity_id：客厅=101 主卧=201 卫生间=301
+    LIVING_EID = 101
+    BEDROOM_EID = 201
+    BATHROOM_EID = 301
 
     # ================================================================
     # 构建真实户型数据
+    # 房间尺寸: 客厅 8m×5m, 主卧 5m×4m, 卫生间 3m×2m; 层高 2.8m
+    # Z: 地面 0, 天花 2.8。主卧在客厅东侧, 卫生间在主卧南侧。
     # ================================================================
 
-    # 房间尺寸: 客厅 8m×5m, 主卧 5m×4m, 卫生间 3m×2m
-    #
-    # 每面墙: width=墙长, height=层高2.8m
-    # 天花/地面: width=房间宽, height=房间进深
-    #
-    # Z 坐标: 地面 z=0, 天花 z=2.8
-    # 主卧在客厅的东侧, 卫生间在主卧南侧
-
     def living_floor
-      ScanItem.new(1, 'marble_01', 40.0, 'm2', :face, [0,0,1], 8.0, 5.0, 'Layer0',
-                   ['客厅'], [101], 0.02)
+      ScanItem.face(face_id: 1, su_material: 'marble_01', area: 40.0,
+                    normal: [0,0,1], width: 8.0, height: 5.0,
+                    layer_name: 'Layer0', component_path: ['客厅'],
+                    component_path_ids: [LIVING_EID], z_center: 0.02)
     end
 
     def living_ceiling
-      ScanItem.new(2, 'paint_w', 40.0, 'm2', :face, [0,0,-1], 8.0, 5.0, 'Layer0',
-                   ['客厅'], [101], 2.78)
+      ScanItem.face(face_id: 2, su_material: 'paint_w', area: 40.0,
+                    normal: [0,0,-1], width: 8.0, height: 5.0,
+                    layer_name: 'Layer0', component_path: ['客厅'],
+                    component_path_ids: [LIVING_EID], z_center: 2.78)
     end
 
     # 客厅四面墙: 北(8m) 南(8m) 东(5m) 西(5m), 层高2.8m
     def living_wall_north
-      ScanItem.new(3, 'paint_w', 22.4, 'm2', :face, [0,1,0], 8.0, 2.8, 'Layer0',
-                   ['客厅'], [101], 1.4)
+      ScanItem.face(face_id: 3, su_material: 'paint_w', area: 22.4,
+                    normal: [0,1,0], width: 8.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['客厅'],
+                    component_path_ids: [LIVING_EID], z_center: 1.4)
     end
 
     def living_wall_south
-      ScanItem.new(4, 'paint_w', 22.4, 'm2', :face, [0,-1,0], 8.0, 2.8, 'Layer0',
-                   ['客厅'], [101], 1.4)
+      ScanItem.face(face_id: 4, su_material: 'paint_w', area: 22.4,
+                    normal: [0,-1,0], width: 8.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['客厅'],
+                    component_path_ids: [LIVING_EID], z_center: 1.4)
     end
 
     def living_wall_east
-      ScanItem.new(5, 'paint_w', 14.0, 'm2', :face, [1,0,0], 5.0, 2.8, 'Layer0',
-                   ['客厅'], [101], 1.4)
+      ScanItem.face(face_id: 5, su_material: 'paint_w', area: 14.0,
+                    normal: [1,0,0], width: 5.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['客厅'],
+                    component_path_ids: [LIVING_EID], z_center: 1.4)
     end
 
     def living_wall_west
-      ScanItem.new(6, 'paint_w', 14.0, 'm2', :face, [-1,0,0], 5.0, 2.8, 'Layer0',
-                   ['客厅'], [101], 1.4)
+      ScanItem.face(face_id: 6, su_material: 'paint_w', area: 14.0,
+                    normal: [-1,0,0], width: 5.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['客厅'],
+                    component_path_ids: [LIVING_EID], z_center: 1.4)
     end
 
     # 客厅踢脚线 — 绕墙一圈 (8+5)*2 = 26m, 高80mm 宽80mm → 长宽比 2.8/0.08 >15 → 线材
     def living_skirting
-      face_ids = (7..10).to_a
       walls = [
-        { id: 7,  w: 8.0, normal: [0,1,0],  cp: ['客厅'], cid: [101] },
-        { id: 8,  w: 8.0, normal: [0,-1,0], cp: ['客厅'], cid: [101] },
-        { id: 9,  w: 5.0, normal: [1,0,0],  cp: ['客厅'], cid: [101] },
-        { id: 10, w: 5.0, normal: [-1,0,0], cp: ['客厅'], cid: [101] },
+        { id: 7,  w: 8.0, normal: [0,1,0] },
+        { id: 8,  w: 8.0, normal: [0,-1,0] },
+        { id: 9,  w: 5.0, normal: [1,0,0] },
+        { id: 10, w: 5.0, normal: [-1,0,0] },
       ]
       walls.map do |w|
-        ScanItem.new(w[:id], 'skirting', w[:w] * 0.08, 'm2', :face, w[:normal],
-                     0.08, w[:w], 'Layer0', w[:cp], w[:cid], 0.04)
+        ScanItem.face(face_id: w[:id], su_material: 'skirting', area: w[:w] * 0.08,
+                      normal: w[:normal], width: 0.08, height: w[:w],
+                      layer_name: 'Layer0', component_path: ['客厅'],
+                      component_path_ids: [LIVING_EID], z_center: 0.04)
       end
     end
 
     # ---- 主卧 (5m × 4m, 层高2.8m) ----
     def bedroom_floor
-      ScanItem.new(20, 'wood_oak', 20.0, 'm2', :face, [0,0,1], 5.0, 4.0, 'Layer0',
-                   ['主卧'], [201], 0.02)
+      ScanItem.face(face_id: 20, su_material: 'wood_oak', area: 20.0,
+                    normal: [0,0,1], width: 5.0, height: 4.0,
+                    layer_name: 'Layer0', component_path: ['主卧'],
+                    component_path_ids: [BEDROOM_EID], z_center: 0.02)
     end
 
     def bedroom_ceiling
-      ScanItem.new(21, 'paint_w', 20.0, 'm2', :face, [0,0,-1], 5.0, 4.0, 'Layer0',
-                   ['主卧'], [201], 2.78)
+      ScanItem.face(face_id: 21, su_material: 'paint_w', area: 20.0,
+                    normal: [0,0,-1], width: 5.0, height: 4.0,
+                    layer_name: 'Layer0', component_path: ['主卧'],
+                    component_path_ids: [BEDROOM_EID], z_center: 2.78)
     end
 
     def bedroom_wall_north
-      ScanItem.new(22, 'paint_w', 14.0, 'm2', :face, [0,1,0], 5.0, 2.8, 'Layer0',
-                   ['主卧'], [201], 1.4)
+      ScanItem.face(face_id: 22, su_material: 'paint_w', area: 14.0,
+                    normal: [0,1,0], width: 5.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['主卧'],
+                    component_path_ids: [BEDROOM_EID], z_center: 1.4)
     end
 
     def bedroom_wall_south
-      ScanItem.new(23, 'paint_w', 14.0, 'm2', :face, [0,-1,0], 5.0, 2.8, 'Layer0',
-                   ['主卧'], [201], 1.4)
+      ScanItem.face(face_id: 23, su_material: 'paint_w', area: 14.0,
+                    normal: [0,-1,0], width: 5.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['主卧'],
+                    component_path_ids: [BEDROOM_EID], z_center: 1.4)
     end
 
     def bedroom_wall_east
-      ScanItem.new(24, 'paint_w', 11.2, 'm2', :face, [1,0,0], 4.0, 2.8, 'Layer0',
-                   ['主卧'], [201], 1.4)
+      ScanItem.face(face_id: 24, su_material: 'paint_w', area: 11.2,
+                    normal: [1,0,0], width: 4.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['主卧'],
+                    component_path_ids: [BEDROOM_EID], z_center: 1.4)
     end
 
     def bedroom_wall_west
-      ScanItem.new(25, 'paint_w', 11.2, 'm2', :face, [-1,0,0], 4.0, 2.8, 'Layer0',
-                   ['主卧'], [201], 1.4)
+      ScanItem.face(face_id: 25, su_material: 'paint_w', area: 11.2,
+                    normal: [-1,0,0], width: 4.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['主卧'],
+                    component_path_ids: [BEDROOM_EID], z_center: 1.4)
     end
 
     # ---- 卫生间 (3m × 2m, 层高2.8m) ----
     def bathroom_floor
-      ScanItem.new(30, 'tile_302', 6.0, 'm2', :face, [0,0,1], 3.0, 2.0, 'Layer0',
-                   ['卫生间'], [301], 0.02)
+      ScanItem.face(face_id: 30, su_material: 'tile_302', area: 6.0,
+                    normal: [0,0,1], width: 3.0, height: 2.0,
+                    layer_name: 'Layer0', component_path: ['卫生间'],
+                    component_path_ids: [BATHROOM_EID], z_center: 0.02)
     end
 
     def bathroom_ceiling
-      ScanItem.new(31, 'paint_w', 6.0, 'm2', :face, [0,0,-1], 3.0, 2.0, 'Layer0',
-                   ['卫生间'], [301], 2.78)
+      ScanItem.face(face_id: 31, su_material: 'paint_w', area: 6.0,
+                    normal: [0,0,-1], width: 3.0, height: 2.0,
+                    layer_name: 'Layer0', component_path: ['卫生间'],
+                    component_path_ids: [BATHROOM_EID], z_center: 2.78)
     end
 
     def bathroom_wall_north
-      ScanItem.new(32, 'tile_302', 8.4, 'm2', :face, [0,1,0], 3.0, 2.8, 'Layer0',
-                   ['卫生间'], [301], 1.4)
+      ScanItem.face(face_id: 32, su_material: 'tile_302', area: 8.4,
+                    normal: [0,1,0], width: 3.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['卫生间'],
+                    component_path_ids: [BATHROOM_EID], z_center: 1.4)
     end
 
     def bathroom_wall_south
-      ScanItem.new(33, 'tile_302', 8.4, 'm2', :face, [0,-1,0], 3.0, 2.8, 'Layer0',
-                   ['卫生间'], [301], 1.4)
+      ScanItem.face(face_id: 33, su_material: 'tile_302', area: 8.4,
+                    normal: [0,-1,0], width: 3.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['卫生间'],
+                    component_path_ids: [BATHROOM_EID], z_center: 1.4)
     end
 
     def bathroom_wall_east
-      ScanItem.new(34, 'tile_302', 5.6, 'm2', :face, [1,0,0], 2.0, 2.8, 'Layer0',
-                   ['卫生间'], [301], 1.4)
+      ScanItem.face(face_id: 34, su_material: 'tile_302', area: 5.6,
+                    normal: [1,0,0], width: 2.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['卫生间'],
+                    component_path_ids: [BATHROOM_EID], z_center: 1.4)
     end
 
     def bathroom_wall_west
-      ScanItem.new(35, 'tile_302', 5.6, 'm2', :face, [-1,0,0], 2.0, 2.8, 'Layer0',
-                   ['卫生间'], [301], 1.4)
+      ScanItem.face(face_id: 35, su_material: 'tile_302', area: 5.6,
+                    normal: [-1,0,0], width: 2.0, height: 2.8,
+                    layer_name: 'Layer0', component_path: ['卫生间'],
+                    component_path_ids: [BATHROOM_EID], z_center: 1.4)
     end
-
-    # ================================================================
-    # 组装全部模型数据
-    # ================================================================
 
     def all_items
       [
@@ -170,7 +204,26 @@ module SuTakeoff
     end
 
     # ================================================================
-    # 测试用例
+    # 测试辅助
+    # ================================================================
+
+    def usages_for(items, openings)
+      WorkbenchPresenter.new(
+        items: items, openings: openings,
+        hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
+                     definition_name: nil, depth: 0, hidden: false, children: [] },
+        colors: {},
+        mapping: @mapping, component_mapping: @cm,
+        policy: @policy, ignored: [], tag_defs: {}
+      ).build[:geometry_usages]
+    end
+
+    def find_usage(usages, entity_id, su_material)
+      usages.find { |u| u[:entity_id] == entity_id && u[:su_material] == su_material }
+    end
+
+    # ================================================================
+    # 测试用例（按 entity_id × material 聚合）
     # ================================================================
 
     def test_total_faces
@@ -182,131 +235,86 @@ module SuTakeoff
     end
 
     def test_living_room_marble_floor
-      result = @calc.compute_geometry_only(all_items, all_openings)
-      floor_usage = result.find { |u| u.space == '客厅' && u.part == 'floor' }
-
-      refute_nil floor_usage
-      assert_equal '爵士白大理石', floor_usage.material_name
-      assert_in_delta 40.0, floor_usage.net_area, 0.01
+      usages = usages_for(all_items, all_openings)
+      floor = find_usage(usages, LIVING_EID, 'marble_01')
+      refute_nil floor
+      assert_in_delta 40.0, floor[:qty_area], 0.01
+      # 来自映射，非启发
+      assert_equal 'explicit', floor[:confidence]
     end
 
-    def test_living_room_walls_with_opening_deduction
-      result = @calc.compute_geometry_only(all_items, all_openings)
+    def test_living_paint_combines_walls_and_ceiling_with_opening_deduction
+      # 客厅 paint_w 同时覆盖墙面（4 面合计 72.8 m² 毛）和天花（40 m²）
+      # 扣减: 南墙门 2.1 + 东墙窗 3.0 = 5.1
+      # 净 area = 72.8 + 40 - 5.1 = 107.7
+      usages = usages_for(all_items, all_openings)
+      paint = find_usage(usages, LIVING_EID, 'paint_w')
+      refute_nil paint
+      assert_in_delta 107.7, paint[:qty_area], 0.05
 
-      # 客厅墙面: paint_w, 四面总计 22.4+22.4+14+14 = 72.8 m² 毛面积
-      # 扣减: 南墙门 2.1m² + 东墙窗户 3.0m² = 5.1m²
-      # 净面积 = 72.8 - 5.1 = 67.7m²
-      living_walls = result.select { |u| u.space == '客厅' && u.part == 'wall' && u.material_name == '多乐士净味白' }
-      refute_empty living_walls
-      net = living_walls.sum(&:net_area).round(2)
-      assert_in_delta 67.7, net, 0.05
+      # by_part 是毛面积，可单独验证墙/天花
+      assert_in_delta 72.8, paint[:by_part]['wall'],    0.05
+      assert_in_delta 40.0, paint[:by_part]['ceiling'], 0.05
     end
 
     def test_bedroom_wood_floor
-      result = @calc.compute_geometry_only(all_items, all_openings)
-      floor_usage = result.find { |u| u.space == '主卧' && u.part == 'floor' }
-
-      refute_nil floor_usage
-      assert_equal '橡木复合地板', floor_usage.material_name
-      assert_in_delta 20.0, floor_usage.net_area, 0.01
+      usages = usages_for(all_items, all_openings)
+      floor = find_usage(usages, BEDROOM_EID, 'wood_oak')
+      refute_nil floor
+      assert_in_delta 20.0, floor[:qty_area], 0.01
     end
 
-    def test_bedroom_walls_with_opening_deduction
-      result = @calc.compute_geometry_only(all_items, all_openings)
-
-      # 主卧墙面: 北14 + 南14 + 东11.2 + 西11.2 = 50.4 m² 毛面积
-      # 扣减: 南墙窗户 2.25m² + 西墙门 2.1m² = 4.35m²
-      # 净面积 = 50.4 - 4.35 = 46.05m²
-      bedroom_walls = result.select { |u| u.space == '主卧' && u.part == 'wall' && u.material_name == '多乐士净味白' }
-      refute_empty bedroom_walls
-      net = bedroom_walls.sum(&:net_area).round(2)
-      assert_in_delta 46.05, net, 0.05
+    def test_bedroom_paint_with_opening_deduction
+      # 墙: 14+14+11.2+11.2 = 50.4 毛, 天花 20
+      # 扣: 南窗 2.25 + 西门 2.1 = 4.35
+      # 净 = 50.4 + 20 - 4.35 = 66.05
+      usages = usages_for(all_items, all_openings)
+      paint = find_usage(usages, BEDROOM_EID, 'paint_w')
+      refute_nil paint
+      assert_in_delta 66.05, paint[:qty_area], 0.05
     end
 
-    def test_bathroom_full_tile
-      result = @calc.compute_geometry_only(all_items, all_openings)
-
-      # 卫生间: 地面 6m² marble → tile_302, 墙面 8.4+8.4+5.6+5.6 = 28m² tile_302
-      # 扣减: 东墙门 1.68m² → 净墙面 = 28 - 1.68 = 26.32m²
-      # 天花: paint_w 6m²
-
-      bathroom_floor = result.find { |u| u.space == '卫生间' && u.part == 'floor' }
-      refute_nil bathroom_floor
-      assert_equal '马可波罗灰砖', bathroom_floor.material_name
-      assert_in_delta 6.0, bathroom_floor.net_area, 0.01
-
-      bathroom_walls = result.select { |u| u.space == '卫生间' && u.part == 'wall' && u.material_name == '马可波罗灰砖' }
-      net_wall = bathroom_walls.sum(&:net_area).round(2)
-      assert_in_delta 26.32, net_wall, 0.05
+    def test_bathroom_tile_floor_and_walls
+      # 卫生间 tile_302 = 地面 6 + 墙面 28 毛 − 东墙门 1.68 = 32.32
+      usages = usages_for(all_items, all_openings)
+      tile = find_usage(usages, BATHROOM_EID, 'tile_302')
+      refute_nil tile
+      assert_in_delta 32.32, tile[:qty_area], 0.05
     end
 
     def test_bathroom_ceiling_paint
-      result = @calc.compute_geometry_only(all_items, all_openings)
-      ceiling = result.find { |u| u.space == '卫生间' && u.part == 'ceiling' }
-
-      refute_nil ceiling
-      assert_equal '多乐士净味白', ceiling.material_name
-      assert_in_delta 6.0, ceiling.net_area, 0.01
+      usages = usages_for(all_items, all_openings)
+      paint = find_usage(usages, BATHROOM_EID, 'paint_w')
+      refute_nil paint
+      assert_in_delta 6.0, paint[:qty_area], 0.01
     end
 
-    def test_total_paint_wall_area_across_all_rooms
-      result = @calc.compute_geometry_only(all_items, all_openings)
-
-      # 客厅墙面净 67.7 + 主卧墙面净 46.05 = 113.75 m² paint_w
-      all_paint_walls = result.select { |u| u.part == 'wall' && u.material_name == '多乐士净味白' }
-      net_paint = all_paint_walls.sum(&:net_area).round(2)
-      assert_in_delta 113.75, net_paint, 0.1
+    def test_skirting_recognized_as_linear_material
+      # 踢脚线 unit='m', 8+8+5+5 = 26m
+      usages = usages_for(all_items, all_openings)
+      skirting = find_usage(usages, LIVING_EID, 'skirting')
+      refute_nil skirting, '踢脚线应被识别为线材并出现在 geometry_usages'
+      assert_in_delta 26.0, skirting[:qty_length], 0.01
+      assert_equal 'm', skirting[:unit]
     end
 
-    def test_skirting_linear_material
-      result = @calc.compute_geometry_only(all_items, all_openings)
-
-      # 踢脚线: unit == 'm', 累加 height (即墙面长度)
-      # 客厅四面踢脚线: 8+8+5+5 = 26m
-      skirtings = result.select { |u| u.material_name == '实木踢脚线' }
-      refute_empty skirtings, '踢脚线应被识别为线材并计入结果'
-
-      total_length = skirtings.sum(&:net_area).round(2)
-      assert_in_delta 26.0, total_length, 0.01
-    end
-
-    def test_material_count_in_result
-      result = @calc.compute_geometry_only(all_items, all_openings)
-
-      # 材料种类: 爵士白大理石(1) + 多乐士净味白(3 ceiling + 2 wall) + 马可波罗灰砖(2) + 橡木复合地板(1) + 实木踢脚线(1)
-      # = 至少 10 条 usage
-      assert result.size >= 9, "应为 9+ 条 usage，实际 #{result.size} 条"
-    end
-
-    def test_component_path_preserved
-      result = @calc.compute_geometry_only(all_items, [])
-
-      living_usages = result.select { |u| u.space == '客厅' }
-      refute_empty living_usages
-      assert_equal '客厅', living_usages.first.space
-    end
-
-    def test_ceiling_paint_in_all_rooms
-      result = @calc.compute_geometry_only(all_items, all_openings)
-
-      %w[客厅 主卧 卫生间].each do |room|
-        ceiling = result.find { |u| u.space == room && u.part == 'ceiling' }
-        refute_nil ceiling, "#{room} 应有天花"
-        assert_equal '多乐士净味白', ceiling.material_name, "#{room} 天花应为涂料"
-      end
-    end
-
-    def test_no_ceiling_openings_deduction
-      # 天花不应有洞口扣减（洞口在墙上）
-      result = @calc.compute_geometry_only(all_items, all_openings)
-      result.select { |u| u.part == 'ceiling' }.each do |ceiling|
-        assert_equal ceiling.net_area, ceiling.net_area, "#{ceiling.space} 天花不应被扣减"
-      end
+    def test_no_opening_deduction_in_pure_ceiling_room
+      # 卫生间天花没有洞口，毛=净=6m²
+      usages = usages_for(all_items, all_openings)
+      paint = find_usage(usages, BATHROOM_EID, 'paint_w')
+      assert_in_delta 6.0, paint[:by_part]['ceiling'], 0.01
+      assert_in_delta 6.0, paint[:qty_area], 0.01
     end
 
     def test_face_id_uniqueness
       ids = all_items.map(&:face_id)
       assert_equal ids.uniq.size, ids.size, '所有面的 face_id 应唯一'
+    end
+
+    def test_face_count_in_usages
+      # 4 间 × 平均 ~5 材质 → 至少 7 条 usage
+      usages = usages_for(all_items, all_openings)
+      assert usages.size >= 7, "应为 7+ 条 usage，实际 #{usages.size} 条"
     end
   end
 end

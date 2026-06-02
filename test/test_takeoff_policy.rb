@@ -187,8 +187,9 @@ module SuTakeoff
 
     def test_instance_always_count
       policy = TakeoffPolicy.new(mapping: @mapping)
-      item = ScanItem.new(100, 'lamp_01', 1, '个', :instance, nil, 0, 0,
-                          'Layer0', ['客厅'], [101], 0)
+      item = ScanItem.instance(face_id: 100, su_material: 'lamp_01', unit: '个',
+                               layer_name: 'Layer0', component_path: ['客厅'],
+                               component_path_ids: [101])
       r = policy.resolve(item)
       assert_equal :count, r.method
     end
