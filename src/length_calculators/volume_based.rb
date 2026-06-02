@@ -6,7 +6,7 @@ module SuTakeoff
     class VolumeBased < Base
       # 截面候选边的长度范围（米）
       CROSS_SECTION_MIN_M = 0.001  # 1mm，排除圆柱面细分弧边
-      CROSS_SECTION_MAX_M = 0.1    # 10cm 及以下视为截面
+      CROSS_SECTION_MAX_M = 0.1    # 截面边须严格小于 10cm（与原 Scanner 行为一致）
 
       def compute(entity, ctx)
         vol_m3 = resolve_volume(entity, ctx)
@@ -39,7 +39,7 @@ module SuTakeoff
           [dkey, es.map { |e| e[:len] }.max, es.size]
         }.sort_by { |_, m, _| m }
         meaningful = group_info.select { |_, _, cnt| cnt >= 4 }
-        meaningful.select { |_, m, _| m >= CROSS_SECTION_MIN_M && m <= CROSS_SECTION_MAX_M }
+        meaningful.select { |_, m, _| m >= CROSS_SECTION_MIN_M && m < CROSS_SECTION_MAX_M }
                   .map { |_, m, _| m }
       end
     end

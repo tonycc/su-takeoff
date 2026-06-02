@@ -26,8 +26,26 @@ module SuTakeoff
     end
 
     def test_computes_when_two_short_groups
-      # 4 条长边（5m）+ 4 条短边 0.05m + 4 条短边 0.1m → 截面 0.05×0.1
-      # 体积 0.025 m³ → length = 0.025 / 0.05 / 0.1 = 5.0
+      # 4 条长边（5m）+ 4 条短边 0.08m + 4 条短边 0.05m → 截面 0.05×0.08
+      # 体积 0.02 m³ → length = 0.02 / 0.05 / 0.08 = 5.0
+      # 注意：截面上限是严格小于 0.1m，故不能直接用 0.1
+      ctx = {
+        edges: [
+          { dkey: [1,0,0], len: 5.0 }, { dkey: [1,0,0], len: 5.0 },
+          { dkey: [1,0,0], len: 5.0 }, { dkey: [1,0,0], len: 5.0 },
+          { dkey: [0,1,0], len: 0.08 }, { dkey: [0,1,0], len: 0.08 },
+          { dkey: [0,1,0], len: 0.08 }, { dkey: [0,1,0], len: 0.08 },
+          { dkey: [0,0,1], len: 0.05 }, { dkey: [0,0,1], len: 0.05 },
+          { dkey: [0,0,1], len: 0.05 }, { dkey: [0,0,1], len: 0.05 },
+        ],
+        scale: 1.0,
+        volume_m3: 0.02
+      }
+      assert_in_delta 5.0, LengthCalculators::VolumeBased.new.compute(nil, ctx), 0.001
+    end
+
+    def test_excludes_section_at_exactly_max_threshold
+      # 边界精确测试：0.1m 是严格小于的上限，不计入截面
       ctx = {
         edges: [
           { dkey: [1,0,0], len: 5.0 }, { dkey: [1,0,0], len: 5.0 },
@@ -40,7 +58,7 @@ module SuTakeoff
         scale: 1.0,
         volume_m3: 0.025
       }
-      assert_in_delta 5.0, LengthCalculators::VolumeBased.new.compute(nil, ctx), 0.001
+      assert_nil LengthCalculators::VolumeBased.new.compute(nil, ctx)
     end
 
     def test_returns_nil_when_volume_zero
