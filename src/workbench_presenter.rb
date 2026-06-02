@@ -135,26 +135,40 @@ module SuTakeoff
       qty_length = 0.0
       qty_volume = 0.0
       qty_count = 0
+      ctx = { opening_area_by_face: opening_area_by_face }
 
       if is_instance
         qty_count = mat_items.sum { |i| i.qty.to_f }
       else
-        face_items_in_group.each do |i|
-          # resolved_method 已由 compute_geometry_only 写入每个 item。
-          # 复合标签（count+length）的多条 item 共享同一 face_id，
-          # 直接读字段而非走 key lookup，避免 hash 碰撞导致 method 被覆盖。
-          method = i.resolved_method || :area
+        # 按 resolved_method 分桶，每桶调对应策略的 aggregate
+        face_linear  = Strategies::Registry.get(:face_linear)
+        solid_volume = Strategies::Registry.get(:solid_volume)
+        face_area    = Strategies::Registry.get(:face_area)
+
+        items_by_method = face_items_in_group.group_by { |i| i.resolved_method || :area }
+
+        items_by_method.each do |method, sub_items|
           case method
           when :length
-            qty_length += (i.qty_length || i.height || 0).to_f
+            # face_linear.aggregate 含 height fallback，兼容 face 和 linear_solid 两种 item
+            qty_length += face_linear ? face_linear.aggregate(sub_items, ctx)
+                                      : sub_items.sum { |i| (i.qty_length || i.height || 0).to_f }
           when :volume
-            qty_volume += (i.qty_volume || 0).to_f
+            qty_volume += solid_volume ? solid_volume.aggregate(sub_items, ctx)
+                                       : sub_items.sum { |i| (i.qty_volume || 0).to_f }
           when :count
-            qty_count += if i.kind == :face then 1.0 else (i.qty_count || i.qty || 0).to_f end
-          else
-            deduction = opening_area_by_face[i.face_id] || 0.0
-            qty_area += [i.qty - deduction, 0.0].max
+            # 临时保留 face→+1.0 的兼容行为；Stage 4 引入 FaceCount 后清理
+            qty_count += sub_items.sum { |i|
+              i.kind == :face ? 1.0 : (i.qty_count || i.qty || 0).to_f
+            }
+          when :area
+            qty_area += face_area ? face_area.aggregate(sub_items, ctx)
+                                  : sub_items.sum { |i|
+                                      d = opening_area_by_face[i.face_id] || 0.0
+                                      [i.qty - d, 0.0].max
+                                    }
           end
+          # :skip および未知 method はスキップ（理論上ここには来ない）
         end
       end
 
