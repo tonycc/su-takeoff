@@ -17,9 +17,7 @@ ruby -Itest test/test_takeoff_policy.rb
 ruby -Itest test/test_compute_geometry_only.rb
 ruby -Itest test/test_wall_model.rb
 ruby -Itest test/test_mapping.rb
-ruby -Itest test/test_formula.rb
 ruby -Itest test/test_data_models.rb
-ruby -Itest test/test_process_library.rb
 ```
 
 测试使用 Minitest，独立于 SketchUp 运行时。`test_helper.rb` 只 require `formula` 和 `data_models`，**各测试文件自行 require 其依赖的数据层模块**。Scanner、Dialog 无自动化测试，需在 SketchUp 内手动验证。
@@ -38,12 +36,9 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 
 - **`takeoff_policy.rb`** — 算量策略决议器（核心）。4 档优先级：`AttrDict 标签 → 图层规则 → 材质映射 unit → 几何启发式`。任意一档命中即返回。`resolve(item)` 返回 `ResolveResult(method, source)`；`resolve_container` 供 Scanner 容器级判定。**构造时注入所有依赖**（mapping, layer_rules, tag_defs, thresholds），不读 PluginState/config.json。单位 → 计量方式由 `classify_unit` 类方法通过字符串启发直接判断（含 `³`/`3`→体积，中文量词→件数，`m`/`mm`/`cm`→长度，其余→面积），无需配置分类列表。
 - **`data_models.rb`** — `ScanItem`（单个算量单元，`kind` 区分 `:face`/`:instance`/`:solid`/`:linear_solid`/`:count_solid`）含 `qty_area/qty_length/qty_volume/qty_count` 量纲字段，统一以米（m）为单位。`MaterialUsage`（分组结果，`confidence` + `source` 决定前端是否染橙）。`Opening`（门窗洞口）。
-- **`calculator.rb`** — `compute_geometry_only`：纯几何计算，含洞口扣减、薄板去重、面/线材识别。未映射材质也产出记录。不应用损耗率与工艺派生。
-- **`mapping.rb`** — SU 材质 → 真实材料映射（分类、单位、规格、损耗率）。
+- **`calculator.rb`** — `compute_geometry_only`：纯几何计算，含洞口扣减、薄板去重、面/线材识别。未映射材质也产出记录。
+- **`mapping.rb`** — SU 材质 → 真实材料映射（分类、单位、规格）。当前仍保留 `default_waste_rate` 字段用于旧数据兼容，但几何用量链路不读取该字段。
 - **`component_mapping.rb`** — 组件定义名 → 材料映射。`counting_method`: `expand` 展开统计面材 / `aggregate` 整件统计个数。
-- **`process_library.rb`** — 按分类的工艺做法，提供替代损耗率与派生项（前端工艺管理页编辑，计算结果仅在几何量视图中展示）。
-- **`formula.rb`** — 派生项公式求值（变量 `area/length/volume/count` + 基础算术 + `ceil/floor/round/min/max`）。自实现递归下降解析器，不依赖 `eval`。
-
 ### SU 运行时层（依赖 SketchUp API）
 
 - **`scanner.rb`** — 递归遍历模型实体收集 `ScanItem` 与 `Opening`。ComponentInstance/Group 分支判定顺序：(1) 复合标签 method 含 `+` → 拆开产出多条容器级 ScanItem；(2) `aggregate` → 整件 `:instance`；(3) `try_emit_solid`（标签/图层规则命中 `:length`/`:volume`/`:count`）→ 不下钻；(4) 正常下钻子面。`compute_linear_length` 有三条路径：基线边 → Solid 体积法 → 边线法（5×gap 判定长/截面方向）。非方条形几何走简化最长法。`Scanner::DEBUG = true` 可开启详细调试日志。
@@ -53,7 +48,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 ### 前端（HtmlDialog 内运行，全局命名空间）
 
 - `ui/js/model_view.js` — 按组件树形视图。每节点展开后显示材质汇总行 → 按规格（宽×高 mm）分组 → 面明细。启发式行橙色边框 +「待确认」徽标。支持搜索、空容器/隐藏项开关、合并相同组件、CSV 导出。
-- `ui/js/settings.js` — 设置页：分类单位配置、算量标签定义（支持多选复合如 `count+length`）、启发式开关与阈值、工艺库管理、忽略材料。
+- `ui/js/settings.js` — 设置页：分类单位配置、算量标签定义（支持多选复合如 `count+length`）、启发式开关与阈值、忽略材料。
 - `ui/js/mapping.js` — 材料映射管理（含未映射材料快速映射）。
 - `ui/js/comp_mapping.js` — 组件映射管理。
 
@@ -62,7 +57,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 - `config.json` — 标签定义、图层规则、启发式阈值、单位词表
 - `default_mapping.json` — SU 材质 → 真实材料
 - `default_component_mapping.json` — 组件定义 → 材料
-- `default_processes.json` — 工艺定义
+
 - `ignored_materials.json` — 忽略的材质列表
 
 配置优先级：模型 AttributeDictionary（随 SKP 文件走）> `data/` JSON 文件 > 默认值。

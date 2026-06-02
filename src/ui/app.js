@@ -22,7 +22,7 @@ function switchPage(page) {
   document.getElementById('page-' + page).style.display = 'block';
   if (page === 'mapping') callSketchUp('get_mappings');
   if (page === 'comp-mapping') callSketchUp('get_component_mappings');
-  if (page === 'settings') callSketchUp('get_processes');
+  if (page === 'settings') callSketchUp('get_settings');
   if (isView) renderCurrentPage();
 }
 

@@ -3,7 +3,7 @@ module SuTakeoff
   # Dialog 不再重复做 policy 决议、unit 选择、geometry 聚合，只负责 IO。
   class WorkbenchPresenter
     def initialize(items:, openings:, hierarchy:, colors:,
-                   mapping:, component_mapping:, policy:, processes:,
+                   mapping:, component_mapping:, policy:,
                    ignored: [], tag_defs: {})
       @items = items
       @openings = openings
@@ -12,7 +12,6 @@ module SuTakeoff
       @mapping = mapping
       @component_mapping = component_mapping
       @policy = policy
-      @processes = processes
       @ignored = ignored
       @tag_defs = tag_defs
     end
@@ -24,7 +23,6 @@ module SuTakeoff
         openings: @openings.map(&:to_h),
         ignored: ignored_names,
         unresolved: unresolved_names,
-        categories: @processes.all_categories,
         hierarchy: @hierarchy,
         geometry_usages: build_geometry_usages,
         tag_defs: @tag_defs
@@ -58,7 +56,7 @@ module SuTakeoff
     end
 
     def calc
-      @calc ||= Calculator.new(@mapping, @processes, @component_mapping, policy: @policy)
+      @calc ||= Calculator.new(@mapping, @component_mapping, policy: @policy)
     end
 
     # ---- overview ----
@@ -94,15 +92,20 @@ module SuTakeoff
     # ---- geometry_usages (per-entity aggregation) ----
 
     def build_geometry_usages
-      geo_usages = calc.compute_geometry_only(@items, @openings)
-      deduped_items = geo_usages.flat_map(&:items)
-      item_lookup = build_item_resolution_lookup(geo_usages)
+      resolutions = calc.compute_geometry_only(@items, @openings)
+
+      # face_id × component_path_ids → 决议结果（method/source/unit）
+      resolution_by_key = resolutions.each_with_object({}) do |r, h|
+        it = r[:item]
+        h[[it.face_id, it.component_path_ids]] = r
+      end
 
       opening_area_by_face = build_opening_area_map
 
+      # 按 (entity_id, su_material) 重新聚合，供前端组件树视图消费
       geo_agg = {}
-      deduped_items.each do |it|
-        next if it.su_material.nil?
+      resolutions.each do |r|
+        it = r[:item]
         eid = it.component_path_ids.last || 0
         key = [eid, it.su_material]
         geo_agg[key] ||= []
@@ -110,28 +113,8 @@ module SuTakeoff
       end
 
       geo_agg.map do |(eid, su_mat), mat_items|
-        build_geometry_usage_entry(eid, su_mat, mat_items, item_lookup, opening_area_by_face)
+        build_geometry_usage_entry(eid, su_mat, mat_items, resolution_by_key, opening_area_by_face)
       end
-    end
-
-    # 从 compute_geometry_only 的 MaterialUsage 反查每个 item 的决议结果，
-    # 避免重复调 policy.resolve 和手写 unit 选择逻辑。
-    def build_item_resolution_lookup(geo_usages)
-      lookup = {}
-      geo_usages.each do |u|
-        method = method_from_usage(u)
-        source = u.source
-        unit = u.unit
-        u.items.each do |it|
-          lookup[it.face_id] = { method: method, source: source, unit: unit }
-        end
-      end
-      lookup
-    end
-
-    def method_from_usage(usage)
-      unit = usage.unit
-      TakeoffPolicy.classify_unit(unit)
     end
 
     def build_opening_area_map
@@ -145,7 +128,7 @@ module SuTakeoff
       map
     end
 
-    def build_geometry_usage_entry(eid, su_mat, mat_items, item_lookup, opening_area_by_face)
+    def build_geometry_usage_entry(eid, su_mat, mat_items, resolution_by_key, opening_area_by_face)
       face_items_in_group = mat_items.reject { |i| i.kind == :instance }
       is_instance = mat_items.any? { |i| i.kind == :instance } && face_items_in_group.empty?
 
@@ -163,7 +146,8 @@ module SuTakeoff
         qty_count = mat_items.sum { |i| i.qty.to_f }
       else
         face_items_in_group.each do |i|
-          res = item_lookup[i.face_id]
+          key = [i.face_id, i.component_path_ids]
+          res = resolution_by_key[key]
           method = res ? res[:method] : :area
           case method
           when :length
@@ -182,12 +166,14 @@ module SuTakeoff
       primary_qty, primary_unit = pick_primary(qty_area, qty_length, qty_volume, qty_count)
 
       any_heuristic = face_items_in_group.any? { |i|
-        (item_lookup[i.face_id] && item_lookup[i.face_id][:source] == :heuristic)
+        key = [i.face_id, i.component_path_ids]
+        (resolution_by_key[key] && resolution_by_key[key][:source] == :heuristic)
       }
       confidence = any_heuristic ? 'heuristic' : 'explicit'
 
       faces_detail = face_items_in_group.map { |i|
-        res = item_lookup[i.face_id]
+        key = [i.face_id, i.component_path_ids]
+        res = resolution_by_key[key]
         {
           face_id: i.face_id,
           path_ids: i.component_path_ids,

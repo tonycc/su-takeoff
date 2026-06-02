@@ -3,9 +3,9 @@
 // ---------------- Data loading ----------------
 function renderMappings(mappings, config) {
   if (config) {
-    if (!window._processData) window._processData = {};
-    window._processData.category_units = config.category_units || [];
-    window._processData.config_units = config.config_units || [];
+    if (!window._sharedConfig) window._sharedConfig = {};
+    window._sharedConfig.category_units = config.category_units || [];
+    window._sharedConfig.config_units = config.config_units || [];
   }
   var allRows = mappings.slice();
   if (window._workbench) {
@@ -16,7 +16,7 @@ function renderMappings(mappings, config) {
       if (!mappedSet[name]) {
         allRows.push({
           su_material_name: name, material_name: '', category: '其他',
-          unit: 'm²', spec: '', default_waste_rate: 0.05
+          unit: 'm²', spec: ''
         });
       }
     });
@@ -38,16 +38,13 @@ function renderSimpleMappingTable(mappings) {
   var container = document.getElementById('mapping-content');
   if (!container) return;
 
-  var cfg = (window._processData) || {};
+  var cfg = (window._sharedConfig) || {};
   var cu = cfg.category_units || [];
   var cats = cu.length > 0 ? cu.map(function(x) { return x.category; }) : DEFAULT_CATEGORIES;
   var units = (cfg.config_units && cfg.config_units.length > 0) ? cfg.config_units : ['m²', 'm', 'm³', '个'];
   var partLabels = { floor: '地', wall: '墙', ceiling: '顶' };
 
   var infoMap = {};
-  if (window._workbench && window._workbench.materials_info) {
-    window._workbench.materials_info.forEach(function(info) { infoMap[info.su_name] = info; });
-  }
 
   var mapped = [], unmapped = [];
   mappings.forEach(function(m) {
@@ -91,7 +88,6 @@ function renderSimpleMappingTable(mappings) {
         '<th>真实材料名</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
-        '<th style="width:70px">损耗率</th>' +
         '<th style="width:100px">操作</th>' +
         '</tr></thead><tbody id="mapping-tbody"></tbody></table>';
     } else {
@@ -107,7 +103,6 @@ function renderSimpleMappingTable(mappings) {
         '<th>真实材料名</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
-        '<th style="width:70px">损耗率</th>' +
         '<th style="width:100px">操作</th>' +
         '</tr></thead><tbody id="mapping-tbody"></tbody></table>';
     } else {
@@ -131,7 +126,6 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.u-mat').value = m.material_name || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions(m.category);
       tr.querySelector('.u-unit').value = m.unit || 'm²';
-      tr.querySelector('.u-waste').value = ((m.default_waste_rate || 0.05) * 100).toFixed(0);
 
       var actions = tr.querySelector('.col-actions');
       actions.innerHTML = '<button>保存</button><button>删除</button>';
@@ -180,7 +174,6 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.u-mat').value = '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions('其他');
       tr.querySelector('.u-unit').value = suggested;
-      tr.querySelector('.u-waste').value = ((m.default_waste_rate || 0.05) * 100).toFixed(0);
 
       var actions = tr.querySelector('.col-actions');
       actions.innerHTML = '<button>保存</button><button>忽略</button>';
@@ -194,7 +187,7 @@ function renderSimpleMappingTable(mappings) {
 
 // ---------------- Row actions ----------------
 function onMappingCatChange(sel) {
-  var cfg = (window._processData) || {};
+  var cfg = (window._sharedConfig) || {};
   var cu = cfg.category_units || [];
   for (var i = 0; i < cu.length; i++) {
     if (cu[i].category === sel.value) {
@@ -228,15 +221,13 @@ function saveMappingRow(suName) {
   if (!tr) return;
   var matName = tr.querySelector('.u-mat').value.trim();
   if (!matName) { alert('请输入真实材料名'); return; }
-  var waste = parseFloat(tr.querySelector('.u-waste').value);
-  if (isNaN(waste) || waste < 0) waste = 5;
   callSketchUp('save_mapping', JSON.stringify({
     su_name: suName,
     material_name: matName,
     category: tr.querySelector('.u-cat').value,
     unit: tr.querySelector('.u-unit').value,
     spec: (tr.querySelector('.u-spec') || {}).value || '',
-    waste_rate: waste / 100
+    waste_rate: 0.0
   }));
 }
 
@@ -260,9 +251,8 @@ function openAddMapping() {
   if (!matName) return;
   var cat = prompt('分类 (瓷砖/石材/涂料/木材/墙纸/玻璃/金属/其他):') || '其他';
   var spec = prompt('规格 (可选):') || '';
-  var waste = parseFloat(prompt('默认损耗率 (如0.05):') || '0.05');
   callSketchUp('save_mapping', JSON.stringify({
     su_name: suName, material_name: matName, category: cat,
-    unit: 'm²', spec: spec, waste_rate: waste
+    unit: 'm²', spec: spec, waste_rate: 0.0
   }));
 }

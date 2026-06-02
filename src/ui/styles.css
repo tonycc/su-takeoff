@@ -304,18 +304,6 @@ tr.unmapped td:first-child { color: #f38ba8; }
 #comp-mapping-tbody tr.row-mapped { background: rgba(137, 180, 250, 0.04); }
 #comp-mapping-tbody tr.row-not-in-model { opacity: 0.5; }
 
-/* ---------- Settings: process table ---------- */
-#process-table input[type=text], #process-table input[type=number], #process-table select {
-  width: 100%; padding: 4px 6px; border: 1px solid #45475a; border-radius: 3px;
-  background: #1e1e2e; color: #cdd6f4; font-size: 12px;
-}
-#process-table input[type=number] { width: 56px; }
-#process-table td { vertical-align: middle; }
-#process-table button {
-  padding: 4px 10px; border: 1px solid #45475a; border-radius: 4px;
-  background: #313244; color: #cdd6f4; cursor: pointer; margin-right: 4px; font-size: 12px;
-}
-#process-table button:hover { background: #45475a; }
 
 .deriv-editor-card {
   background: #11111b; border: 1px solid #313244; border-radius: 4px;

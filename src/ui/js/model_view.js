@@ -604,18 +604,6 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
     tdName.appendChild(spacer);
   }
 
-  var materialsInfo = data.materials_info || [];
-  var info = null;
-  for (var i = 0; i < materialsInfo.length; i++) {
-    if (materialsInfo[i].su_name === usage.su_material) { info = materialsInfo[i]; break; }
-  }
-  if (info && info.color) {
-    var swatch = document.createElement('span');
-    swatch.className = 'mv-mat-swatch';
-    swatch.style.background = info.color;
-    tdName.appendChild(swatch);
-  }
-
   var matName = document.createElement('span');
   matName.className = 'mv-mat-summary-name';
   matName.textContent = usage.su_material;

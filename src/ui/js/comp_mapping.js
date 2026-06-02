@@ -6,9 +6,9 @@ function renderComponentMappings(mappings, definitions, config) {
   config = config || {};
 
   // Sync config data for consistent category/unit lists
-  window._processData = window._processData || {};
-  if (config.category_units) window._processData.category_units = config.category_units;
-  if (config.config_units) window._processData.config_units = config.config_units;
+  window._sharedConfig = window._sharedConfig || {};
+  if (config.category_units) window._sharedConfig.category_units = config.category_units;
+  if (config.config_units) window._sharedConfig.config_units = config.config_units;
 
   // Index existing mappings by definition_name
   var mappedByDef = {};
@@ -94,7 +94,7 @@ function renderComponentMappings(mappings, definitions, config) {
   var tbody = document.getElementById('comp-mapping-tbody');
   if (!tbody) return;
 
-  var cats = (window._processData && window._processData.category_units || [])
+  var cats = (window._sharedConfig && window._sharedConfig.category_units || [])
     .map(function(x) { return x.category; });
   if (cats.length === 0) cats = DEFAULT_CATEGORIES;
 
@@ -140,7 +140,7 @@ function renderComponentMappings(mappings, definitions, config) {
 }
 
 function onCompMappingCatChange(sel) {
-  var cfg = (window._processData) || {};
+  var cfg = (window._sharedConfig) || {};
   var cu = cfg.category_units || [];
   for (var i = 0; i < cu.length; i++) {
     if (cu[i].category === sel.value) {

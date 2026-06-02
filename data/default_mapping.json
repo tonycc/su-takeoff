@@ -1,9 +1,2 @@
 {
-  "[0091_MintCream]": {
-    "material_name": "吊顶涂料",
-    "category": "涂料",
-    "unit": "m²",
-    "spec": "",
-    "default_waste_rate": 0.0
-  }
 }
