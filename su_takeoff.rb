@@ -3,6 +3,19 @@ require 'csv'
 require 'singleton'
 
 require_relative 'src/data_models'
+
+# strategies 必须在 takeoff_policy / calculator / scanner / workbench_presenter 之前
+require_relative 'src/strategies/base'
+require_relative 'src/strategies/registry'
+require_relative 'src/strategies/face_area'
+require_relative 'src/strategies/face_linear'
+require_relative 'src/strategies/instance_count'
+require_relative 'src/strategies/solid_volume'
+require_relative 'src/strategies/solid_linear'
+require_relative 'src/strategies/solid_count'
+require_relative 'src/strategies/skip'
+require_relative 'src/strategies/builtin'
+
 require_relative 'src/mapping'
 require_relative 'src/component_mapping'
 require_relative 'src/takeoff_policy'
