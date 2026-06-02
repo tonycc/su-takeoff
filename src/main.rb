@@ -21,7 +21,11 @@ module SuTakeoff
                   'heuristics_enabled' => true }
       load_data
       # 注册内置策略（幂等：Registry.register 同对象重复注册是 no-op）
-      Strategies::Builtin.register_all! if Strategies::Registry.all.empty?
+      if Strategies::Registry.all.empty?
+        Strategies::Builtin.register_all!
+        strategies_path = File.join(PLUGIN_DIR, 'data', 'strategies.json')
+        Strategies::Loader.load_from_file!(strategies_path)
+      end
     end
 
     # 算量策略：基于当前 mapping + config 构造一个 TakeoffPolicy。
