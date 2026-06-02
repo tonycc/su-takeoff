@@ -200,8 +200,9 @@ module SuTakeoff
       if tags && tags[:method] && tags[:method].to_s.include?('+')
         tags[:method].to_s.split('+').map(&:strip).each do |m|
           sym = m.to_sym
-          items << emit_solid_by_method(entity, path, transform, sym, tags, effective_tag) \
-            if %i[count length volume].include?(sym)
+          next unless %i[count length volume].include?(sym)
+          result = emit_solid_by_method(entity, path, transform, sym, tags, effective_tag)
+          items << result if result
         end
         return
       end
