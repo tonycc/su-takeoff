@@ -93,16 +93,10 @@ module SuTakeoff
 
     def build_geometry_usages
       resolutions = calc.compute_geometry_only(@items, @openings)
-
-      # face_id × component_path_ids → 决议结果（method/source/unit）
-      resolution_by_key = resolutions.each_with_object({}) do |r, h|
-        it = r[:item]
-        h[[it.face_id, it.component_path_ids]] = r
-      end
-
       opening_area_by_face = build_opening_area_map
 
       # 按 (entity_id, su_material) 重新聚合，供前端组件树视图消费
+      # 复合标签（如 count+length）会产出多条 item 共享同一 eid，全部保留
       geo_agg = {}
       resolutions.each do |r|
         it = r[:item]
@@ -113,7 +107,7 @@ module SuTakeoff
       end
 
       geo_agg.map do |(eid, su_mat), mat_items|
-        build_geometry_usage_entry(eid, su_mat, mat_items, resolution_by_key, opening_area_by_face)
+        build_geometry_usage_entry(eid, su_mat, mat_items, opening_area_by_face)
       end
     end
 
@@ -128,7 +122,7 @@ module SuTakeoff
       map
     end
 
-    def build_geometry_usage_entry(eid, su_mat, mat_items, resolution_by_key, opening_area_by_face)
+    def build_geometry_usage_entry(eid, su_mat, mat_items, opening_area_by_face)
       face_items_in_group = mat_items.reject { |i| i.kind == :instance }
       is_instance = mat_items.any? { |i| i.kind == :instance } && face_items_in_group.empty?
 
@@ -146,9 +140,10 @@ module SuTakeoff
         qty_count = mat_items.sum { |i| i.qty.to_f }
       else
         face_items_in_group.each do |i|
-          key = [i.face_id, i.component_path_ids]
-          res = resolution_by_key[key]
-          method = res ? res[:method] : :area
+          # resolved_method 已由 compute_geometry_only 写入每个 item。
+          # 复合标签（count+length）的多条 item 共享同一 face_id，
+          # 直接读字段而非走 key lookup，避免 hash 碰撞导致 method 被覆盖。
+          method = i.resolved_method || :area
           case method
           when :length
             qty_length += (i.qty_length || i.height || 0).to_f
@@ -165,15 +160,10 @@ module SuTakeoff
 
       primary_qty, primary_unit = pick_primary(qty_area, qty_length, qty_volume, qty_count)
 
-      any_heuristic = face_items_in_group.any? { |i|
-        key = [i.face_id, i.component_path_ids]
-        (resolution_by_key[key] && resolution_by_key[key][:source] == :heuristic)
-      }
+      any_heuristic = face_items_in_group.any? { |i| i.source == :heuristic }
       confidence = any_heuristic ? 'heuristic' : 'explicit'
 
       faces_detail = face_items_in_group.map { |i|
-        key = [i.face_id, i.component_path_ids]
-        res = resolution_by_key[key]
         {
           face_id: i.face_id,
           path_ids: i.component_path_ids,
@@ -183,8 +173,8 @@ module SuTakeoff
           area: i.qty.round(3),
           kind: i.kind,
           part: Calculator.face_orientation(i.normal),
-          resolved_method: res&.dig(:method)&.to_s,
-          source: res&.dig(:source)&.to_s
+          resolved_method: i.resolved_method&.to_s,
+          source: i.source&.to_s
         }
       }
 

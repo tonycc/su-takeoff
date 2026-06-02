@@ -316,5 +316,24 @@ module SuTakeoff
       usages = usages_for(all_items, all_openings)
       assert usages.size >= 7, "应为 7+ 条 usage，实际 #{usages.size} 条"
     end
+
+    def test_compound_tag_count_plus_length_both_accumulated
+      # 复合标签 count+length：同一实体产出 count_solid + linear_solid 两条 item，
+      # 共享相同 face_id/path_ids。Presenter 应同时累加 qty_count 和 qty_length，
+      # 而不是因 key 碰撞导致其中一个被覆盖为 0。
+      count_item = ScanItem.count_solid(
+        face_id: 99, su_material: 'skirting',
+        layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [LIVING_EID]
+      )
+      linear_item = ScanItem.linear_solid(
+        face_id: 99, su_material: 'skirting', length: 3.0,
+        layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [LIVING_EID]
+      )
+      usages = usages_for([count_item, linear_item], [])
+      u = find_usage(usages, LIVING_EID, 'skirting')
+      refute_nil u, '复合标签 item 应出现在 geometry_usages'
+      assert_in_delta 1.0, u[:qty_count],  0.01, '件数应为 1'
+      assert_in_delta 3.0, u[:qty_length], 0.01, '长度应为 3m'
+    end
   end
 end
