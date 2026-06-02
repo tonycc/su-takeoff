@@ -13,6 +13,8 @@ module SuTakeoff
     def teardown
       Strategies::Registry.reset!
       Strategies::Builtin.register_all!
+      strategies_json = File.join(File.expand_path('..', __dir__), 'data', 'strategies.json')
+      Strategies::Loader.load_from_file!(strategies_json)
     end
 
     def test_loads_variant_from_json

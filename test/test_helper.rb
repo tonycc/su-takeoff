@@ -11,5 +11,8 @@ require 'src/strategies/solid_linear'
 require 'src/strategies/solid_count'
 require 'src/strategies/skip'
 require 'src/strategies/builtin'
+require 'src/strategies/loader'
 
 SuTakeoff::Strategies::Builtin.register_all!
+strategies_json = File.join(File.expand_path('..', __dir__), 'data', 'strategies.json')
+SuTakeoff::Strategies::Loader.load_from_file!(strategies_json)

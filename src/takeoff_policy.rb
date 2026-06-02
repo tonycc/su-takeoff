@@ -79,9 +79,13 @@ module SuTakeoff
         return result_for(m, :layer)
       end
 
-      # 3. 材质映射 unit
+      # 3. 材质映射 unit（+ 3.5 自动匹配同 method 下的专用策略）
       if @mapping && (record = @mapping.get(item.su_material))
-        return result_for(method_from_unit(record.unit), :mapping)
+        hint_method = method_from_unit(record.unit)
+        if (matched = auto_match_strategy(item, hint_method, record))
+          return ResolveResult.new(strategy: matched, source: :auto_match)
+        end
+        return result_for(hint_method, :mapping)
       end
 
       # 4. 启发式（弱信号，仅产生待确认建议；仅在没有显式配置时触发）
@@ -140,6 +144,28 @@ module SuTakeoff
     def result_for(method, source)
       strategy = Strategies::Registry.default_for(method)
       ResolveResult.new(strategy: strategy, source: source)
+    end
+
+    # 遍历同 method 下的非默认策略，第一个 matches? 命中的返回。
+    # 跳过 default_for(method) 那个（避免默认策略反复命中自己）。
+    def auto_match_strategy(item, hint_method, record)
+      context = build_match_context(item, hint_method, record)
+      default = Strategies::Registry.default_for(hint_method)
+      Strategies::Registry.all.each do |s|
+        next if s.method != hint_method
+        next if default && s.name == default.name
+        return s if s.matches?(item, context)
+      end
+      nil
+    end
+
+    def build_match_context(item, hint_method, record)
+      def_name = item.component_path && item.component_path.last
+      {
+        definition_name: def_name,
+        unit: record && record.unit,
+        hint_method: hint_method
+      }
     end
 
     # 严格的几何启发：必须是垂直面 + 横向窄长

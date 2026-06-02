@@ -277,5 +277,50 @@ module SuTakeoff
       assert_equal :solid_count, r.strategy.name
       assert_equal :count, r.method
     end
+
+    # ---- Stage 4: auto_match 档（3.5）----
+
+    def test_auto_match_skirting_by_definition_name
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'skirting_m')
+      item.component_path = ['主卧踢脚线-001']
+      r = policy.resolve(item)
+      assert_equal :skirting_linear_default, r.strategy.name
+      assert_equal :auto_match, r.source
+    end
+
+    def test_no_auto_match_falls_to_default_mapping
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'skirting_m')
+      item.component_path = ['普通线条']
+      r = policy.resolve(item)
+      assert_equal :solid_linear, r.strategy.name
+      assert_equal :mapping, r.source
+    end
+
+    def test_auto_match_pipe_by_pattern
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'skirting_m')
+      item.component_path = ['PVC管道-DN50']
+      r = policy.resolve(item)
+      assert_equal :pipe_length_default, r.strategy.name
+      assert_equal :auto_match, r.source
+    end
+
+    def test_auto_match_only_within_same_method
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'marble_01')
+      item.component_path = ['踢脚线-001']
+      r = policy.resolve(item)
+      assert_equal :face_area, r.strategy.name
+      assert_equal :mapping, r.source
+    end
+
+    def test_auto_match_skipped_when_no_mapping
+      policy = TakeoffPolicy.new(mapping: @mapping)
+      item = make_item(su_material: 'unknown')
+      r = policy.resolve(item)
+      assert_equal :skip, r.method
+    end
   end
 end

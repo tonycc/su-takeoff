@@ -9,6 +9,7 @@ require 'src/strategies/solid_linear'
 require 'src/strategies/solid_count'
 require 'src/strategies/skip'
 require 'src/strategies/builtin'
+require 'src/strategies/loader'
 
 module SuTakeoff
   class TestStrategyRegistry < Minitest::Test
@@ -20,6 +21,8 @@ module SuTakeoff
       # 恢复全局 Registry 到默认 builtin 状态，避免污染其他测试
       Strategies::Registry.reset!
       Strategies::Builtin.register_all!
+      strategies_json = File.join(File.expand_path('..', __dir__), 'data', 'strategies.json')
+      Strategies::Loader.load_from_file!(strategies_json)
     end
 
     def test_register_and_get
