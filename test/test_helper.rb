@@ -10,6 +10,7 @@ require 'src/strategies/solid_volume'
 require 'src/strategies/solid_linear'
 require 'src/strategies/solid_count'
 require 'src/strategies/skip'
+require 'src/strategies/skirting_linear'
 require 'src/strategies/builtin'
 require 'src/strategies/loader'
 

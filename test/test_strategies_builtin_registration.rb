@@ -49,8 +49,8 @@ module SuTakeoff
 
     def test_all_seven_strategies_registered
       # face_area, face_linear, instance_count, solid_volume,
-      # solid_linear, solid_count, skip
-      assert_equal 7, Strategies::Registry.all.size
+      # solid_linear, solid_count, skip, skirting_linear
+      assert_equal 8, Strategies::Registry.all.size
     end
 
     def test_face_linear_registered_without_default

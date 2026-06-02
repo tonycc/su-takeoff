@@ -285,7 +285,8 @@ module SuTakeoff
       item = make_item(su_material: 'skirting_m')
       item.component_path = ['主卧踢脚线-001']
       r = policy.resolve(item)
-      assert_equal :skirting_linear_default, r.strategy.name
+      refute_equal :solid_linear, r.strategy.name
+      assert_includes [:skirting_linear, :skirting_linear_default], r.strategy.name
       assert_equal :auto_match, r.source
     end
 

@@ -14,6 +14,7 @@ require_relative 'src/strategies/solid_volume'
 require_relative 'src/strategies/solid_linear'
 require_relative 'src/strategies/solid_count'
 require_relative 'src/strategies/skip'
+require_relative 'src/strategies/skirting_linear'
 require_relative 'src/strategies/builtin'
 require_relative 'src/strategies/loader'
 

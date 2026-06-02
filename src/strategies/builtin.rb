@@ -11,6 +11,7 @@ module SuTakeoff
         Registry.register(SolidLinear.new,    default_for: :length)
         Registry.register(SolidCount.new,     default_for: :count)
         Registry.register(Skip.new,           default_for: :skip)
+        Registry.register(SkirtingLinear.new)   # 不传 default_for（避免与 SolidLinear 冲突）
       end
     end
   end
