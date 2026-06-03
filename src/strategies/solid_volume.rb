@@ -2,8 +2,8 @@ module SuTakeoff
   module Strategies
     # 容器级体积：标签或图层规则命中 :volume 时使用。
     class SolidVolume < Base
-      def initialize
-        super(name: :solid_volume, method: :volume, default_unit: 'm³')
+      def initialize(name: :solid_volume, match_rules: {})
+        super(name: name, method: :volume, default_unit: 'm³', match_rules: match_rules)
       end
 
       def aggregate(items, _ctx)

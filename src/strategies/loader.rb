@@ -12,8 +12,7 @@ module SuTakeoff
     #   }
     #
     # 复用 base_strategy 的 aggregate / emit_from_container 实现（同 class），
-    # 但用自定义的 name 和 match_rules（通过 instance_variable_set 注入，
-    # 避免改 7 个内置策略的 initialize 签名）。
+    # 但用自定义的 name 和 match_rules（通过公开的 keyword 构造注入）。
     module Loader
       def self.load_from_file!(path)
         return unless File.exist?(path)
@@ -30,10 +29,7 @@ module SuTakeoff
       end
 
       def self.build_variant(base, new_name, new_rules)
-        variant = base.class.new
-        variant.instance_variable_set(:@name, new_name)
-        variant.instance_variable_set(:@match_rules, new_rules)
-        variant
+        base.class.new(name: new_name, match_rules: new_rules)
       end
 
       def self.symbolize_keys(hash)

@@ -82,6 +82,17 @@ module SuTakeoff
       end
     end
 
+    def test_variant_construction_is_public_api_not_instance_variable_set
+      # 验证公开构造路径可用，不再依赖反射
+      manual = Strategies::SolidLinear.new(
+        name: :manual_test, match_rules: { definition_name_includes: ['xyz'] }
+      )
+      assert_equal :manual_test, manual.name
+      assert_equal :length, manual.method
+      assert_equal 'm', manual.default_unit
+      assert_equal ['xyz'], manual.match_rules[:definition_name_includes]
+    end
+
     def test_loaded_variant_match_rules_work
       Tempfile.create(['strategies', '.json']) do |f|
         f.write(JSON.generate({

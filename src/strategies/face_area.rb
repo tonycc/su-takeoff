@@ -1,8 +1,8 @@
 module SuTakeoff
   module Strategies
     class FaceArea < Base
-      def initialize
-        super(name: :face_area, method: :area, default_unit: 'm²')
+      def initialize(name: :face_area, match_rules: {})
+        super(name: name, method: :area, default_unit: 'm²', match_rules: match_rules)
       end
 
       def aggregate(items, ctx)
