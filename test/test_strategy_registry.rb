@@ -10,6 +10,8 @@ require 'src/strategies/solid_count'
 require 'src/strategies/skip'
 require 'src/strategies/builtin'
 require 'src/strategies/loader'
+require 'src/mapping'
+require 'src/takeoff_policy'
 
 module SuTakeoff
   class TestStrategyRegistry < Minitest::Test
@@ -90,6 +92,57 @@ module SuTakeoff
       # 不应 raise
       Strategies::Registry.register(s, default_for: :area)
       assert_equal s, Strategies::Registry.default_for(:area)
+    end
+
+    # ---- 实例 API ----
+
+    def test_instance_methods_work_independently
+      registry = Strategies::Registry.new
+      s = Strategies::Base.new(name: :iso, method: :area, default_unit: 'm²')
+      registry.register(s, default_for: :area)
+      assert_equal s, registry.get(:iso)
+      assert_equal s, registry.default_for(:area)
+    end
+
+    def test_instance_does_not_pollute_global
+      Strategies::Registry.reset!
+      Strategies::Builtin.register_all!
+      before = Strategies::Registry.all.size
+
+      isolated = Strategies::Registry.new
+      isolated.register(Strategies::Base.new(name: :iso2, method: :area, default_unit: 'm²'))
+      assert_equal 1, isolated.all.size
+      assert_equal before, Strategies::Registry.all.size
+    end
+
+    def test_global_class_methods_delegate_to_singleton
+      Strategies::Registry.reset!
+      s = Strategies::Base.new(name: :delegate_test, method: :length, default_unit: 'm')
+      Strategies::Registry.register(s)
+      assert_equal s, Strategies::Registry.global.get(:delegate_test)
+    end
+
+    def test_policy_uses_injected_registry
+      isolated = Strategies::Registry.new
+      isolated.register(Strategies::FaceArea.new, default_for: :area)
+      isolated.register(Strategies::SolidLinear.new, default_for: :length)
+      isolated.register(Strategies::SolidVolume.new, default_for: :volume)
+      isolated.register(Strategies::SolidCount.new, default_for: :count)
+      isolated.register(Strategies::Skip.new, default_for: :skip)
+      isolated.register(Strategies::InstanceCount.new)
+      isolated.register(Strategies::FaceLinear.new)
+
+      m = SuTakeoff::MaterialMapping.new
+      m.add('xxx', 'X', 'cat', 'm²', '', 0.05)
+
+      policy = SuTakeoff::TakeoffPolicy.new(mapping: m, strategies: isolated)
+      item = SuTakeoff::ScanItem.face(
+        face_id: 1, su_material: 'xxx', area: 5.0, normal: [0,0,1],
+        width: 2.0, height: 2.5, layer_name: 'L0',
+        component_path: ['R'], component_path_ids: [1]
+      )
+      r = policy.resolve(item)
+      assert_equal :face_area, r.strategy.name
     end
   end
 end

@@ -31,15 +31,16 @@ module SuTakeoff
     DEFAULT_VERTICAL_SLAB_GAP    = 0.05 # m
     DEFAULT_VERTICAL_SLAB_TOL    = 0.02
 
-    attr_reader :vertical_slab_gap, :vertical_slab_area_tol
+    attr_reader :vertical_slab_gap, :vertical_slab_area_tol, :strategies
 
     # mapping: MaterialMapping 实例（用于 unit 兜底）
     # layer_rules: { '线条' => :length, '砌体' => :volume, ... }
     #              值可以是 String 或 Symbol，内部归一为 Symbol
     # heuristics_enabled: 启发式开关
     # thresholds: { linear_min_aspect_ratio:, linear_max_short_edge_m: }
+    # strategies: Strategies::Registry 实例；不传则使用 Registry.global
     def initialize(mapping:, layer_rules: {}, heuristics_enabled: true,
-                   tag_defs: {}, thresholds: {})
+                   tag_defs: {}, thresholds: {}, strategies: nil)
       @mapping = mapping
       @layer_rules = normalize_layer_rules(layer_rules)
       @tag_defs = tag_defs || {}
@@ -48,6 +49,7 @@ module SuTakeoff
       @max_short_edge  = thresholds[:linear_max_short_edge_m] || DEFAULT_MAX_SHORT_EDGE
       @vertical_slab_gap     = thresholds[:vertical_slab_gap_m] || DEFAULT_VERTICAL_SLAB_GAP
       @vertical_slab_area_tol = thresholds[:vertical_slab_area_tolerance] || DEFAULT_VERTICAL_SLAB_TOL
+      @strategies = strategies || Strategies::Registry.global
     end
 
     # 面级判定。返回 ResolveResult（携带 Strategy 对象）。
@@ -91,7 +93,7 @@ module SuTakeoff
       # 4. 启发式（弱信号，仅产生待确认建议；仅在没有显式配置时触发）
       if @heuristics && linear_face?(item)
         # 启发判定线材：用 face_linear（含 height fallback）而非 solid_linear
-        strategy = Strategies::Registry.get(:face_linear) || Strategies::Registry.default_for(:length)
+        strategy = @strategies.get(:face_linear) || @strategies.default_for(:length)
         return ResolveResult.new(strategy: strategy, source: :heuristic)
       end
 
@@ -142,7 +144,7 @@ module SuTakeoff
 
     # 根据 method 查 default strategy 构造 ResolveResult。
     def result_for(method, source)
-      strategy = Strategies::Registry.default_for(method)
+      strategy = @strategies.default_for(method)
       ResolveResult.new(strategy: strategy, source: source)
     end
 
@@ -150,8 +152,8 @@ module SuTakeoff
     # 跳过 default_for(method) 那个（避免默认策略反复命中自己）。
     def auto_match_strategy(item, hint_method, record)
       context = build_match_context(item, hint_method, record)
-      default = Strategies::Registry.default_for(hint_method)
-      Strategies::Registry.all.each do |s|
+      default = @strategies.default_for(hint_method)
+      @strategies.all.each do |s|
         next if s.method != hint_method
         next if default && s.name == default.name
         return s if s.matches?(item, context)

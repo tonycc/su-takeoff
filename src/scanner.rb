@@ -392,8 +392,9 @@ module SuTakeoff
       return nil if def_name.nil? || def_name.empty?
 
       context = { definition_name: def_name, hint_method: :length }
-      default = Strategies::Registry.default_for(:length)
-      strategy = Strategies::Registry.all.find do |s|
+      registry = @policy.strategies
+      default = registry.default_for(:length)
+      strategy = registry.all.find do |s|
         s.method == :length &&
           (default.nil? || s.name != default.name) &&
           s.matches?(nil, context)

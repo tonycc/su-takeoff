@@ -105,7 +105,8 @@ module SuTakeoff
       record = lookup_record(item)
       if record
         method = item.kind == :instance ? :count : TakeoffPolicy.classify_unit(record.unit)
-        strategy = Strategies::Registry.default_for(method)
+        strategies = @policy&.strategies || Strategies::Registry.global
+        strategy = strategies.default_for(method)
         return {
           method: method,
           source: :mapping,
@@ -139,21 +140,22 @@ module SuTakeoff
     #   :area    → record.unit（m²），缺省回退 item.unit → Registry.default_for(:area)
     def unit_for(item, method, source, record = nil)
       record ||= lookup_record(item)
+      strategies = @policy&.strategies || Strategies::Registry.global
       case method
       when :length
         # mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位用 strategy 默认
         if source == :mapping && record && TakeoffPolicy.classify_unit(record.unit) == :length
           record.unit
         else
-          Strategies::Registry.default_for(:length)&.default_unit || 'm'
+          strategies.default_for(:length)&.default_unit || 'm'
         end
       when :count
-        record&.unit || item.unit || Strategies::Registry.default_for(:count)&.default_unit || '个'
+        record&.unit || item.unit || strategies.default_for(:count)&.default_unit || '个'
       when :area
-        record&.unit || item.unit || Strategies::Registry.default_for(:area)&.default_unit || 'm²'
+        record&.unit || item.unit || strategies.default_for(:area)&.default_unit || 'm²'
       else
         # :volume :skip 等
-        Strategies::Registry.default_for(method)&.default_unit || ''
+        strategies.default_for(method)&.default_unit || ''
       end
     end
 

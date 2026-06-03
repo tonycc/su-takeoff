@@ -141,9 +141,10 @@ module SuTakeoff
         qty_count = mat_items.sum { |i| i.qty.to_f }
       else
         # 按 resolved_method 分桶，每桶调对应策略的 aggregate
-        face_linear  = Strategies::Registry.get(:face_linear)
-        solid_volume = Strategies::Registry.get(:solid_volume)
-        face_area    = Strategies::Registry.get(:face_area)
+        strategies = @policy&.strategies || Strategies::Registry.global
+        face_linear  = strategies.get(:face_linear)
+        solid_volume = strategies.get(:solid_volume)
+        face_area    = strategies.get(:face_area)
 
         items_by_method = face_items_in_group.group_by { |i| i.resolved_method || :area }
 
