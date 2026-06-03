@@ -326,13 +326,51 @@ module SuTakeoff
       tags        = read_takeoff_tags(entity)
       attr_method = tags && tags[:method]
       layer       = entity.layer && entity.layer.name
-      method      = @policy.resolve_container(layer_name: layer, attr_method: attr_method)
-      if DEBUG
-        puts "[Scanner] try_emit_solid ##{entity.entityID} layer=\"#{layer}\" " \
-             "attr_method=#{attr_method.inspect} → #{method.inspect}"
+
+      # 档 1+2：AttrDict / 图层规则（原有）
+      method = @policy.resolve_container(layer_name: layer, attr_method: attr_method)
+
+      # 档 3：组件映射 unit 推导（新增）
+      if method.nil?
+        def_name = container_definition_name(entity)
+        if def_name && !def_name.empty? && @component_mapping && (cm = @component_mapping.get(def_name))
+          if cm.unit
+            m = @policy.method_for_unit(cm.unit)
+            method = m if %i[length count volume].include?(m)
+          end
+        end
       end
+
+      # 档 4：策略自动匹配（命名约定，新增）
+      if method.nil?
+        matched_strategy = find_container_strategy(entity)
+        if matched_strategy && %i[length count volume].include?(matched_strategy.method)
+          method = matched_strategy.method
+        end
+      end
+
+      if PATH_DEBUG
+        puts "[PathDebug:try_emit_solid] ##{entity.entityID} \"#{container_definition_name(entity) rescue '?'}\" " \
+             "layer=\"#{layer}\" attr=#{attr_method.inspect} → method=#{method.inspect}"
+      end
+
       return nil unless method
       emit_solid_by_method(entity, path, transform, method, tags, effective_tag)
+    end
+
+    # 容器级策略匹配：根据 entity 的 definition_name 查找命名匹配的非默认策略。
+    # 用于"含线/管/wire/pipe"等关键字的组件自动按长度统计。
+    def find_container_strategy(entity)
+      return nil unless @policy
+      def_name = container_definition_name(entity)
+      return nil if def_name.nil? || def_name.empty?
+      registry = @policy.strategies
+      context = { definition_name: def_name }
+      registry.all.each do |s|
+        next if s.name == registry.default_for(s.method)&.name
+        return s if s.matches?(nil, context)
+      end
+      nil
     end
 
     def emit_solid_by_method(entity, path, transform, method, tags, effective_tag = nil)
@@ -359,8 +397,16 @@ module SuTakeoff
 
       case method
       when :length
-        length_m = compute_length_via_strategy(entity, scale) ||
-                   compute_linear_length(entity, scale) || d
+        via_strategy = compute_length_via_strategy(entity, scale)
+        via_chained  = compute_linear_length(entity, scale)
+        length_m     = via_strategy || via_chained || d
+        if PATH_DEBUG
+          puts "[PathDebug:emit_solid_by_method:length] ##{entity.entityID} \"#{container_definition_name(entity) rescue '?'}\""
+          puts "[PathDebug]   compute_length_via_strategy → #{via_strategy.inspect}"
+          puts "[PathDebug]   compute_linear_length (Chained) → #{via_chained.inspect}"
+          puts "[PathDebug]   bbox depth d=#{d}"
+          puts "[PathDebug]   选用 length_m = #{length_m}"
+        end
         item = ScanItem.linear_solid(
           face_id: entity.entityID, su_material: mat_name,
           length: length_m.round(4), width: w.round(4), height: h.round(4), depth: h.round(4),
