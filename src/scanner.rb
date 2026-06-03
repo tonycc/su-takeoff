@@ -236,9 +236,21 @@ module SuTakeoff
         return
       end
 
-      # 纯边线容器（无面/子组件）→ 按件数统计
+      # 纯边线容器（无面/子组件/子群组）：
+      #   - 决议判定 method：AttrDict / 图层 / 组件映射 / 几何启发
+      #   - :length → 用 PathSum 累加所有 Edge 长度，emit :linear_solid
+      #   - 其他 → 兼容旧行为 emit_edge_only_item（按件数）
       unless has_collectable_geometry?(entity)
         if has_any_edge?(entity)
+          method = decide_pure_edges_method(entity)
+          if method == :length
+            length_m = compute_path_length(entity, transform)
+            if length_m && length_m > 0
+              puts "[Scanner] #{entity.class} ##{entity.entityID} \"#{def_name}\" 纯边线 → 路径长度 #{length_m}m" if DEBUG
+              items << emit_path_linear_solid(entity, path, transform, length_m, effective_tag)
+              return
+            end
+          end
           puts "[Scanner] #{entity.class} ##{entity.entityID} \"#{def_name}\" 无线框面 → 按件数统计" if DEBUG
           items << emit_edge_only_item(entity, path, effective_tag)
         end
@@ -573,6 +585,93 @@ module SuTakeoff
         component_path: comp_path,
         component_path_ids: comp_path_ids,
         tag: (tags && tags[:tag]) || effective_tag
+      )
+    end
+
+    # 纯边线容器的 method 决议（4 档优先级）：
+    #   1. AttrDict 显式 method
+    #   2. 图层规则
+    #   3. 组件映射 unit 推导
+    #   4. 几何启发：≥2 个不同方向的边 = 路径线 → :length
+    # 都未命中 → :count（兼容旧行为）
+    def decide_pure_edges_method(entity)
+      # 1. AttrDict
+      tags = read_takeoff_tags(entity)
+      if tags && tags[:method]
+        sym = tags[:method].to_sym
+        return sym if %i[length count volume].include?(sym)
+      end
+
+      # 2. 图层规则
+      if @policy
+        layer = entity.layer && entity.layer.name
+        if layer
+          m = @policy.resolve_container(layer_name: layer)
+          return m if m
+        end
+      end
+
+      # 3. 组件映射 unit
+      def_name = container_definition_name(entity)
+      if def_name && @component_mapping && (cm = @component_mapping.get(def_name))
+        if @policy && cm.unit
+          m = @policy.method_for_unit(cm.unit)
+          return m if %i[length count].include?(m)
+        end
+      end
+
+      # 4. 几何启发
+      return :length if path_like_geometry?(entity)
+
+      :count
+    end
+
+    # 几何特征：纯边线且至少 2 个不同方向 → 折线路径（电线/管道特征）。
+    # 单段直线不算（避免误判单一杆件）。
+    def path_like_geometry?(entity)
+      ents = definition_entities(entity)
+      return false unless ents
+      edges = ents.select { |e| e.is_a?(Sketchup::Edge) }
+      return false if edges.size < 2
+      dkeys = edges.map { |e|
+        dir = e.line[1].normalize! rescue nil
+        next nil unless dir
+        [dir.x.round(3).abs, dir.y.round(3).abs, dir.z.round(3).abs]
+      }.compact.uniq
+      dkeys.size >= 2
+    end
+
+    # 纯边线容器的路径总长（PathSum）。
+    def compute_path_length(entity, transform)
+      scale = [transform.xscale.abs, transform.yscale.abs, transform.zscale.abs].max
+      ctx = build_length_ctx(entity, scale)
+      return nil unless ctx
+      LengthCalculators::PathSum.new.compute(entity, ctx)
+    end
+
+    # 产出路径长度 ScanItem（kind=:linear_solid）。
+    def emit_path_linear_solid(entity, path, transform, length_m, effective_tag)
+      tags = read_takeoff_tags(entity)
+      comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+      comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+      mat_name = (tags && tags[:material]) ||
+                 (entity.respond_to?(:material) && entity.material&.name) ||
+                 container_definition_name(entity)
+      bb_center_world = entity.bounds.center.transform(transform)
+      z_center_m      = bb_center_world.z * 0.0254
+      layer           = entity.layer && entity.layer.name
+      item_tag        = (tags && tags[:tag]) || effective_tag
+
+      ScanItem.linear_solid(
+        face_id: entity.entityID,
+        su_material: mat_name,
+        length: length_m.round(4),
+        layer_name: layer,
+        component_path: comp_path,
+        component_path_ids: comp_path_ids,
+        z_center: z_center_m.round(4),
+        tags: tags,
+        tag: item_tag
       )
     end
 

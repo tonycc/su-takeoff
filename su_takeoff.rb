@@ -23,6 +23,7 @@ require_relative 'src/length_calculators/baseline'
 require_relative 'src/length_calculators/volume_based'
 require_relative 'src/length_calculators/edge_based'
 require_relative 'src/length_calculators/chained'
+require_relative 'src/length_calculators/path_sum'
 
 require_relative 'src/mapping'
 require_relative 'src/component_mapping'
