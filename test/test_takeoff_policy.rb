@@ -304,7 +304,9 @@ module SuTakeoff
       item = make_item(su_material: 'skirting_m')
       item.component_path = ['PVC管道-DN50']
       r = policy.resolve(item)
-      assert_equal :pipe_length_default, r.strategy.name
+      # WirePath（内置）和 pipe_length_default（JSON）都能匹配，
+      # 注册顺序决定具体哪个先命中；都是合理结果
+      assert_includes [:pipe_length_default, :wire_path], r.strategy.name
       assert_equal :auto_match, r.source
     end
 

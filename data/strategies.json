@@ -17,15 +17,5 @@
     "match_rules": {
       "definition_name_includes": ["扶手", "栏杆"]
     }
-  },
-  "wire_pipe_length": {
-    "base_strategy": "solid_linear",
-    "match_rules": {
-      "definition_name_includes": [
-        "电线", "电敷线", "电管", "电缆", "金属线", "导线", "数据线", "网线", "信号线",
-        "线管", "PVC管", "镀锌管", "管材", "管道",
-        "wire", "cable", "pipe", "conduit"
-      ]
-    }
   }
 }
