@@ -497,9 +497,11 @@ module SuTakeoff
 
     def collect_edges(ents, edge_scale)
       edges = []
+      first_log = PATH_DEBUG  # 只在第一次进入 collect_edges 时打 header
       ents.each do |e|
         next unless e.is_a?(Sketchup::Edge)
-        len_raw = e.length * edge_scale
+        raw_e_length = e.length    # 调试：保留 e.length 原始返回值
+        len_raw = raw_e_length * edge_scale
         next if len_raw <= 0
         dir = e.line[1].normalize! rescue next
         len_m = if defined?(Length) && len_raw.is_a?(Length)
@@ -508,6 +510,14 @@ module SuTakeoff
                   len_raw.to_f * @model_unit_to_m
                 end
         dkey = [dir.x.round(3).abs, dir.y.round(3).abs, dir.z.round(3).abs]
+        if PATH_DEBUG
+          if first_log
+            puts "[PathDebug:collect_edges] edge_scale=#{edge_scale}  model_unit_to_m=#{@model_unit_to_m}"
+            first_log = false
+          end
+          puts "[PathDebug:collect_edges]   e.length=#{raw_e_length} (class=#{raw_e_length.class})  " \
+               "len_raw=#{len_raw} (class=#{len_raw.class})  len_m=#{len_m}"
+        end
         edges << { dkey: dkey, len: len_m, len_raw: len_raw }
       end
       edges
@@ -518,15 +528,27 @@ module SuTakeoff
     def calibrate_inch_edges(edges, entity)
       return if edges.empty?
       is_len_obj = defined?(Length) && edges.first[:len_raw].is_a?(Length)
+      if PATH_DEBUG
+        puts "[PathDebug:calibrate] is_len_obj=#{is_len_obj}  first len_raw class=#{edges.first[:len_raw].class}"
+      end
       return if is_len_obj
 
       bb = entity.bounds
       bb_max_m = [bb.width, bb.height, bb.depth].max * 0.0254
       edge_max = edges.map { |e| e[:len] }.max
+      ratio = edge_max > 0 ? bb_max_m / edge_max : 0
+      if PATH_DEBUG
+        puts "[PathDebug:calibrate] bb_max_m=#{bb_max_m.round(4)}  edge_max(m)=#{edge_max.round(6)}  ratio=#{ratio.round(2)}  trigger=#{ratio > 10}"
+      end
       return unless edge_max > 0 && bb_max_m / edge_max > 10
 
       puts "[linear_length] 校准: 边值=#{edge_max.round(4)}m, bbox=#{bb_max_m.round(4)}m → 改英寸换算" if DEBUG
       edges.each { |e| e[:len] = e[:len_raw].to_f * 0.0254 }
+      if PATH_DEBUG
+        edges.each_with_index do |e, i|
+          puts "[PathDebug:calibrate]   校准后 edge[#{i}]: len=#{e[:len]}"
+        end
+      end
     end
 
     def first_child_face_material(entity)
@@ -642,11 +664,39 @@ module SuTakeoff
     end
 
     # 纯边线容器的路径总长（PathSum）。
+    # PATH_DEBUG: 详细日志（独立于 DEBUG flag），排查 wire/path 长度 bug 用。
+    PATH_DEBUG = true
+
     def compute_path_length(entity, transform)
       scale = [transform.xscale.abs, transform.yscale.abs, transform.zscale.abs].max
+      eid = entity.entityID
+      def_name = container_definition_name(entity) rescue '?'
+      if PATH_DEBUG
+        puts "[PathDebug] ====== compute_path_length(##{eid} \"#{def_name}\") ======"
+        puts "[PathDebug]   parent_scale=#{scale}  model_unit=#{@model.options['UnitsOptions']['LengthUnit'] rescue '?'}  model_unit_to_m=#{@model_unit_to_m}"
+      end
       ctx = build_length_ctx(entity, scale)
-      return nil unless ctx
-      LengthCalculators::PathSum.new.compute(entity, ctx)
+      unless ctx
+        puts "[PathDebug]   build_length_ctx 返回 nil，跳过" if PATH_DEBUG
+        return nil
+      end
+
+      if PATH_DEBUG
+        puts "[PathDebug]   ctx[:edge_scale]=#{ctx[:edge_scale]}  scale=#{ctx[:scale]}  baseline_id=#{ctx[:baseline_id].inspect}"
+        edges = ctx[:edges] || []
+        puts "[PathDebug]   ctx[:edges].size=#{edges.size}"
+        edges.each_with_index do |e, i|
+          raw = e[:len_raw]
+          puts "[PathDebug]   edge[#{i}]: len(m)=#{e[:len]}  len_raw=#{raw} (class=#{raw.class})  dkey=#{e[:dkey].inspect}"
+        end
+        bb = entity.bounds
+        puts "[PathDebug]   entity.bounds(in): width=#{bb.width} height=#{bb.height} depth=#{bb.depth}"
+        puts "[PathDebug]   entity.bounds(m via 0.0254): w=#{(bb.width * 0.0254).round(4)} h=#{(bb.height * 0.0254).round(4)} d=#{(bb.depth * 0.0254).round(4)}"
+      end
+
+      result = LengthCalculators::PathSum.new.compute(entity, ctx)
+      puts "[PathDebug]   PathSum 结果 = #{result.inspect} (m)" if PATH_DEBUG
+      result
     end
 
     # 产出路径长度 ScanItem（kind=:linear_solid）。
@@ -661,6 +711,12 @@ module SuTakeoff
       z_center_m      = bb_center_world.z * 0.0254
       layer           = entity.layer && entity.layer.name
       item_tag        = (tags && tags[:tag]) || effective_tag
+
+      if PATH_DEBUG
+        puts "[PathDebug] emit_path_linear_solid ##{entity.entityID} \"#{container_definition_name(entity) rescue '?'}\""
+        puts "[PathDebug]   length_m=#{length_m} (round 4 = #{length_m.round(4)})"
+        puts "[PathDebug]   mat=#{mat_name}  layer=#{layer}  comp_path=#{comp_path.inspect}"
+      end
 
       ScanItem.linear_solid(
         face_id: entity.entityID,
