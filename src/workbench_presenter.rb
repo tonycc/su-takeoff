@@ -178,6 +178,11 @@ module SuTakeoff
       any_heuristic = face_items_in_group.any? { |i| i.source == :heuristic }
       confidence = any_heuristic ? 'heuristic' : 'explicit'
 
+      # 紧凑索引：仅 face_id + path_ids，用于前端面定位/高亮（不含宽高面积等大字段）
+      face_refs = face_items_in_group.map { |i|
+        { face_id: i.face_id, path_ids: i.component_path_ids }
+      }
+
       faces_detail = face_items_in_group.map { |i|
         {
           face_id: i.face_id,
@@ -206,9 +211,9 @@ module SuTakeoff
         face_count: face_items_in_group.size,
         by_part: part_counts.transform_values { |v| v.round(2) },
         is_instance: is_instance,
+        face_refs: face_refs,
         faces: faces_detail,
         confidence: confidence,
-        # Stage 3 调试字段：本聚合涉及的全部策略（复合标签场景下可能多个）
         strategies: face_items_in_group.map(&:strategy_name).compact.uniq.map(&:to_s)
       }
     end

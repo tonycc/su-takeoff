@@ -1,6 +1,7 @@
 // src/ui/app.js — 核心：导航、桥接、状态、工具函数
 
 function renderWorkbenchError(info) {
+  hideLoading();
   var container = document.getElementById('page-position');
   container.innerHTML = '<div class="mv-error">' + esc(info.error) + '<br><small>' +
     (info.backtrace || []).map(esc).join('<br>') + '</small></div>';
@@ -36,16 +37,37 @@ function callSketchUp(action, json) {
 }
 
 // ---------------- Scan entry ----------------
-function scanAll() { callSketchUp('scan_all'); }
-function scanSelected() { callSketchUp('scan_selected'); }
+function showLoading() {
+  document.getElementById('loading-overlay').style.display = 'flex';
+  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = true; });
+}
+function hideLoading() {
+  document.getElementById('loading-overlay').style.display = 'none';
+  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = false; });
+}
+
+function scanAll() { showLoading(); callSketchUp('scan_all'); }
+function scanSelected() { showLoading(); callSketchUp('scan_selected'); }
 
 // ---------------- Workbench state ----------------
 window._workbench = null;
 window._currentPage = 'position';
 
+window.receiveFaces = function(data) {
+  if (!window._workbench) return;
+  if (!window._workbench._facesCache) window._workbench._facesCache = {};
+  var cacheKey = data.entity_id + ':' + data.su_material;
+  window._workbench._facesCache[cacheKey] = data.faces || [];
+  if (window._facesRequested) delete window._facesRequested[cacheKey];
+  renderModelView(window._workbench);
+};
+
 function renderWorkbench(data) {
+  hideLoading();
   try {
     window._workbench = data;
+    window._workbench._facesCache = {};
+    window._facesRequested = {};
     buildWorkbenchIndexes(data);
     // 保留已有展开状态（标签/映射变更触发重扫时避免折叠）
     if (!_mv.expandedNodes) _mv.expandedNodes = {};
@@ -137,11 +159,12 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
   var targetUsage = null;
 
   // 按完整路径匹配面：face_id 相同 + path_ids 相同 = 同一实例中的同一个面
+  // 使用 face_refs（紧凑索引），避免依赖懒加载的 faces 数组
   var pathIds = activePathIds || [];
   for (var i = 0; i < geoUsages.length; i++) {
-    var faces = geoUsages[i].faces || [];
-    for (var j = 0; j < faces.length; j++) {
-      if (faces[j].face_id === faceId && arraysEqual(faces[j].path_ids, pathIds)) {
+    var faceRefs = geoUsages[i].face_refs || [];
+    for (var j = 0; j < faceRefs.length; j++) {
+      if (faceRefs[j].face_id === faceId && arraysEqual(faceRefs[j].path_ids, pathIds)) {
         targetEntityId = geoUsages[i].entity_id;
         targetUsage = geoUsages[i];
         break;

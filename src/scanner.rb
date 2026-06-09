@@ -2,7 +2,7 @@ require 'set'
 
 module SuTakeoff
   class Scanner
-    attr_reader :material_colors
+    attr_reader :material_colors, :entity_contexts
 
     IDENTITY = Geom::Transformation.new
 
@@ -14,6 +14,7 @@ module SuTakeoff
     def initialize
       @model = Sketchup.active_model
       @material_colors = {}
+      @entity_contexts = {}
       @component_mapping = PluginState.instance.component_mapping
       begin
         @policy = PluginState.instance.takeoff_policy
@@ -73,6 +74,29 @@ module SuTakeoff
       hierarchy = collect_hierarchy(entities)
 
       { items: items, openings: openings, hierarchy: hierarchy }
+    end
+
+    # 局部重扫：只重扫 entity_id 对应的容器子树，返回 { items:, openings: }。
+    # ctx 来自主扫描时存入的 entity_contexts[entity_id]。
+    def scan_entity(entity_id, ctx)
+      entity = @model.find_entity_by_id(entity_id)
+      return nil unless entity
+
+      path      = (ctx[:path_ids] || []).map { |id| @model.find_entity_by_id(id) }.compact
+      transform = Geom::Transformation.new(ctx[:transform])
+
+      new_items            = []
+      new_openings         = []
+      @pending_opening_info = []
+      face_set             = Set.new
+      opening_face_ids     = Set.new
+
+      collect_faces(entity, path, transform, face_set,
+                    new_items, new_openings, opening_face_ids,
+                    ctx[:effective_layer], ctx[:effective_tag], ctx[:effective_method])
+      associate_openings_to_hosts(new_items, new_openings, @pending_opening_info)
+
+      { items: new_items, openings: new_openings }
     end
 
     private
@@ -199,6 +223,15 @@ module SuTakeoff
     def collect_container(entity, path, transform, items, openings, opening_face_ids,
                           effective_layer, effective_tag, effective_method)
       return if entity.hidden? || !entity.visible? || (entity.layer && !entity.layer.visible?)
+
+      # 记录本容器的扫描上下文，供 set_entity_tag 局部重扫使用
+      @entity_contexts[entity.entityID] = {
+        path_ids:         path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 },
+        transform:        transform.to_a,
+        effective_layer:  effective_layer,
+        effective_tag:    effective_tag,
+        effective_method: effective_method
+      }
 
       # 复合标签：method 含 '+' 时拆开，产出多条容器级 ScanItem，不再下钻
       tags = read_takeoff_tags(entity)
@@ -716,27 +749,32 @@ module SuTakeoff
     end
 
     def associate_openings_to_hosts(items, openings, pending_info)
+      return if pending_info.empty?
+
+      # 按 component_path 建索引，避免对每个洞口线性扫描全量 items
+      path_index = {}
+      items.each do |item|
+        next if item.normal.nil?
+        (path_index[item.component_path] ||= []) << item
+      end
+
       pending_info.each do |info|
-        op_idx    = info[:index]
-        op_normal = info[:normal]
-        op_area   = info[:area]
-        op_path   = info[:component_path]
+        op_idx      = info[:index]
+        op_normal   = info[:normal]
+        op_area     = info[:area]
+        op_path     = info[:component_path]
         parent_path = op_path[0..-2]
 
-        candidates = items.select do |item|
-          next if item.normal.nil?
+        candidate_paths = [op_path, parent_path].uniq
+        candidates = candidate_paths.flat_map { |p| path_index[p] || [] }.select do |item|
           dot = (op_normal[0] * item.normal[0] +
                  op_normal[1] * item.normal[1] +
                  op_normal[2] * item.normal[2]).abs
-          dot > 0.99 &&
-            item.qty > op_area &&
-            (item.component_path == op_path || item.component_path == parent_path)
+          dot > 0.99 && item.qty > op_area
         end
 
-        if candidates.any?
-          best = candidates.min_by(&:qty)
-          openings[op_idx].host_face_ids = [best.face_id]
-        end
+        next unless candidates.any?
+        openings[op_idx].host_face_ids = [candidates.min_by(&:qty).face_id]
       end
     end
 

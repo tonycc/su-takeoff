@@ -66,6 +66,11 @@ module SuTakeoff
 
       # 标记系统 —— 为群组/组件分配/清除标记
       @dialog.add_action_callback('set_entity_tag') { |_ctx, json| set_entity_tag(json) }
+
+      # 按需加载面详情（懒加载，减小初始 JSON 体积）
+      @dialog.add_action_callback('get_faces') { |_ctx, json| get_faces(json) }
+
+      @faces_cache = {}
     end
 
     def show
@@ -86,10 +91,11 @@ module SuTakeoff
         all_items = result[:items]
 
         @last_scan = {
-          items: all_items,
-          openings: result[:openings],
-          hierarchy: result[:hierarchy],
-          colors: scanner.material_colors
+          items:            all_items,
+          openings:         result[:openings],
+          hierarchy:        result[:hierarchy],
+          colors:           scanner.material_colors,
+          entity_contexts:  scanner.entity_contexts
         }
 
         send_workbench_state
@@ -99,8 +105,49 @@ module SuTakeoff
       end
     end
 
+    # 局部重扫：只重扫 entity_id 对应容器的子树，比全量 do_scan 快一到两个数量级。
+    # 当 entity_contexts 中找不到该容器（首次扫描前、隐藏容器等）时回退全量扫描。
+    def partial_rescan_entity(entity_id, tag_name)
+      ctx = @last_scan && @last_scan[:entity_contexts]&.fetch(entity_id, nil)
+      return do_scan(selection_only: false) unless ctx
+
+      # 剔除属于该容器子树的旧 item（comp_path_ids 中含 entity_id 的全部条目）
+      @last_scan[:items].reject! { |it| it.component_path_ids.include?(entity_id) }
+
+      # 仅重扫该容器
+      scanner = Scanner.new
+      result  = scanner.scan_entity(entity_id, ctx)
+      return do_scan(selection_only: false) unless result
+
+      # 合并颜色与子容器上下文
+      @last_scan[:colors].merge!(scanner.material_colors)
+      @last_scan[:entity_contexts].merge!(scanner.entity_contexts)
+
+      # 洞口去重合并：以新扫描中出现的透明面 id 为准
+      new_op_ids = result[:openings].map(&:entity_id).to_set
+      @last_scan[:openings].reject! { |op| new_op_ids.include?(op.entity_id) }
+      @last_scan[:openings].concat(result[:openings])
+
+      # 合并新 item，并更新层级树节点的 tag 字段
+      @last_scan[:items].concat(result[:items])
+      update_hierarchy_node_tag(@last_scan[:hierarchy], entity_id, tag_name)
+
+      send_workbench_state
+    end
+
+    # 递归更新层级树中 entity_id 对应节点的 tag 字段。
+    def update_hierarchy_node_tag(node, entity_id, tag_name)
+      return false unless node
+      if node[:entity_id] == entity_id
+        node[:tag] = (tag_name.nil? || tag_name.empty?) ? nil : tag_name
+        return true
+      end
+      (node[:children] || []).any? { |child| update_hierarchy_node_tag(child, entity_id, tag_name) }
+    end
+
     # Unified state push — called after scan and after any mapping/ignored change.
     # Computes usages for all mapped materials; unmapped are returned for editing UI.
+    # faces 数组从 geometry_usages 中剥除并缓存在服务端，前端通过 get_faces 按需请求。
     def send_workbench_state
       return unless @last_scan
       begin
@@ -115,11 +162,32 @@ module SuTakeoff
           ignored: PluginState.instance.ignored,
           tag_defs: PluginState.instance.config['tag_defs'] || {}
         ).build
+
+        # 剥除 faces 并缓存：避免初始 JSON 过大
+        @faces_cache = {}
+        data[:geometry_usages].each do |usage|
+          key = "#{usage[:entity_id]}:#{usage[:su_material]}"
+          @faces_cache[key] = usage.delete(:faces) || []
+        end
+
         @dialog.execute_script("window.renderWorkbench(#{JSON.generate(data)})")
       rescue => e
         msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
         @dialog.execute_script("window.renderWorkbenchError(#{msg})")
       end
+    end
+
+    def get_faces(json)
+      data = JSON.parse(json)
+      key = "#{data['entity_id']}:#{data['su_material']}"
+      faces = @faces_cache.fetch(key, [])
+      result = { entity_id: data['entity_id'].to_i, su_material: data['su_material'], faces: faces }
+      @dialog.execute_script("window.receiveFaces(#{JSON.generate(result)})")
+    rescue => e
+      begin
+        result = { entity_id: data['entity_id'].to_i, su_material: data['su_material'], faces: [] }
+        @dialog.execute_script("window.receiveFaces(#{JSON.generate(result)})")
+      rescue; end
     end
 
     def locate_material(su_name)
@@ -465,7 +533,7 @@ module SuTakeoff
       end
       model.commit_operation
 
-      do_scan(selection_only: false)
+      partial_rescan_entity(entity_id, tag_name)
     rescue => e
       msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
       @dialog.execute_script("window.renderWorkbenchError(#{msg})")

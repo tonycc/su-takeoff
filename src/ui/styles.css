@@ -30,6 +30,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
 .sb-btn:hover { background: #45475a; }
 .sb-btn.primary { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; font-weight: 600; }
 .sb-btn.primary:hover { background: #74c7ec; }
+.sb-btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
 
 /* 导航项 */
 .sb-nav {
@@ -254,6 +255,28 @@ tr.unmapped td:first-child { color: #f38ba8; }
 
 
 
+
+/* ---------- Loading overlay ---------- */
+.main { position: relative; }
+
+#loading-overlay {
+  display: none;
+  position: absolute; inset: 0;
+  background: rgba(30, 30, 46, 0.82);
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; z-index: 100;
+}
+
+.loading-spinner {
+  width: 34px; height: 34px;
+  border: 3px solid #313244; border-top-color: #89b4fa;
+  border-radius: 50%;
+  animation: su-spin 0.75s linear infinite;
+}
+
+@keyframes su-spin { to { transform: rotate(360deg); } }
+
+.loading-text { color: #a6adc8; font-size: 13px; }
 
 /* ---------- Workbench ---------- */
 .empty-state { padding: 80px 20px; text-align: center; color: #6c7086; font-size: 14px; }

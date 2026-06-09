@@ -80,7 +80,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
   - **`try_emit_solid` 4 档**：AttrDict method → 图层规则 → 组件映射 unit 推导 → 策略自动匹配（`find_container_strategy`，按 definition_name 命中非默认策略）。
   - **`emit_solid_by_method`** 按 method 产出 `:linear_solid`/`:solid`/`:count_solid`。`:length` 优先调 `compute_length_via_strategy`（让 SkirtingLinear/WirePath 等暴露 `compute_length` 的策略接管），fallback 到 `compute_linear_length`（Chained）。
   - **`build_length_ctx`** 统一组装 entities/edges/edge_scale，`calibrate_inch_edges` 处理 e.length 单位混淆。
-  - `Scanner::DEBUG = true` 开启详细调试日志（含 PATH_DEBUG 系列）。
+  - `Scanner::DEBUG = true` 开启详细调试日志。
 - **`workbench_presenter.rb`** — 把 Scanner 结果加工成前端 `_workbench`。`build_geometry_usages` 按 (entity_id, su_material) 聚合后，按 `resolved_method` 分桶调对应策略的 `aggregate`；输出含 `strategies: [...]` 字段（本聚合涉及的全部策略名）供前端调试。
 - **`ui/dialog.rb`** — HtmlDialog 桥接。`send_workbench_state` 推全量数据，所有回调通过 `add_action_callback` + JS `sketchup.<action>()` 通信，数据以 JSON 经 `execute_script` 传递。
 - **`main.rb`** — `PluginState` 单例，管理配置持久化。初始化时调 `Strategies::Builtin.register_all!` + `Strategies::Loader.load_from_file!`（仅首次，幂等）。`takeoff_policy` 每次返回基于最新 config 的新 Policy（避免缓存陈旧规则）。注册菜单、工具栏。

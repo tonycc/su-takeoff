@@ -584,7 +584,7 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   indent.style.paddingLeft = (depth * 16) + 'px';
   tdName.appendChild(indent);
 
-  var hasFaces = usage.faces && usage.faces.length > 0;
+  var hasFaces = (usage.face_count || 0) > 0;
   if (hasFaces) {
     var toggle = document.createElement('span');
     toggle.className = 'mv-toggle';
@@ -657,19 +657,38 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   tbody.appendChild(row);
 
   if (isMatExpanded && hasFaces) {
-    // 按规格（宽×高 mm）分组
-    var specGroups = {};
-    usage.faces.forEach(function(f) {
-      var dimKey = (f.width && f.height)
-        ? Math.round(f.width * 1000) + '×' + Math.round(f.height * 1000)
-        : '—';
-      if (!specGroups[dimKey]) specGroups[dimKey] = [];
-      specGroups[dimKey].push(f);
-    });
-    var dimKeys = Object.keys(specGroups);
-    dimKeys.forEach(function(dimKey) {
-      renderSpecGroupRow(dimKey, specGroups[dimKey], usage, depth + 1, matKey, tbody);
-    });
+    var cacheKey = usage.entity_id + ':' + usage.su_material;
+    var facesCache = window._workbench && window._workbench._facesCache;
+    var faces = facesCache && facesCache[cacheKey];
+    if (faces) {
+      // 按规格（宽×高 mm）分组
+      var specGroups = {};
+      faces.forEach(function(f) {
+        var dimKey = (f.width && f.height)
+          ? Math.round(f.width * 1000) + '×' + Math.round(f.height * 1000)
+          : '—';
+        if (!specGroups[dimKey]) specGroups[dimKey] = [];
+        specGroups[dimKey].push(f);
+      });
+      Object.keys(specGroups).forEach(function(dimKey) {
+        renderSpecGroupRow(dimKey, specGroups[dimKey], usage, depth + 1, matKey, tbody);
+      });
+    } else {
+      // 懒加载：显示占位行，向 Ruby 请求面详情
+      var loadRow = document.createElement('tr');
+      loadRow.className = 'mv-face-row';
+      var loadTd = document.createElement('td');
+      loadTd.colSpan = 13;
+      loadTd.style.cssText = 'text-align:center;color:#6c7086;font-size:12px;padding:6px';
+      loadTd.textContent = '加载面详情…';
+      loadRow.appendChild(loadTd);
+      tbody.appendChild(loadRow);
+      window._facesRequested = window._facesRequested || {};
+      if (!window._facesRequested[cacheKey]) {
+        window._facesRequested[cacheKey] = true;
+        callSketchUp('get_faces', JSON.stringify({ entity_id: usage.entity_id, su_material: usage.su_material }));
+      }
+    }
   }
 }
 
@@ -737,7 +756,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   tdName.appendChild(indent);
 
   // Toggle icon
-  var hasFaceItems = selfUsages.some(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
+  var hasFaceItems = selfUsages.some(function(u) { return !u.is_instance && (u.face_count || 0) > 0; });
   var hasExpandable = hasChildren || hasFaceItems;
   if (hasExpandable) {
     var toggle = document.createElement('span');
@@ -889,7 +908,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   // Expansion area: material summary rows + child component rows
   if (isExpanded) {
     // Material summary rows (only this entity's own face usages)
-    var faceUsages = selfUsages.filter(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
+    var faceUsages = selfUsages.filter(function(u) { return !u.is_instance && (u.face_count || 0) > 0; });
     if (faceUsages.length > 0) {
       faceUsages.forEach(function(u) {
         renderMaterialSummaryRow(u, effectiveDepth + 1, node.entity_id, tbody, data);
@@ -963,7 +982,7 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
   indent.style.paddingLeft = (depth * 16) + 'px';
   tdName.appendChild(indent);
 
-  var hasExpandable = allChildren.length > 0 || mergedUsages.some(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
+  var hasExpandable = allChildren.length > 0 || mergedUsages.some(function(u) { return !u.is_instance && (u.face_count || 0) > 0; });
   if (hasExpandable) {
     var toggle = document.createElement('span');
     toggle.className = 'mv-toggle';
@@ -1097,7 +1116,7 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
   // 展开区域
   if (isExpanded) {
     // 材质汇总（合并后的 usages）
-    var faceUsages = mergedUsages.filter(function(u) { return !u.is_instance && u.faces && u.faces.length > 0; });
+    var faceUsages = mergedUsages.filter(function(u) { return !u.is_instance && (u.face_count || 0) > 0; });
     if (faceUsages.length > 0) {
       faceUsages.forEach(function(u) {
         renderMaterialSummaryRow(u, depth + 1, first.entity_id, tbody, data);
