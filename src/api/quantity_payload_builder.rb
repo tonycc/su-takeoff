@@ -40,7 +40,9 @@ module SuTakeoff
           idempotency_key: "su-v2-#{@binding.model_key}-#{payload_hash[0, 16]}",
           project: business_payload[:project],
           model_key: business_payload[:model_key],
-          source_version: "sha256:#{payload_hash}",
+          # source_version 服务端上限 64 字符（联调实测 64→200 / 65→500）。
+          # 取 hash 前 16 位（与 idempotency_key 截断一致），内容派生且稳定，共 23 字符。
+          source_version: "sha256:#{payload_hash[0, 16]}",
           components: components
         }
 

@@ -138,4 +138,31 @@ class TestQuantityPayloadBuilder < Minitest::Test
     assert_equal first.payload_hash, second.payload_hash
     assert_equal first.payload[:idempotency_key], second.payload[:idempotency_key]
   end
+
+  def test_source_version_within_server_limit_and_stable
+    @mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
+    item = SuTakeoff::ScanItem.face(
+      face_id: 1,
+      face_persistent_id: 101,
+      su_material: 'paint',
+      area: 10.0,
+      normal: [0, 0, 1],
+      width: 2.0,
+      height: 5.0,
+      layer_name: '墙面',
+      component_path: [],
+      component_path_ids: []
+    )
+
+    first = build([item])
+    second = build([item])
+
+    # 服务端 source_version 字段上限为 64 字符（联调实测 len=64→200, len=65→500）。
+    # 超限会触发服务端未捕获异常返回 500，必须截断。
+    assert_operator first.payload[:source_version].length, :<=, 64,
+                    "source_version 超过服务端 64 字符上限：#{first.payload[:source_version]}"
+    # 内容派生且稳定：相同输入产生相同 source_version
+    assert_equal first.payload[:source_version], second.payload[:source_version]
+    assert_match(/\Asha256:[a-f0-9]+\z/, first.payload[:source_version])
+  end
 end
