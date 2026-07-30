@@ -45,7 +45,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 - **`takeoff_policy.rb`** — 算量策略决议器（核心）。4+1 档优先级：`AttrDict 标签 → 图层规则 → 材质映射 unit → 策略自动匹配 → 几何启发式`。任意一档命中即返回。`resolve(item)` 返回 `ResolveResult(strategy, source)`；`strategy` 是 `Strategies::Base` 子类对象，`method` 由 `strategy.method` 派生（向后兼容）。`resolve_container` 供 Scanner 容器级判定。**构造时注入所有依赖**（mapping, layer_rules, tag_defs, thresholds, strategies），不读 PluginState/config.json。`strategies:` 不传时默认走 `Strategies::Registry.global`；测试可注入独立 Registry。单位 → 计量方式由 `classify_unit` 类方法通过字符串启发直接判断（含 `³`/`3`/`L`/`立方`→体积，中文量词→件数，`m`/`mm`/`cm`→长度，其余→面积），无需配置分类列表。
 - **`data_models.rb`** — `ScanItem`（keyword_init）含 `kind` 区分 `:face`/`:instance`/`:solid`/`:linear_solid`/`:count_solid`，`qty_area/qty_length/qty_volume/qty_count` 量纲字段统一以米（m）为单位；新增 `strategy_name`（Symbol，缓存决议出的策略名，前端调试用）。类方法 `ScanItem.face/instance/solid/linear_solid/count_solid` 是推荐的工厂入口。`Opening`（门窗洞口）保留不变。
 - **`calculator.rb`** — `compute_geometry_only`：纯几何决议 + 薄板去重。先 `dedup_thin_slabs`（水平楼板），再 `cache_resolve` 全量决议，再 `dedup_vertical_slabs`（竖直薄板，仅作用于 method==:length 的面），最后输出 `{item:, method:, source:, unit:, strategy_name:}` 数组。`unit_for` 走 `Strategies::Registry.default_for(method).default_unit`；未映射面用 `geometry_unmapped_fallback`（长宽比 > 15 视线材）。
-- **`mapping.rb`** — SU 材质 → 真实材料映射（分类、单位、规格）。`default_waste_rate` 字段保留兼容旧数据，几何用量链路不读取。
+- **`mapping.rb`** — SU 材质 → 真实材料映射（分类、单位、规格）。`default_waste_rate` 字段保留兼容旧数据，几何用量链路不读取。`platform_sku_id/code/name` 为平台 SKU 关联（材质级），随 JSON / CSV / 模型 AttributeDictionary 持久化，模型视图「产品信息」列据此展示。
 - **`component_mapping.rb`** — 组件定义名 → 材料映射。`counting_method`: `expand` 展开统计面材 / `aggregate` 整件统计个数。
 
 ### Strategy 架构（`src/strategies/`）
@@ -97,7 +97,7 @@ v1.1.0 新增。实现登录认证、项目绑定、算量 Payload 构建与推�
 
 - **`api_error.rb`** — `ApiError < StandardError`，字段 `status/code/details/retryable/body`。所有 HTTP 错误统一转为此异常。
 - **`http_response.rb`** — `HttpResponse` 值对象（status/body/headers），`ApiClient` 内部使用。
-- **`api_client.rb`** — HTTP 客户端。5 个接口：`login` / `refresh` / `logout` / `me`（`/identity/me`）/ `push_quantities`。超时配置：连接 10s、登录 30s、推送 120s。`normalize_base_url` 在 `environment=production` 时强制 HTTPS。支持 `transport:` 注入（测试用 mock）。
+- **`api_client.rb`** — HTTP 客户端。6 个接口：`login` / `refresh` / `logout` / `me`（`/identity/me`）/ `push_quantities` / `materials`（`GET /api/v1/su/materials` 供应链 SKU/产品查询，支持 `keyword`/`category_id`/`brand_id`/`status`/`page`/`page_size`）。超时配置：连接 10s、登录 30s、推送 120s。`normalize_base_url` 在 `environment=production` 时强制 HTTPS。支持 `transport:` 注入（测试用 mock）。
 - **`credential_store.rb`** — Token 安全存储抽象。`CredentialStore.default` 按平台分派：macOS → `MacOSKeychainStore`（系统 Keychain），其他 → `UnavailableStore`（降级为进程内会话）。`MemoryCredentialStore` 供测试。**当前仅实现 macOS Keychain，Windows Credential Manager 未实现**。
 - **`auth_session.rb`** — 会话状态机。状态：`signed_out → authenticating → signed_in / tenant_selection_required / error`。`login` 支持多租户（`TENANT_SELECTION_REQUIRED` 时返回租户列表）；`restore` 从安全存储恢复会话；`refresh!` 刷新 access_token；`with_access_token_retry` 401 单次重试（防循环）；`can_push?` 校验 `quantity:ingest` 权限。access_token 存内存，refresh_token 存 CredentialStore。
 - **`project_binding.rb`** — 项目绑定，持久化到模型 `AttributeDictionary`（`su_takeoff_cloud` / `binding`）。字段：`project_code` / `project_name` / `model_key`（自动生成 UUID）/ `last_payload_hash` / `last_idempotency_key` / `last_sheet_id` / `last_model_version_id` / `last_synced_at`。`mark_synced!` 在推送成功后更新。
