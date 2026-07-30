@@ -5,7 +5,7 @@
 require 'fileutils'
 
 PROJECT_DIR = File.dirname(__dir__)
-PACKAGE_NAME = "su-takeoff-v1.0.0"
+PACKAGE_NAME = "su-takeoff-v1.1.0"
 
 def build_rbz
   tmp = File.join(PROJECT_DIR, 'tmp', 'rbz')

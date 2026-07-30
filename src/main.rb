@@ -1,6 +1,6 @@
 # src/main.rb
 module SuTakeoff
-  PLUGIN_DIR = File.dirname(__dir__)
+  PLUGIN_DIR = File.dirname(__dir__) unless const_defined?(:PLUGIN_DIR)
 
   # Singleton plugin state
   class PluginState
@@ -184,24 +184,45 @@ module SuTakeoff
     end
   end
 
+  def self.reset_plugin_state!
+    state = PluginState.instance
+    state.instance_variable_set(:@mapping, MaterialMapping.new)
+    state.instance_variable_set(:@component_mapping, ComponentMapping.new)
+    state.instance_variable_set(:@ignored, [])
+    state.instance_variable_set(:@config, {
+      'material_category_units' => [],
+      'component_category_units' => [],
+      'units' => [],
+      'layer_rules' => {},
+      'tag_defs' => {},
+      'heuristics_enabled' => true
+    })
+    state.send(:load_data)
+  end
+
+  def self.development_loader?
+    respond_to?(:dev_mode?) && dev_mode?
+  end
+
   unless file_loaded?(__FILE__)
     # Add menu
-    ui_menu = UI.menu('Plugins').add_submenu('SU Takeoff')
+    menu_name = development_loader? ? 'SU Takeoff Dev' : 'SU Takeoff'
+    ui_menu = UI.menu('Plugins').add_submenu(menu_name)
     ui_menu.add_item('材料统计') { Dialog.new.show }
     ui_menu.add_separator
     ui_menu.add_item('重新加载插件') {
-      Dir.glob(File.join(PLUGIN_DIR, 'src/**/*.rb')).sort.each { |f| load f }
-      # Reset singleton so PluginState picks up fresh data
-      PluginState.instance.instance_variable_set(:@mapping, MaterialMapping.new)
-      PluginState.instance.instance_variable_set(:@component_mapping, ComponentMapping.new)
-      PluginState.instance.instance_variable_set(:@ignored, [])
-      PluginState.instance.send(:load_data)
-      UI.messagebox("SU Takeoff 插件已重新加载")
+      if SuTakeoff.respond_to?(:reload_sources!)
+        SuTakeoff.reload_sources!
+      else
+        Dir.glob(File.join(PLUGIN_DIR, 'src/**/*.rb')).sort.each { |f| load f }
+        SuTakeoff.reset_plugin_state!
+      end
+      UI.messagebox("#{menu_name} 源码已重新加载\n#{PLUGIN_DIR}")
     }
 
     # Toolbar
-    toolbar = UI::Toolbar.new('SU Takeoff')
-    cmd = UI::Command.new('SU Takeoff') { Dialog.new.show }
+    toolbar = UI::Toolbar.new(menu_name)
+    cmd = UI::Command.new(menu_name) { Dialog.new.show }
     cmd.tooltip = 'SU Takeoff — 装修面材用量统计'
     toolbar = toolbar.add_item(cmd)
     toolbar.show
