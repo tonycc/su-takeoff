@@ -136,5 +136,30 @@ module SuTakeoff
       assert_nil @mapping.get('a').platform_sku_name
     end
 
+    def test_update_sku_preserves_existing_mapping_fields
+      @mapping.add('a', 'A材料', '瓷砖', 'm²', '600×600', 0.08, 'tile-tag')
+      @mapping.update_sku('a', 'sku-9', 'SKU-9', '某SKU 18mm')
+      r = @mapping.get('a')
+      assert_equal 'sku-9', r.platform_sku_id
+      assert_equal 'SKU-9', r.platform_sku_code
+      assert_equal '某SKU 18mm', r.platform_sku_name
+      # 其余字段保持不变
+      assert_equal 'A材料', r.material_name
+      assert_equal '瓷砖', r.category
+      assert_equal 'm²', r.unit
+      assert_equal '600×600', r.spec
+      assert_equal 0.08, r.default_waste_rate
+      assert_equal 'tile-tag', r.platform_material_tag
+    end
+
+    def test_update_sku_creates_mapping_for_unmapped_material
+      @mapping.update_sku('newmat', 'sku-1', 'SKU-1', '白橡木饰面板 18mm')
+      r = @mapping.get('newmat')
+      refute_nil r, '未映射材质应被自动建立映射'
+      assert_equal '白橡木饰面板 18mm', r.material_name # 默认取 SKU 名称
+      assert_equal 'SKU-1', r.platform_sku_code
+      assert_equal '白橡木饰面板 18mm', r.platform_sku_name
+    end
+
   end
 end

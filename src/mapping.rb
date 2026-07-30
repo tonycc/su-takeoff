@@ -34,6 +34,20 @@ module SuTakeoff
       @records[su_name]
     end
 
+    # 仅更新某材质的平台 SKU 关联，保留其余字段；未映射时自动建立映射
+    # （材料名默认取 SKU 名称，分类/单位用默认值）。
+    def update_sku(su_name, sku_id, sku_code, sku_name)
+      existing = @records[su_name]
+      if existing
+        add(su_name, existing.material_name, existing.category, existing.unit,
+            existing.spec, existing.default_waste_rate, existing.platform_material_tag,
+            sku_id, sku_code, sku_name)
+      else
+        add(su_name, normalize_optional(sku_name) || su_name, '其他', 'm²', '',
+            0.05, nil, sku_id, sku_code, sku_name)
+      end
+    end
+
     def delete(su_name)
       @records.delete(su_name)
     end
