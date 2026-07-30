@@ -111,6 +111,7 @@ module SuTakeoff
       @mapping.export_csv(csv_file.path)
       from_csv = MaterialMapping.new
       from_csv.import_csv(csv_file.path)
+      assert_equal 'sku-1', from_csv.get('a').platform_sku_id
       assert_equal 'SKU-001', from_csv.get('a').platform_sku_code
       assert_equal '白橡木饰面板 18mm', from_csv.get('a').platform_sku_name
     end
@@ -132,6 +133,7 @@ module SuTakeoff
       @mapping.load_json(file.path)
       assert_nil @mapping.get('a').platform_sku_id
       assert_nil @mapping.get('a').platform_sku_code
+      assert_nil @mapping.get('a').platform_sku_name
     end
 
   end
