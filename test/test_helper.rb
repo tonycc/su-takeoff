@@ -16,6 +16,15 @@ require 'src/strategies/skirting_linear'
 require 'src/strategies/wire_path'
 require 'src/strategies/builtin'
 require 'src/strategies/loader'
+require 'src/api/api_error'
+require 'src/api/http_response'
+require 'src/api/api_client'
+require 'src/api/credential_store'
+require 'src/api/auth_session'
+require 'src/api/project_binding'
+require 'src/api/quantity_payload_builder'
+require 'src/api/sync_outbox'
+require 'src/api/quantity_sync_service'
 
 SuTakeoff::Strategies::Builtin.register_all!
 strategies_json = File.join(File.expand_path('..', __dir__), 'data', 'strategies.json')
