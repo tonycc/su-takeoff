@@ -87,7 +87,6 @@ function renderSimpleMappingTable(mappings) {
         '<th>SU材质</th>' +
         '<th>真实材料名</th>' +
         '<th style="width:100px">平台标签</th>' +
-        '<th style="width:160px">平台SKU</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
         '<th style="width:100px">操作</th>' +
@@ -104,7 +103,6 @@ function renderSimpleMappingTable(mappings) {
         '<th>部位分布</th>' +
         '<th>真实材料名</th>' +
         '<th style="width:100px">平台标签</th>' +
-        '<th style="width:160px">平台SKU</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
         '<th style="width:100px">操作</th>' +
@@ -131,12 +129,6 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.u-platform-tag').value = m.platform_material_tag || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions(m.category);
       tr.querySelector('.u-unit').value = m.unit || 'm²';
-      tr.dataset.skuId = m.platform_sku_id || '';
-      tr.dataset.skuCode = m.platform_sku_code || '';
-      tr.dataset.skuName = m.platform_sku_name || '';
-      tr.querySelector('.u-sku').value =
-        m.platform_sku_code ? (m.platform_sku_code + ' ' + (m.platform_sku_name || '')) : '';
-      bindSkuAutocomplete(tr);
 
       var actions = tr.querySelector('.col-actions');
       actions.innerHTML = '<button>保存</button><button>删除</button>';
@@ -186,12 +178,6 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.u-platform-tag').value = m.platform_material_tag || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions('其他');
       tr.querySelector('.u-unit').value = suggested;
-      tr.dataset.skuId = m.platform_sku_id || '';
-      tr.dataset.skuCode = m.platform_sku_code || '';
-      tr.dataset.skuName = m.platform_sku_name || '';
-      tr.querySelector('.u-sku').value =
-        m.platform_sku_code ? (m.platform_sku_code + ' ' + (m.platform_sku_name || '')) : '';
-      bindSkuAutocomplete(tr);
 
       var actions = tr.querySelector('.col-actions');
       actions.innerHTML = '<button>保存</button><button>忽略</button>';
@@ -246,9 +232,6 @@ function saveMappingRow(suName) {
     category: tr.querySelector('.u-cat').value,
     unit: tr.querySelector('.u-unit').value,
     spec: (tr.querySelector('.u-spec') || {}).value || '',
-    platform_sku_id: tr.dataset.skuId || '',
-    platform_sku_code: tr.dataset.skuCode || '',
-    platform_sku_name: tr.dataset.skuName || '',
     waste_rate: 0.0
   }));
 }
@@ -280,7 +263,7 @@ function openAddMapping() {
   }));
 }
 
-// ---------------- SKU 自动补全 ----------------
+// ---------------- SKU 自动补全（供模型视图组件行 buildSkuCell 复用）----------------
 window._skuReqId = 0;
 window._skuActiveRow = null;
 

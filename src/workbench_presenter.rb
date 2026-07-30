@@ -214,13 +214,9 @@ module SuTakeoff
         }
       }
 
-      record = @mapping.get(su_mat)
-
       {
         entity_id: eid,
         su_material: su_mat,
-        sku_code: record&.platform_sku_code,
-        sku_name: record&.platform_sku_name,
         unit: primary_unit,
         qty: primary_qty.round(4),
         qty_area: qty_area.round(4),
