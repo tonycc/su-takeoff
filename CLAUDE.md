@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-SketchUp 插件，用于装修用量统计。扫描 SU 模型面/容器，按组件层级 / 空间 / 部位 / 材料分组，输出几何量报表。支持四种计量方式：**面积（m²）/ 长度（m）/ 体积（m³）/ 件数（个）**，由 `TakeoffPolicy` 4+1 档优先级决议，每个量纲背后由独立的 `Strategy` 类承担"如何聚合/如何从容器产出/默认单位"。前端仅保留按组件树视图。
+SketchUp 插件，用于装修用量统计。扫描 SU 模型面/容器，按组件层级 / 空间 / 部位 / 材料分组，输出几何量报表。支持四种计量方式：**面积（m²）/ 长度（m）/ 体积（m³）/ 件数（个）**，由 `TakeoffPolicy` 4+1 档优先级决议，每个量纲背后由独立的 `Strategy` 类承担"如何聚合/如何从容器产出/默认单位"。前端仅保留按组件树视图。v1.1.0 新增**云端同步**能力：登录认证、项目绑定、算量数据推送至供应链平台（`src/api/` 模块）。
 
 ## 运行测试
 
@@ -18,9 +18,15 @@ ruby -Itest test/test_strategy_matching.rb
 ruby -Itest test/test_length_calculator_chained.rb
 ruby -Itest test/test_compute_geometry_only.rb
 ruby -Itest test/test_wall_model.rb
+
+# 云端同步相关
+ruby -Itest test/test_api_client.rb
+ruby -Itest test/test_auth_session.rb
+ruby -Itest test/test_quantity_payload_builder.rb
+ruby -Itest test/test_quantity_sync_service.rb
 ```
 
-测试使用 Minitest，独立于 SketchUp 运行时。`test_helper.rb` require 数据层 + 全部 Strategy + LengthCalculator，并在加载时执行 `Strategies::Builtin.register_all!` 与 `Strategies::Loader.load_from_file!(data/strategies.json)` —— 任何单测都拿到一个完整的 Strategy Registry。Scanner、Dialog 无自动化测试，需在 SketchUp 内手动验证。
+测试使用 Minitest，独立于 SketchUp 运行时。`test_helper.rb` require 数据层 + 全部 Strategy + LengthCalculator + 全部 API 模块，并在加载时执行 `Strategies::Builtin.register_all!` 与 `Strategies::Loader.load_from_file!(data/strategies.json)` —— 任何单测都拿到一个完整的 Strategy Registry 和可用的 API 类。Scanner、Dialog 无自动化测试，需在 SketchUp 内手动验证。
 
 CSV 字节序列错误属于 Ruby 2.6 系统环境问题，与项目代码无关。
 
@@ -32,7 +38,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 
 ## 架构
 
-插件通过 `su_takeoff.rb` 加载 —— 一条扁平的 require 链按顺序引入 `src/` 下所有模块：数据层 → Strategy → LengthCalculator → Mapping → Policy → Calculator → Presenter → Scanner → UI。所有代码位于 `module SuTakeoff` 内。
+插件通过 `su_takeoff.rb` 加载 —— 一条扁平的 require 链按顺序引入 `src/` 下所有模块：数据层 → Strategy → LengthCalculator → Mapping → API → Policy → Calculator → Presenter → Scanner → UI。所有代码位于 `module SuTakeoff` 内，API 模块位于 `SuTakeoff::Api`。
 
 ### 数据层（可单元测试，无 SU 依赖）
 
@@ -85,12 +91,37 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 - **`ui/dialog.rb`** — HtmlDialog 桥接。`send_workbench_state` 推全量数据，所有回调通过 `add_action_callback` + JS `sketchup.<action>()` 通信，数据以 JSON 经 `execute_script` 传递。
 - **`main.rb`** — `PluginState` 单例，管理配置持久化。初始化时调 `Strategies::Builtin.register_all!` + `Strategies::Loader.load_from_file!`（仅首次，幂等）。`takeoff_policy` 每次返回基于最新 config 的新 Policy（避免缓存陈旧规则）。注册菜单、工具栏。
 
+### 云端同步层（`src/api/`，可单元测试，无 SU 依赖）
+
+v1.1.0 新增。实现登录认证、项目绑定、算量 Payload 构建与推送。设计基线见 `docs/API对接设计方案.md`，服务端契约见 `docs/su-plugin-integration.md`。客户端标识 `CLIENT_ID = 'su-plugin'`，协议版本 SU v2。
+
+- **`api_error.rb`** — `ApiError < StandardError`，字段 `status/code/details/retryable/body`。所有 HTTP 错误统一转为此异常。
+- **`http_response.rb`** — `HttpResponse` 值对象（status/body/headers），`ApiClient` 内部使用。
+- **`api_client.rb`** — HTTP 客户端。5 个接口：`login` / `refresh` / `logout` / `me`（`/identity/me`）/ `push_quantities`。超时配置：连接 10s、登录 30s、推送 120s。`normalize_base_url` 在 `environment=production` 时强制 HTTPS。支持 `transport:` 注入（测试用 mock）。
+- **`credential_store.rb`** — Token 安全存储抽象。`CredentialStore.default` 按平台分派：macOS → `MacOSKeychainStore`（系统 Keychain），其他 → `UnavailableStore`（降级为进程内会话）。`MemoryCredentialStore` 供测试。**当前仅实现 macOS Keychain，Windows Credential Manager 未实现**。
+- **`auth_session.rb`** — 会话状态机。状态：`signed_out → authenticating → signed_in / tenant_selection_required / error`。`login` 支持多租户（`TENANT_SELECTION_REQUIRED` 时返回租户列表）；`restore` 从安全存储恢复会话；`refresh!` 刷新 access_token；`with_access_token_retry` 401 单次重试（防循环）；`can_push?` 校验 `quantity:ingest` 权限。access_token 存内存，refresh_token 存 CredentialStore。
+- **`project_binding.rb`** — 项目绑定，持久化到模型 `AttributeDictionary`（`su_takeoff_cloud` / `binding`）。字段：`project_code` / `project_name` / `model_key`（自动生成 UUID）/ `last_payload_hash` / `last_idempotency_key` / `last_sheet_id` / `last_model_version_id` / `last_synced_at`。`mark_synced!` 在推送成功后更新。
+- **`quantity_payload_builder.rb`** — 消费 Scanner 结果 + 映射表 + Policy + Binding，输出 `BuildResult(payload, payload_hash, issues)`。稳定编码：`c-<SHA256[0,16]>` / `f-<SHA256[0,16]>` / `p-<SHA256[0,16]>`（前缀区分 component/face/part）。规范化：按 code 排序、4 位小数、洞口扣减、跳过 ignored 材料、未映射材料阻止推送。`payload_hash = SHA256(JSON)`，用于幂等。
+- **`sync_outbox.rb`** — 失败推送的发件箱。按 `idempotency_key` 哈希命名 JSON 文件，`upsert` / `delete` / `all` / `find`。限制：最多 50 条 / 10MB。同一 key 只保留一条（保留原始 `created_at`）。
+- **`quantity_sync_service.rb`** — 推送编排。`busy` 锁防并发；`build_payload` → `do_push_built`（401 重试 via `with_access_token_retry`）→ 退避重试（1/2/4 秒 + 抖动，最多 3 次）→ 成功更新 binding / 失败写 outbox。返回 `SyncResult(success, payload, payload_hash, issues, response, error, attempts, outbox_record)`。
+
+**登录门禁**：进入插件先校验登录状态，未登录锁定扫描/映射/设置/定位/标签功能；登录后缺 `quantity:ingest` 权限时仅禁用云端推送。
+
+**实施进度**（详见设计文档 §13）：
+- ✅ 阶段 1：HTTP 与认证（ApiClient / CredentialStore / AuthSession / 登录 UI）
+- ✅ 阶段 2：稳定编码和项目绑定（persistent_id / ProjectBinding / 绑定 UI）
+- ✅ 阶段 3：材料标签和 Payload Builder（platform_material_tag / QuantityPayloadBuilder）
+- ✅ 阶段 4：推送和失败恢复（SyncService / Outbox / 推送 UI / 后台线程）
+- ⬜ 阶段 0：服务端契约确认（生产 URL / 错误结构 / component_type 枚举 / payload 限制等 10 项待确认）
+- ⬜ 阶段 5：联调与发布（测试租户验证 / 多租户 / 幂等 / 大模型 413 / Windows 安全存储）
+
 ### 前端（HtmlDialog 内运行，全局命名空间）
 
 - `ui/js/model_view.js` — 按组件树形视图。每节点展开后显示材质汇总行 → 按规格（宽×高 mm）分组 → 面明细。启发式行橙色边框 +「待确认」徽标。支持搜索、空容器/隐藏项开关、合并相同组件、CSV 导出。
 - `ui/js/settings.js` — 设置页：分类单位配置、算量标签定义（支持多选复合如 `count+length`）、启发式开关与阈值、忽略材料。
 - `ui/js/mapping.js` — 材料映射管理（含未映射材料快速映射）。
 - `ui/js/comp_mapping.js` — 组件映射管理。
+- `ui/js/cloud_sync.js` — 云端同步页：独立登录页（账号/密码/租户下拉/环境信息）、云端同步主页（推送按钮/账号摘要/项目绑定面板/结果展示）。通过 `callSketchUp` 调用 Ruby 回调（`cloudLogin` / `cloudLogout` / `saveProjectBinding` / `cloudPush` / `get_cloud_state`）。
 
 ### 数据文件（`data/` 目录）
 
@@ -99,6 +130,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 - `default_component_mapping.json` — 组件定义 → 材料
 - `ignored_materials.json` — 忽略的材质列表
 - `strategies.json` — 用户自定义 Strategy 变体（base_strategy + match_rules），目前内置 3 个示例：`skirting_linear_default` / `pipe_length_default`（正则匹配管道|管材|PVC|PPR|DN\d+）/ `handrail_length_default`（扶手/栏杆）
+- `api_config.json` — 云端同步环境配置（`environment` + `base_url`）。当前默认 `development` / `http://127.0.0.1:8000`（本地联调）。正式发布前必须改为生产 HTTPS 域名。`environment=production` 时 ApiClient 强制 HTTPS，前端不可覆盖 Base URL。
 
 配置优先级：模型 AttributeDictionary（随 SKP 文件走）> `data/` JSON 文件 > 默认值。
 
@@ -152,6 +184,11 @@ Scanner → WorkbenchPresenter → JSON → frontend _workbench → renderPositi
 - **响应式数据流**：任何变更触发 `send_workbench_state` → 前端 `_workbench` 被替换 → 所有视图重绘。切视图不调 Ruby。
 - **ComponentInstance vs Group 坐标空间**：`entity.definition.entities` 返回定义层边（不含实例 scale），`entity.volume` 和 `entity.bounds` 含实例 transform。`build_length_ctx` 中 `edge_scale = parent_scale × entity_scale` 统一两套坐标系。
 - **显式优于隐式**：会改变算量结果的判定必须有视觉锚点。几何启发只能产生「待确认建议」，不默默改结果。
+- **Token 安全**：access_token 仅存内存，refresh_token 存系统安全存储（macOS Keychain）。密码不入日志、不持久化。安全存储不可用时降级为进程内会话（重启需重新登录）。
+- **推送幂等**：`idempotency_key = su-v2-<model_key>-<payload_hash[0,16]>`，payload_hash 基于规范化 JSON 的 SHA256。同一模型内容不变则 key 不变，服务端据此去重。
+- **云端同步不阻塞 UI**：推送在后台线程执行（`Thread.new`），结果通过 `dialog.execute_script` 回主线程派发。Dialog 销毁后安全跳过回调。
+- **API 测试不依赖网络和 SU 运行时**：通过 `transport:` 注入 mock HTTP 层、`sleeper:` / `jitter:` 注入跳过真实等待、`persist_success: false` 跳过模型写入。
+- **服务端错误响应格式（FastAPI）**：业务错误为 `{"detail": {"code": "...", "message": "..."}}`，422 校验为 `{"detail": [{type, loc, msg}]}` 数组。`ApiClient#unwrap_detail` 统一解包。`ApiError.body` 保留原始响应（含 `detail` 信封），上层（如 `AuthSession#tenant_options_from`）从 `body['detail']` 读取扩展字段。生产 Base URL：`https://gzzyai.com`。
 
 ## 扩展须知
 
@@ -159,6 +196,9 @@ Scanner → WorkbenchPresenter → JSON → frontend _workbench → renderPositi
 - **新增命名约定策略（如 龙骨/防水）**：写一个继承 `SolidLinear` 或对应基类的 Strategy，`DEFAULT_MATCH_RULES` 配关键字，`Builtin.register_all!` 注册（不传 `default_for` 避免冲突）；或写进 `data/strategies.json` 复用现有 base。
 - **新增长度算法**：写一个 `LengthCalculators::Base` 子类实现 `compute`，在专用 Strategy 中持有实例 + 暴露 `compute_length(entity, ctx)`；Scanner `compute_length_via_strategy` 会自动接管。
 - **Scanner `collect_container`（~110 行）是容器决议的核心**。修改时注意 5 条分支（复合标签 / aggregate / try_emit_solid / 纯边线 / 下钻）的互斥与顺序。
+- **新增 API 接口**：在 `ApiClient` 中添加方法（参照现有 5 个接口的模式），`AuthSession` 或 `QuantitySyncService` 中编排调用。所有 HTTP 错误统一转 `ApiError`。测试通过 `transport:` mock 注入，不发真实请求。
+- **Payload 字段变更**：修改 `QuantityPayloadBuilder` 时注意稳定编码（code 排序 + 4 位小数 + SHA256 幂等 hash）。任何字段变更都会改变 `payload_hash`，触发重新推送。设计文档 §7 和契约文档 `su-plugin-integration.md` 是字段定义的权威来源。
+- **CredentialStore 平台扩展**：当前仅实现 macOS Keychain（`security` CLI）。新增平台需继承 `CredentialStore` 基类实现 `read/write/delete`，并在 `CredentialStore.default` 中注册平台判断。
 
 ## 沟通语言
 
