@@ -196,4 +196,17 @@ class TestApiClient < Minitest::Test
     err = assert_raises(SuTakeoff::Api::ApiError) { client.materials(access_token: 'tok') }
     assert_equal('MODULE_DISABLED', err.code)
   end
+
+  def test_materials_default_query_values
+    transport = Transport.new(FakeResponse.new('200', '{"total":0,"items":[]}'))
+    client = SuTakeoff::Api::ApiClient.new(base_url: 'https://api.example.com', transport: transport)
+
+    client.materials(access_token: 'tok')
+
+    query = URI.decode_www_form(transport.calls.first[:uri].query).to_h
+    assert_equal '1', query['page']
+    assert_equal '20', query['page_size']
+    assert_equal 'active', query['status']
+    refute query.key?('keyword')
+  end
 end
