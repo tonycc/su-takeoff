@@ -323,9 +323,9 @@ function bindSkuAutocomplete(tr) {
 }
 
 window.receiveSkuResults = function(data) {
-  if (data.req_id !== window._skuReqId) return; // 丢弃过期响应
+  if (Number(data.req_id) !== window._skuReqId) return; // 丢弃过期响应
   var tr = window._skuActiveRow;
-  if (!tr) return;
+  if (!tr || !tr.isConnected) return; // 行已重建/分离则忽略
   var dd = tr.querySelector('.sku-dropdown');
   if (!dd) return;
   dd.innerHTML = '';
