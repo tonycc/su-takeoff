@@ -33,6 +33,7 @@ module SuTakeoff
 
     'src/mapping',
     'src/component_mapping',
+    'src/component_sku_mapping',
     'src/api/api_error',
     'src/api/error_translator',
     'src/api/http_response',
