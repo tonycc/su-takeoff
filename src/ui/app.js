@@ -16,42 +16,132 @@ document.querySelectorAll('.sb-nav').forEach(function(btn) {
 });
 
 function switchPage(page) {
+  if (!window._pluginUnlocked && page !== 'login') {
+    page = 'login';
+  }
+  var previousPage = window._currentPage;
   window._currentPage = page;
+  document.body.classList.toggle('login-page-active', page === 'login');
   document.querySelectorAll('.sb-nav').forEach(function(b) { b.classList.remove('active'); });
-  document.querySelector('.sb-nav[data-page="' + page + '"]').classList.add('active');
+  var nav = document.querySelector('.sb-nav[data-page="' + page + '"]');
+  if (nav) nav.classList.add('active');
   document.querySelectorAll('.page-content').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById('page-' + page).style.display = 'block';
+  if (page === 'login' && previousPage !== 'login') callSketchUp('get_cloud_state');
   if (page === 'mapping') callSketchUp('get_mappings');
   if (page === 'comp-mapping') callSketchUp('get_component_mappings');
   if (page === 'settings') callSketchUp('get_settings');
-  if (isView) renderCurrentPage();
+  if (page === 'cloud') callSketchUp('get_cloud_state');
+  if (window._workbench) renderCurrentPage();
 }
 
 // ---------------- Bridge ----------------
 function callSketchUp(action, json) {
-  if (typeof sketchup !== 'undefined') {
+  if (typeof sketchup !== 'undefined' && sketchup[action]) {
     sketchup[action](json || '');
   } else {
-    console.warn('Not running in SketchUp HtmlDialog');
+    handleBrowserPreview(action, json || '');
   }
+}
+
+function browserPreviewCloudState(extra) {
+  var signedIn = !!window._browserPreviewSignedIn;
+  var state = {
+    api_configured: true,
+    api_environment: 'browser-preview',
+    api_base_url: 'http://127.0.0.1:8000',
+    auth: {
+      status: signedIn ? 'signed_in' : 'signed_out',
+      account: window._browserPreviewAccount || '',
+      can_push: signedIn
+    },
+    binding: { model_key: 'browser-preview-model' },
+    has_scan: false,
+    busy: false,
+    force_login: !signedIn
+  };
+  Object.keys(extra || {}).forEach(function(key) { state[key] = extra[key]; });
+  if (typeof window.renderCloudState === 'function') window.renderCloudState(state);
+  if (typeof window.renderLoginState === 'function') window.renderLoginState(state);
+}
+
+function handleBrowserPreview(action, json) {
+  if (action === 'get_cloud_state') {
+    browserPreviewCloudState({
+      status_message: window._browserPreviewSignedIn ? '浏览器预览：已模拟登录' : '浏览器预览：请登录后继续'
+    });
+    return;
+  }
+  if (action === 'cloud_login') {
+    var data = {};
+    try { data = JSON.parse(json || '{}'); } catch(e) { data = {}; }
+    if (!String(data.username || '').trim()) {
+      browserPreviewCloudState({ error: { message: '请输入账号' } });
+      return;
+    }
+    if (!String(data.password || '')) {
+      browserPreviewCloudState({
+        error: { message: '请输入密码' },
+        login_username: String(data.username || '').trim()
+      });
+      return;
+    }
+    window._browserPreviewSignedIn = true;
+    window._browserPreviewAccount = String(data.username || '').trim();
+    browserPreviewCloudState({ status_message: '浏览器预览：登录状态已更新', clear_password: true });
+    return;
+  }
+  if (action === 'cloud_logout') {
+    window._browserPreviewSignedIn = false;
+    window._browserPreviewAccount = '';
+    browserPreviewCloudState({ status_message: '浏览器预览：已退出登录', force_login: true });
+    return;
+  }
+  if (!window._pluginUnlocked) {
+    browserPreviewCloudState({ error: { message: '请先登录平台账号后再使用插件功能' }, force_login: true });
+    return;
+  }
+  console.warn('Not running in SketchUp HtmlDialog:', action);
 }
 
 // ---------------- Scan entry ----------------
 function showLoading() {
+  if (!window._pluginUnlocked) {
+    switchPage('login');
+    return;
+  }
   document.getElementById('loading-overlay').style.display = 'flex';
   document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = true; });
 }
 function hideLoading() {
   document.getElementById('loading-overlay').style.display = 'none';
-  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = false; });
+  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = !window._pluginUnlocked; });
 }
 
-function scanAll() { showLoading(); callSketchUp('scan_all'); }
-function scanSelected() { showLoading(); callSketchUp('scan_selected'); }
+function scanAll() {
+  if (!window._pluginUnlocked) { switchPage('login'); return; }
+  showLoading(); callSketchUp('scan_all');
+}
+function scanSelected() {
+  if (!window._pluginUnlocked) { switchPage('login'); return; }
+  showLoading(); callSketchUp('scan_selected');
+}
 
 // ---------------- Workbench state ----------------
 window._workbench = null;
-window._currentPage = 'position';
+window._currentPage = 'login';
+window._pluginUnlocked = false;
+
+function setPluginUnlocked(unlocked) {
+  window._pluginUnlocked = !!unlocked;
+  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = !window._pluginUnlocked; });
+  document.querySelectorAll('.sb-nav').forEach(function(b) {
+    b.disabled = !window._pluginUnlocked;
+  });
+  if (!window._pluginUnlocked && window._currentPage !== 'login') switchPage('login');
+}
+
+setPluginUnlocked(false);
 
 window.receiveFaces = function(data) {
   if (!window._workbench) return;

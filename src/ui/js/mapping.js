@@ -86,6 +86,7 @@ function renderSimpleMappingTable(mappings) {
         '<th style="width:40px">#</th>' +
         '<th>SU材质</th>' +
         '<th>真实材料名</th>' +
+        '<th style="width:100px">平台标签</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
         '<th style="width:100px">操作</th>' +
@@ -101,6 +102,7 @@ function renderSimpleMappingTable(mappings) {
         '<th>面数/面积</th>' +
         '<th>部位分布</th>' +
         '<th>真实材料名</th>' +
+        '<th style="width:100px">平台标签</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
         '<th style="width:100px">操作</th>' +
@@ -124,6 +126,7 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.col-seq').textContent = idx + 1;
       tr.querySelector('.col-su-name').textContent = m.su_material_name;
       tr.querySelector('.u-mat').value = m.material_name || '';
+      tr.querySelector('.u-platform-tag').value = m.platform_material_tag || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions(m.category);
       tr.querySelector('.u-unit').value = m.unit || 'm²';
 
@@ -172,6 +175,7 @@ function renderSimpleMappingTable(mappings) {
       }
 
       tr.querySelector('.u-mat').value = '';
+      tr.querySelector('.u-platform-tag').value = m.platform_material_tag || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions('其他');
       tr.querySelector('.u-unit').value = suggested;
 
@@ -224,6 +228,7 @@ function saveMappingRow(suName) {
   callSketchUp('save_mapping', JSON.stringify({
     su_name: suName,
     material_name: matName,
+    platform_material_tag: (tr.querySelector('.u-platform-tag') || {}).value || '',
     category: tr.querySelector('.u-cat').value,
     unit: tr.querySelector('.u-unit').value,
     spec: (tr.querySelector('.u-spec') || {}).value || '',
@@ -253,6 +258,7 @@ function openAddMapping() {
   var spec = prompt('规格 (可选):') || '';
   callSketchUp('save_mapping', JSON.stringify({
     su_name: suName, material_name: matName, category: cat,
+    platform_material_tag: '',
     unit: 'm²', spec: spec, waste_rate: 0.0
   }));
 }

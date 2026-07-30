@@ -1,4 +1,8 @@
 # src/ui/dialog.rb
+require 'timeout'
+require 'thread'
+require 'uri'
+
 module SuTakeoff
   class FaceSelectionObserver < Sketchup::SelectionObserver
     def initialize(html_dialog)
@@ -27,9 +31,11 @@ module SuTakeoff
   end
 
   class Dialog
+    CLOUD_LOGIN_TIMEOUT_SECONDS = 15 unless const_defined?(:CLOUD_LOGIN_TIMEOUT_SECONDS)
+
     def initialize
       @dialog = UI::HtmlDialog.new(
-        dialog_title: 'SU Takeoff — 材料统计',
+        dialog_title: dialog_title,
         preferences_key: 'su_takeoff_dialog',
         scrollable: true,
         resizable: true,
@@ -39,38 +45,49 @@ module SuTakeoff
         top: 200,
         style: UI::HtmlDialog::STYLE_DIALOG
       )
-      @dialog.set_file(File.join(__dir__, 'index.html'))
+      load_dialog_file
       @last_scan = nil
 
-      @dialog.add_action_callback('scan_all') { |_ctx| do_scan(selection_only: false) }
-      @dialog.add_action_callback('scan_selected') { |_ctx| do_scan(selection_only: true) }
+      @dialog.add_action_callback('scan_all') { |_ctx| require_login! && do_scan(selection_only: false) }
+      @dialog.add_action_callback('scan_selected') { |_ctx| require_login! && do_scan(selection_only: true) }
 
-      @dialog.add_action_callback('get_mappings') { |_ctx| send_mappings }
-      @dialog.add_action_callback('save_mapping') { |_ctx, json| save_mapping(json) }
-      @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| delete_mapping(su_name) }
-      @dialog.add_action_callback('import_csv') { |_ctx| import_csv_dialog }
-      @dialog.add_action_callback('export_csv') { |_ctx| export_csv_dialog }
-      @dialog.add_action_callback('get_settings') { |_ctx| send_settings }
+      @dialog.add_action_callback('get_mappings') { |_ctx| require_login! && send_mappings }
+      @dialog.add_action_callback('save_mapping') { |_ctx, json| require_login! && save_mapping(json) }
+      @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| require_login! && delete_mapping(su_name) }
+      @dialog.add_action_callback('import_csv') { |_ctx| require_login! && import_csv_dialog }
+      @dialog.add_action_callback('export_csv') { |_ctx| require_login! && export_csv_dialog }
+      @dialog.add_action_callback('get_settings') { |_ctx| require_login! && send_settings }
 
-      @dialog.add_action_callback('locate_material') { |_ctx, su_name| locate_material(su_name) }
-      @dialog.add_action_callback('locate_face') { |_ctx, json| locate_face(json) }
-      @dialog.add_action_callback('locate_entity') { |_ctx, json| locate_entity(json) }
-      @dialog.add_action_callback('ignore_material') { |_ctx, name| ignore_material(name) }
-      @dialog.add_action_callback('unignore') { |_ctx, name| unignore(name) }
-      @dialog.add_action_callback('clear_ignored') { |_ctx| clear_ignored }
-      @dialog.add_action_callback('save_config') { |_ctx, json| save_config(json) }
+      @dialog.add_action_callback('locate_material') { |_ctx, su_name| require_login! && locate_material(su_name) }
+      @dialog.add_action_callback('locate_face') { |_ctx, json| require_login! && locate_face(json) }
+      @dialog.add_action_callback('locate_entity') { |_ctx, json| require_login! && locate_entity(json) }
+      @dialog.add_action_callback('ignore_material') { |_ctx, name| require_login! && ignore_material(name) }
+      @dialog.add_action_callback('unignore') { |_ctx, name| require_login! && unignore(name) }
+      @dialog.add_action_callback('clear_ignored') { |_ctx| require_login! && clear_ignored }
+      @dialog.add_action_callback('save_config') { |_ctx, json| require_login! && save_config(json) }
 
-      @dialog.add_action_callback('get_component_mappings') { |_ctx| send_component_mappings }
-      @dialog.add_action_callback('save_component_mapping') { |_ctx, json| save_component_mapping(json) }
-      @dialog.add_action_callback('delete_component_mapping') { |_ctx, def_name| delete_component_mapping(def_name) }
+      @dialog.add_action_callback('get_component_mappings') { |_ctx| require_login! && send_component_mappings }
+      @dialog.add_action_callback('save_component_mapping') { |_ctx, json| require_login! && save_component_mapping(json) }
+      @dialog.add_action_callback('delete_component_mapping') { |_ctx, def_name| require_login! && delete_component_mapping(def_name) }
 
       # 标记系统 —— 为群组/组件分配/清除标记
-      @dialog.add_action_callback('set_entity_tag') { |_ctx, json| set_entity_tag(json) }
+      @dialog.add_action_callback('set_entity_tag') { |_ctx, json| require_login! && set_entity_tag(json) }
 
       # 按需加载面详情（懒加载，减小初始 JSON 体积）
-      @dialog.add_action_callback('get_faces') { |_ctx, json| get_faces(json) }
+      @dialog.add_action_callback('get_faces') { |_ctx, json| require_login! && get_faces(json) }
+
+      # 云端同步
+      @dialog.add_action_callback('get_cloud_state') { |_ctx| send_cloud_state }
+      @dialog.add_action_callback('cloud_login') { |_ctx, json| cloud_login(json) }
+      @dialog.add_action_callback('cloud_logout') { |_ctx| cloud_logout }
+      @dialog.add_action_callback('save_project_binding') { |_ctx, json| save_project_binding(json) }
+      @dialog.add_action_callback('cloud_push') { |_ctx| cloud_push }
 
       @faces_cache = {}
+      @cloud_busy = false
+      @cloud_ui_queue = Queue.new
+      @cloud_login_request_id = nil
+      @cloud_ui_pump_timer = nil
     end
 
     def show
@@ -78,9 +95,46 @@ module SuTakeoff
       model = Sketchup.active_model
       @selection_observer = FaceSelectionObserver.new(@dialog)
       model.selection.add_observer(@selection_observer)
+      send_cloud_state(status_message: '正在校验登录状态...', force_login: true)
+      restore_cloud_session
     end
 
     private
+
+    def dialog_title
+      dev_mode? ? 'SU Takeoff Dev — 材料统计' : 'SU Takeoff — 材料统计'
+    end
+
+    def dev_mode?
+      SuTakeoff.respond_to?(:dev_mode?) && SuTakeoff.dev_mode?
+    end
+
+    def load_dialog_file
+      index_path = File.join(__dir__, 'index.html')
+      return @dialog.set_file(index_path) unless dev_mode?
+
+      stamp = Time.now.to_i.to_s
+      base_href = "file://#{File.expand_path(__dir__).gsub(' ', '%20')}/"
+      html = File.read(index_path)
+      html = html.sub('<head>', "<head>\n  <base href=\"#{base_href}\">")
+      html = html.gsub(/(src|href)="([^"]+\.(?:js|css))(?:\?v=[^"]*)?"/) do
+        "#{Regexp.last_match(1)}=\"#{Regexp.last_match(2)}?v=#{stamp}\""
+      end
+      @dialog.set_html(html)
+    rescue => e
+      puts "[SuTakeoff] Warning: dev HtmlDialog load failed: #{e.message}"
+      @dialog.set_file(File.join(__dir__, 'index.html'))
+    end
+
+    def require_login!
+      return true if auth_session.signed_in?
+
+      send_cloud_state(
+        error: { message: '请先登录平台账号后再使用插件功能' },
+        force_login: true
+      )
+      false
+    end
 
     def do_scan(selection_only:)
       clear_face_highlight  # 尽力清除，失败不阻塞
@@ -368,7 +422,8 @@ module SuTakeoff
       data = JSON.parse(json)
       m = PluginState.instance.mapping
       m.add(data['su_name'], data['material_name'], data['category'],
-            data['unit'], data['spec'], (data['waste_rate'] || 0.0).to_f)
+            data['unit'], data['spec'], (data['waste_rate'] || 0.0).to_f,
+            data['platform_material_tag'])
       m.save_json(PluginState.mapping_path)
       PluginState.instance.save_mapping_to_model_dict
       send_mappings
@@ -427,7 +482,8 @@ module SuTakeoff
       cm = PluginState.instance.component_mapping
       cm.add(data['definition_name'], data['material_name'], data['category'],
              data['unit'] || '个', data['spec'] || '', data['waste_rate'].to_f,
-             data['counting_method'] || 'expand')
+             data['counting_method'] || 'expand', data['platform_material_tag'],
+             data['platform_component_type'])
       cm.save_json(PluginState.component_mapping_path)
       PluginState.instance.save_component_mapping_to_model_dict
       send_component_mappings
@@ -537,6 +593,412 @@ module SuTakeoff
     rescue => e
       msg = JSON.generate({ error: e.message, backtrace: e.backtrace.first(5) })
       @dialog.execute_script("window.renderWorkbenchError(#{msg})")
+    end
+
+    def send_cloud_state(extra = {})
+      extra = normalize_cloud_state_extra(extra)
+      data = {
+        api_configured: api_configured?,
+        api_environment: api_config['environment'],
+        api_base_url: api_config['base_url'],
+        auth: auth_state_hash,
+        binding: project_binding_hash,
+        has_scan: !!@last_scan,
+        busy: @cloud_busy
+      }.merge(extra)
+      json = JSON.generate(data)
+      @dialog.execute_script("window.renderCloudState && window.renderCloudState(#{json}); window.renderLoginState && window.renderLoginState(#{json});")
+    rescue => e
+      send_cloud_error(e)
+    end
+
+    def cloud_login(json)
+      data = JSON.parse(json)
+      return send_cloud_error_message('API Base URL 未配置') unless api_configured?
+      return send_cloud_error_message('请输入账号') if data['username'].to_s.strip.empty?
+
+      username = data['username'].to_s
+      password = data['password'].to_s
+      tenant_id = data['tenant_id']
+      return send_cloud_error_message('请输入密码', login_username: username) if password.empty?
+
+      @cloud_busy = true
+      @cloud_login_request_id = next_cloud_request_id
+      request_id = @cloud_login_request_id
+      send_cloud_state(
+        status_message: '正在登录...',
+        login_username: username
+      )
+      ensure_cloud_ui_pump
+      schedule_cloud_login_timeout(request_id, username)
+      session = build_auth_session
+      Thread.new do
+        begin
+          state = Timeout.timeout(CLOUD_LOGIN_TIMEOUT_SECONDS) do
+            session.login(username: username, password: password, tenant_id: tenant_id)
+          end
+          run_on_ui_thread do
+            if active_cloud_login_request?(request_id)
+              @auth_session = session
+              @cloud_busy = false
+              @cloud_login_request_id = nil
+              if state[:status] == :tenant_selection_required
+                send_cloud_state(
+                  status_message: '请选择租户后重新登录',
+                  login_username: username,
+                  force_login: true
+                )
+              else
+                save_last_account(username)
+                send_cloud_state(status_message: '登录状态已更新', clear_password: true)
+              end
+            end
+          end
+        rescue Timeout::Error
+          run_on_ui_thread do
+            finish_cloud_login_error(request_id, '登录超时，请检查网络连接后重试', username)
+          end
+        rescue => e
+          run_on_ui_thread do
+            finish_cloud_login_error(request_id, e, username)
+          end
+        end
+      end
+    rescue => e
+      @cloud_busy = false
+      @cloud_login_request_id = nil
+      send_cloud_error(e)
+    end
+
+    def cloud_logout
+      @cloud_busy = true
+      send_cloud_state(status_message: '正在退出登录...')
+      ensure_cloud_ui_pump
+      Thread.new do
+        auth_session.logout
+        run_on_ui_thread do
+          @cloud_busy = false
+          clear_last_account
+          send_cloud_state(status_message: '已退出登录')
+        end
+      rescue => e
+        run_on_ui_thread do
+          @cloud_busy = false
+          send_cloud_error(e)
+        end
+      end
+    end
+
+    def save_project_binding(json)
+      return unless require_login!
+
+      data = JSON.parse(json)
+      binding = Api::ProjectBinding.load(Sketchup.active_model)
+      binding.update_project!(
+        project_code: data['project_code'],
+        project_name: data['project_name']
+      )
+      send_cloud_state(status_message: '项目绑定已保存')
+    rescue => e
+      send_cloud_error(e)
+    end
+
+    def cloud_push
+      return unless require_login!
+
+      return send_cloud_error_message('请先扫描模型') unless @last_scan
+      return send_cloud_error_message('API Base URL 未配置') unless api_configured?
+      return send_cloud_error_message('请先登录平台账号') unless auth_session.signed_in?
+      return send_cloud_error_message('当前账号缺少 quantity:ingest 权限') unless auth_session.can_push?
+      return send_cloud_error_message('已有推送任务正在执行') if @cloud_busy
+
+      binding = Api::ProjectBinding.load(Sketchup.active_model)
+      build = Api::QuantityPayloadBuilder.new(
+        items: @last_scan[:items],
+        openings: @last_scan[:openings],
+        mapping: PluginState.instance.mapping,
+        component_mapping: PluginState.instance.component_mapping,
+        policy: PluginState.instance.takeoff_policy,
+        binding: binding,
+        ignored: PluginState.instance.ignored
+      ).build
+
+      unless build.issues.empty?
+        send_cloud_state(sync_result: { success: false, issues: build.issues })
+        return
+      end
+
+      @cloud_busy = true
+      send_cloud_state(status_message: '正在上传算量数据...')
+      ensure_cloud_ui_pump
+
+      Thread.new do
+        outbox = Api::SyncOutbox.new(dir: cloud_outbox_dir)
+        sync = Api::QuantitySyncService.new(
+          api_client: api_client,
+          auth_session: auth_session,
+          outbox: outbox,
+          binding: binding,
+          mapping: PluginState.instance.mapping,
+          component_mapping: PluginState.instance.component_mapping,
+          policy: PluginState.instance.takeoff_policy,
+          ignored: PluginState.instance.ignored,
+          persist_success: false
+        )
+        result = sync.push_built(build)
+        run_on_ui_thread { finish_cloud_push(binding, build, result) }
+      rescue => e
+        run_on_ui_thread do
+          @cloud_busy = false
+          send_cloud_error(e)
+        end
+      end
+    rescue => e
+      @cloud_busy = false
+      send_cloud_error(e)
+    end
+
+    def finish_cloud_push(binding, build, result)
+      @cloud_busy = false
+      if result.success?
+        response = result.response || {}
+        binding.mark_synced!(
+          payload_hash: build.payload_hash,
+          idempotency_key: build.payload[:idempotency_key],
+          sheet_id: response['sheet_id'],
+          model_version_id: response['model_version_id']
+        )
+      end
+      send_cloud_state(sync_result: serialize_sync_result(result))
+    rescue => e
+      send_cloud_error(e)
+    end
+
+    def serialize_sync_result(result)
+      {
+        success: result.success?,
+        attempts: result.attempts,
+        issues: result.issues || [],
+        response: result.response,
+        error: result.error && {
+          status: result.error.status,
+          code: result.error.code,
+          message: result.error.message,
+          retryable: result.error.retryable?
+        },
+        outbox_saved: !!result.outbox_record,
+        payload_hash: result.payload_hash,
+        idempotency_key: result.payload && result.payload[:idempotency_key]
+      }
+    end
+
+    def auth_state_hash
+      return { status: 'unconfigured', can_push: false } unless api_configured?
+
+      state = auth_session.state
+      state[:status] = state[:status].to_s
+      if auth_session.last_error
+        state[:last_error] = {
+          code: auth_session.last_error.code,
+          message: login_error_message(auth_session.last_error)
+        }
+      end
+      state
+    rescue => e
+      { status: 'error', can_push: false, last_error: { message: login_error_message(e) } }
+    end
+
+    def project_binding_hash
+      Api::ProjectBinding.load(Sketchup.active_model).to_h
+    rescue
+      {}
+    end
+
+    def auth_session
+      @auth_session ||= build_auth_session
+    end
+
+    def build_auth_session
+      Api::AuthSession.new(
+        api_client: api_client,
+        credential_store: Api::CredentialStore.default(namespace: credential_namespace)
+      )
+    end
+
+    def credential_namespace
+      env = api_config['environment'].to_s.strip
+      host = begin
+        URI.parse(api_config['base_url'].to_s).host
+      rescue
+        nil
+      end
+      suffix = [env.empty? ? 'production' : env, host.to_s].reject(&:empty?).join(':')
+      "su_takeoff_api:#{suffix}"
+    end
+
+    def restore_cloud_session
+      return send_cloud_state(status_message: '请先配置 API 地址', force_login: true) unless api_configured?
+
+      account = last_account.to_s.strip
+      if account.empty?
+        send_cloud_state(status_message: '请先登录平台账号', force_login: true)
+        return
+      end
+
+      @cloud_busy = true
+      send_cloud_state(status_message: '正在恢复登录状态...', force_login: true)
+      ensure_cloud_ui_pump
+      Thread.new do
+        begin
+          auth_session.restore(username: account)
+          run_on_ui_thread do
+            @cloud_busy = false
+            message = auth_session.signed_in? ? '登录状态已恢复' : '请先登录平台账号'
+            send_cloud_state(status_message: message, force_login: !auth_session.signed_in?)
+          end
+        rescue => e
+          run_on_ui_thread do
+            @cloud_busy = false
+            send_cloud_error(e, force_login: true)
+          end
+        end
+      end
+    rescue => e
+      @cloud_busy = false
+      send_cloud_error(e)
+    end
+
+    def save_last_account(username)
+      Sketchup.write_default('SuTakeoff', 'api_last_account', username.to_s.strip)
+    rescue
+      @last_account_fallback = username.to_s.strip
+    end
+
+    def last_account
+      Sketchup.read_default('SuTakeoff', 'api_last_account', '') rescue @last_account_fallback
+    end
+
+    def clear_last_account
+      Sketchup.write_default('SuTakeoff', 'api_last_account', '')
+    rescue
+      @last_account_fallback = ''
+    end
+
+    def api_client
+      cfg = api_config
+      Api::ApiClient.new(
+        base_url: cfg['base_url'],
+        environment: cfg['environment'] || 'production'
+      )
+    end
+
+    def api_config
+      @api_config ||= begin
+        path = File.join(PLUGIN_DIR, 'data', 'api_config.json')
+        File.exist?(path) ? JSON.parse(File.read(path)) : {}
+      end
+    end
+
+    def api_configured?
+      !api_config['base_url'].to_s.strip.empty?
+    end
+
+    def cloud_outbox_dir
+      File.join(PLUGIN_DIR, 'data', 'sync_outbox')
+    end
+
+    def run_on_ui_thread(&block)
+      if defined?(UI) && UI.respond_to?(:start_timer)
+        @cloud_ui_queue ||= Queue.new
+        @cloud_ui_queue << block
+      else
+        block.call
+      end
+    end
+
+    def ensure_cloud_ui_pump
+      return unless defined?(UI) && UI.respond_to?(:start_timer)
+      return if @cloud_ui_pump_timer
+
+      @cloud_ui_queue ||= Queue.new
+      @cloud_ui_pump_timer = UI.start_timer(0.2, true) do
+        drain_cloud_ui_queue
+        next if @cloud_busy || !@cloud_ui_queue.empty?
+
+        UI.stop_timer(@cloud_ui_pump_timer) rescue nil
+        @cloud_ui_pump_timer = nil
+      end
+    end
+
+    def drain_cloud_ui_queue
+      loop do
+        callback = @cloud_ui_queue.pop(true)
+        callback.call
+      end
+    rescue ThreadError
+      nil
+    rescue => e
+      puts "[SuTakeoff] Warning: cloud UI callback failed: #{e.message}"
+    end
+
+    def next_cloud_request_id
+      @cloud_request_seq = (@cloud_request_seq || 0) + 1
+    end
+
+    def active_cloud_login_request?(request_id)
+      @cloud_busy && @cloud_login_request_id == request_id
+    end
+
+    def schedule_cloud_login_timeout(request_id, username)
+      return unless defined?(UI) && UI.respond_to?(:start_timer)
+
+      UI.start_timer(CLOUD_LOGIN_TIMEOUT_SECONDS, false) do
+        finish_cloud_login_error(request_id, '登录超时，请检查网络连接后重试', username)
+      end
+    end
+
+    def finish_cloud_login_error(request_id, error_or_message, username)
+      return unless active_cloud_login_request?(request_id)
+
+      @cloud_busy = false
+      @cloud_login_request_id = nil
+      send_cloud_error_message(
+        login_error_message(error_or_message),
+        login_username: username,
+        force_login: true
+      )
+    end
+
+    def send_cloud_error(error, extra = {})
+      send_cloud_error_message(login_error_message(error), extra)
+    end
+
+    def send_cloud_error_message(message, extra = {})
+      send_cloud_state({ error: { message: login_error_message(message) } }.merge(extra))
+    end
+
+    def login_error_message(error_or_message)
+      if defined?(Api::ErrorTranslator)
+        Api::ErrorTranslator.login_message(error_or_message)
+      else
+        error_or_message.respond_to?(:message) ? error_or_message.message.to_s : error_or_message.to_s
+      end
+    end
+
+    def normalize_cloud_state_extra(extra)
+      normalized = extra.dup
+      error = normalized[:error] || normalized['error']
+      if error.is_a?(Hash)
+        key = error.key?(:message) ? :message : 'message'
+        normalized_error = error.dup
+        normalized_error[key] = login_error_message(normalized_error[key]) if normalized_error[key]
+        normalized[:error] = normalized_error
+        normalized.delete('error')
+      elsif error
+        normalized[:error] = { message: login_error_message(error) }
+        normalized.delete('error')
+      end
+      normalized
     end
 
   end

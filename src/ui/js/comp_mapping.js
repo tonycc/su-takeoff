@@ -33,6 +33,8 @@ function renderComponentMappings(mappings, definitions, config) {
       unit: m ? m.unit : '个',
       spec: m ? m.spec : '',
       counting_method: m ? (m.counting_method || 'expand') : 'expand',
+      platform_material_tag: m ? (m.platform_material_tag || '') : '',
+      platform_component_type: m ? (m.platform_component_type || '') : '',
       is_mapped: !!m
     };
   });
@@ -48,6 +50,8 @@ function renderComponentMappings(mappings, definitions, config) {
         unit: m.unit || '个',
         spec: m.spec || '',
         counting_method: m.counting_method || 'expand',
+        platform_material_tag: m.platform_material_tag || '',
+        platform_component_type: m.platform_component_type || '',
         is_mapped: true,
         not_in_model: true
       });
@@ -82,6 +86,8 @@ function renderComponentMappings(mappings, definitions, config) {
       '<th style="width:50px">类型</th>' +
       '<th style="width:150px">名称</th>' +
       '<th style="width:110px">自定义名称</th>' +
+      '<th style="width:90px">平台标签</th>' +
+      '<th style="width:90px">平台类型</th>' +
       '<th style="width:70px">分类</th>' +
       '<th style="width:50px">单位</th>' +
       '<th style="width:80px">计量方式</th>' +
@@ -121,6 +127,8 @@ function renderComponentMappings(mappings, definitions, config) {
       '<td><span class="mv-tag-badge ' + kindClass + '" style="font-size:10px">' + kindLabel + '</span></td>' +
       '<td><code style="color:#89b4fa">' + nameDisplay + '</code></td>' +
       '<td><input type="text" class="u-mat" value="' + esc(row.material_name) + '"></td>' +
+      '<td><input type="text" class="u-platform-tag" value="' + esc(row.platform_material_tag) + '"></td>' +
+      '<td><input type="text" class="u-platform-type" value="' + esc(row.platform_component_type) + '"></td>' +
       '<td><select class="u-cat" onchange="onCompMappingCatChange(this)">' + buildCatOpts(row.category) + '</select></td>' +
       '<td><input type="text" class="u-unit" value="' + esc(row.unit) + '" style="width:50px" readonly></td>' +
       '<td><select class="u-method">' +
@@ -174,6 +182,8 @@ function addComponentMapping() {
     unit: '个',
     spec: '',
     waste_rate: 0.0,
+    platform_material_tag: '',
+    platform_component_type: '',
     counting_method: 'expand'
   }));
 }
@@ -192,6 +202,8 @@ function saveCompMappingRow(defName) {
     unit: tr.querySelector('.u-unit').value.trim() || '个',
     spec: '',
     waste_rate: 0.0,
+    platform_material_tag: (tr.querySelector('.u-platform-tag') || {}).value || '',
+    platform_component_type: (tr.querySelector('.u-platform-type') || {}).value || '',
     counting_method: tr.querySelector('.u-method').value
   }));
 }
