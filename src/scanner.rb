@@ -153,6 +153,7 @@ module SuTakeoff
 
       comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 }
+      comp_path_persistent_ids = path.map { |c| persistent_id(c) }
 
       area_m2 = compute_area(entity, transform)
       if DEBUG
@@ -210,7 +211,9 @@ module SuTakeoff
         tags: face_tags,
         tag: face_tag,
         center_x: (bb_center_world.x * 0.0254).round(4),
-        center_y: (bb_center_world.y * 0.0254).round(4)
+        center_y: (bb_center_world.y * 0.0254).round(4),
+        face_persistent_id: persistent_id(entity),
+        component_path_persistent_ids: comp_path_persistent_ids
       )
     end
 
@@ -251,13 +254,16 @@ module SuTakeoff
       if cm_record && cm_record.counting_method == 'aggregate' && def_name && !def_name.empty?
         comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
         comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+        comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
         items << ScanItem.instance(
           face_id: entity.entityID,
           su_material: def_name,
           unit: cm_record.unit || '个',
           layer_name: entity.layer.name,
           component_path: comp_path,
-          component_path_ids: comp_path_ids
+          component_path_ids: comp_path_ids,
+          face_persistent_id: persistent_id(entity),
+          component_path_persistent_ids: comp_path_persistent_ids
         )
         return
       end
@@ -404,6 +410,7 @@ module SuTakeoff
     def emit_solid_by_method(entity, path, transform, method, tags, effective_tag = nil)
       comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+      comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
 
       bb       = entity.bounds
       scale    = [transform.xscale.abs, transform.yscale.abs, transform.zscale.abs].max
@@ -431,7 +438,9 @@ module SuTakeoff
           face_id: entity.entityID, su_material: mat_name,
           length: length_m.round(4), width: w.round(4), height: h.round(4), depth: h.round(4),
           layer_name: layer, component_path: comp_path, component_path_ids: comp_path_ids,
-          z_center: z_center_m.round(4), tags: tags, tag: item_tag
+          z_center: z_center_m.round(4), tags: tags, tag: item_tag,
+          face_persistent_id: persistent_id(entity),
+          component_path_persistent_ids: comp_path_persistent_ids
         )
         if DEBUG
           puts "[Scanner] emit_solid :length → qty_length=#{item.qty_length}m " \
@@ -449,13 +458,17 @@ module SuTakeoff
           face_id: entity.entityID, su_material: mat_name,
           volume: vol_m3.round(4), width: w.round(4), height: h.round(4), depth: d.round(4),
           layer_name: layer, component_path: comp_path, component_path_ids: comp_path_ids,
-          z_center: z_center_m.round(4), tags: tags, tag: item_tag
+          z_center: z_center_m.round(4), tags: tags, tag: item_tag,
+          face_persistent_id: persistent_id(entity),
+          component_path_persistent_ids: comp_path_persistent_ids
         )
       when :count
         ScanItem.count_solid(
           face_id: entity.entityID, su_material: mat_name,
           layer_name: layer, component_path: comp_path, component_path_ids: comp_path_ids,
-          tags: tags, tag: item_tag
+          tags: tags, tag: item_tag,
+          face_persistent_id: persistent_id(entity),
+          component_path_persistent_ids: comp_path_persistent_ids
         )
       end
     end
@@ -615,6 +628,14 @@ module SuTakeoff
       end
     end
 
+    def persistent_id(entity)
+      return nil unless entity.respond_to?(:persistent_id)
+
+      entity.persistent_id
+    rescue
+      nil
+    end
+
     def definition_entities(entity)
       if entity.respond_to?(:definition)
         entity.definition.entities
@@ -643,6 +664,7 @@ module SuTakeoff
 
       comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+      comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
 
       ScanItem.instance(
         face_id: entity.entityID,
@@ -650,6 +672,8 @@ module SuTakeoff
         layer_name: entity.layer.name,
         component_path: comp_path,
         component_path_ids: comp_path_ids,
+        face_persistent_id: persistent_id(entity),
+        component_path_persistent_ids: comp_path_persistent_ids,
         tag: (tags && tags[:tag]) || effective_tag
       )
     end
@@ -720,6 +744,7 @@ module SuTakeoff
       tags = read_takeoff_tags(entity)
       comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+      comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
       mat_name = (tags && tags[:material]) ||
                  (entity.respond_to?(:material) && entity.material&.name) ||
                  container_definition_name(entity)
@@ -735,6 +760,8 @@ module SuTakeoff
         layer_name: layer,
         component_path: comp_path,
         component_path_ids: comp_path_ids,
+        face_persistent_id: persistent_id(entity),
+        component_path_persistent_ids: comp_path_persistent_ids,
         z_center: z_center_m.round(4),
         tags: tags,
         tag: item_tag

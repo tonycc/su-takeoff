@@ -4,7 +4,7 @@ require 'json'
 module SuTakeoff
   MappingRecord = Struct.new(
     :su_material_name, :material_name, :category,
-    :unit, :spec, :default_waste_rate, keyword_init: true
+    :unit, :spec, :default_waste_rate, :platform_material_tag, keyword_init: true
   )
 
   class MaterialMapping
@@ -13,14 +13,15 @@ module SuTakeoff
     end
 
     def add(su_name, material_name, category, unit = 'm²',
-            spec = '', default_waste_rate = 0.05)
+            spec = '', default_waste_rate = 0.05, platform_material_tag = nil)
       @records[su_name] = MappingRecord.new(
         su_material_name: su_name,
         material_name: material_name,
         category: category,
         unit: unit,
         spec: spec,
-        default_waste_rate: default_waste_rate
+        default_waste_rate: default_waste_rate,
+        platform_material_tag: normalize_optional(platform_material_tag)
       )
     end
 
@@ -42,10 +43,10 @@ module SuTakeoff
 
     def export_csv(path)
       CSV.open(path, 'w') do |csv|
-        csv << %w[su_material_name material_name category unit spec default_waste_rate]
+        csv << %w[su_material_name material_name category unit spec default_waste_rate platform_material_tag]
         @records.each_value do |r|
           csv << [r.su_material_name, r.material_name, r.category,
-                  r.unit, r.spec, r.default_waste_rate]
+                  r.unit, r.spec, r.default_waste_rate, r.platform_material_tag]
         end
       end
     end
@@ -58,7 +59,8 @@ module SuTakeoff
           row['category'],
           row['unit'] || 'm²',
           row['spec'] || '',
-          (row['default_waste_rate'] || '0.05').to_f
+          (row['default_waste_rate'] || '0.05').to_f,
+          row['platform_material_tag']
         )
       end
     end
@@ -67,7 +69,8 @@ module SuTakeoff
       File.write(path, JSON.pretty_generate(@records.transform_values { |r|
         {
           material_name: r.material_name, category: r.category,
-          unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate
+          unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate,
+          platform_material_tag: r.platform_material_tag
         }
       }))
     end
@@ -77,7 +80,8 @@ module SuTakeoff
       data = JSON.parse(File.read(path))
       data.each do |su_name, h|
         add(su_name, h['material_name'], h['category'],
-            h['unit'], h['spec'] || '', h['default_waste_rate'].to_f)
+            h['unit'], h['spec'] || '', h['default_waste_rate'].to_f,
+            h['platform_material_tag'])
       end
     end
 
@@ -85,7 +89,8 @@ module SuTakeoff
       data = JSON.parse(json_str)
       data.each do |su_name, h|
         add(su_name, h['material_name'], h['category'],
-            h['unit'], h['spec'] || '', h['default_waste_rate'].to_f)
+            h['unit'], h['spec'] || '', h['default_waste_rate'].to_f,
+            h['platform_material_tag'])
       end
     end
 
@@ -93,9 +98,17 @@ module SuTakeoff
       JSON.generate(@records.transform_values { |r|
         {
           material_name: r.material_name, category: r.category,
-          unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate
+          unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate,
+          platform_material_tag: r.platform_material_tag
         }
       })
+    end
+
+    private
+
+    def normalize_optional(value)
+      text = value.to_s.strip
+      text.empty? ? nil : text
     end
 
   end

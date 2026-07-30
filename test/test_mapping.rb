@@ -63,5 +63,38 @@ module SuTakeoff
       assert_equal 'A', mapping2.get('a').material_name
     end
 
+    def test_platform_material_tag_roundtrips_json_and_csv
+      @mapping.add('a', 'A', 'cat', 'm²', '', 0.05, 'wood')
+
+      json_file = Tempfile.new(['mapping', '.json'])
+      @mapping.save_json(json_file.path)
+      from_json = MaterialMapping.new
+      from_json.load_json(json_file.path)
+      assert_equal 'wood', from_json.get('a').platform_material_tag
+
+      csv_file = Tempfile.new(['mapping', '.csv'])
+      @mapping.export_csv(csv_file.path)
+      from_csv = MaterialMapping.new
+      from_csv.import_csv(csv_file.path)
+      assert_equal 'wood', from_csv.get('a').platform_material_tag
+    end
+
+    def test_old_json_without_platform_material_tag_still_loads
+      file = Tempfile.new(['mapping', '.json'])
+      file.write(JSON.generate('a' => {
+        material_name: 'A',
+        category: 'cat',
+        unit: 'm²',
+        spec: '',
+        default_waste_rate: 0.05
+      }))
+      file.close
+
+      @mapping.load_json(file.path)
+
+      assert_equal 'A', @mapping.get('a').material_name
+      assert_nil @mapping.get('a').platform_material_tag
+    end
+
   end
 end

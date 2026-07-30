@@ -14,6 +14,8 @@ module SuTakeoff
   #   strategy_name
   #     Policy 决议得到的 Strategy 名称（Symbol，如 :face_area / :solid_linear）
   #     由 Calculator#cache_resolve 写入，Presenter 用于调试输出。
+  #   face_persistent_id / component_path_persistent_ids
+  #     平台推送用稳定编码来源；entityID 仍保留给当前会话内 UI 定位。
   ScanItem = Struct.new(
     :face_id,
     :su_material,
@@ -39,6 +41,8 @@ module SuTakeoff
     :center_x,       # P4: bbox 中心世界坐标 X（米）—— 竖直薄板配对用
     :center_y,       # P4: bbox 中心世界坐标 Y（米）
     :strategy_name,  # Stage 3: Strategy 名称（Symbol）
+    :face_persistent_id,
+    :component_path_persistent_ids,
     keyword_init: true
   )
 
@@ -48,7 +52,8 @@ module SuTakeoff
   class ScanItem
     def self.face(face_id:, su_material:, area:, normal:, width:, height:,
                   layer_name:, component_path:, component_path_ids:,
-                  z_center: 0, tags: nil, tag: nil, center_x: nil, center_y: nil)
+                  z_center: 0, tags: nil, tag: nil, center_x: nil, center_y: nil,
+                  face_persistent_id: nil, component_path_persistent_ids: nil)
       new(
         face_id: face_id, su_material: su_material,
         qty: area, unit: 'm²', kind: :face,
@@ -58,13 +63,16 @@ module SuTakeoff
         z_center: z_center,
         qty_area: area, qty_length: nil, qty_volume: 0, qty_count: 0,
         tags: tags, tag: tag,
-        center_x: center_x, center_y: center_y
+        center_x: center_x, center_y: center_y,
+        face_persistent_id: face_persistent_id,
+        component_path_persistent_ids: component_path_persistent_ids
       )
     end
 
     def self.instance(face_id:, su_material:, unit: '个',
                       layer_name:, component_path:, component_path_ids:,
-                      tags: nil, tag: nil)
+                      tags: nil, tag: nil, face_persistent_id: nil,
+                      component_path_persistent_ids: nil)
       new(
         face_id: face_id, su_material: su_material,
         qty: 1, unit: unit, kind: :instance,
@@ -73,13 +81,16 @@ module SuTakeoff
         component_path: component_path, component_path_ids: component_path_ids,
         z_center: 0,
         qty_count: 1, qty_area: 0, qty_length: 0, qty_volume: 0,
-        tags: tags, tag: tag
+        tags: tags, tag: tag,
+        face_persistent_id: face_persistent_id,
+        component_path_persistent_ids: component_path_persistent_ids
       )
     end
 
     def self.solid(face_id:, su_material:, volume:, width:, height:, depth:,
                    layer_name:, component_path:, component_path_ids:,
-                   z_center: 0, tags: nil, tag: nil)
+                   z_center: 0, tags: nil, tag: nil, face_persistent_id: nil,
+                   component_path_persistent_ids: nil)
       new(
         face_id: face_id, su_material: su_material,
         qty: 0, unit: 'm³', kind: :solid,
@@ -89,14 +100,17 @@ module SuTakeoff
         z_center: z_center,
         qty_volume: volume, qty_area: 0, qty_length: depth, qty_count: 0,
         depth: depth,
-        tags: tags, tag: tag
+        tags: tags, tag: tag,
+        face_persistent_id: face_persistent_id,
+        component_path_persistent_ids: component_path_persistent_ids
       )
     end
 
     def self.linear_solid(face_id:, su_material:, length:,
                           width: 0, height: 0, depth: 0,
                           layer_name:, component_path:, component_path_ids:,
-                          z_center: 0, tags: nil, tag: nil)
+                          z_center: 0, tags: nil, tag: nil, face_persistent_id: nil,
+                          component_path_persistent_ids: nil)
       new(
         face_id: face_id, su_material: su_material,
         qty: 0, unit: 'm', kind: :linear_solid,
@@ -106,13 +120,16 @@ module SuTakeoff
         z_center: z_center,
         qty_length: length, qty_area: 0, qty_volume: 0,
         depth: depth,
-        tags: tags, tag: tag
+        tags: tags, tag: tag,
+        face_persistent_id: face_persistent_id,
+        component_path_persistent_ids: component_path_persistent_ids
       )
     end
 
     def self.count_solid(face_id:, su_material:, unit: '个',
                          layer_name:, component_path:, component_path_ids:,
-                         tags: nil, tag: nil)
+                         tags: nil, tag: nil, face_persistent_id: nil,
+                         component_path_persistent_ids: nil)
       new(
         face_id: face_id, su_material: su_material,
         qty: 1, unit: unit, kind: :count_solid,
@@ -121,7 +138,9 @@ module SuTakeoff
         component_path: component_path, component_path_ids: component_path_ids,
         z_center: 0,
         qty_count: 1, qty_area: 0, qty_length: 0, qty_volume: 0,
-        tags: tags, tag: tag
+        tags: tags, tag: tag,
+        face_persistent_id: face_persistent_id,
+        component_path_persistent_ids: component_path_persistent_ids
       )
     end
   end
