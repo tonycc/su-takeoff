@@ -16,6 +16,7 @@ module SuTakeoff
       AUTH_LOGOUT_PATH = '/api/v1/auth/logout'
       IDENTITY_ME_PATH = '/api/v1/identity/me'
       QUANTITIES_PATH = '/api/v1/su/quantities'
+      MATERIALS_PATH = '/api/v1/su/materials'
 
       DEFAULT_OPEN_TIMEOUT = 10
       DEFAULT_READ_TIMEOUT = 30
@@ -62,16 +63,29 @@ module SuTakeoff
         post(QUANTITIES_PATH, body: payload, access_token: access_token, read_timeout: @quantity_read_timeout)
       end
 
-      def get(path, access_token: nil, read_timeout: @read_timeout)
-        request('GET', path, access_token: access_token, read_timeout: read_timeout)
+      def materials(access_token:, keyword: nil, category_id: nil, brand_id: nil,
+                    status: 'active', page: 1, page_size: 20)
+        params = {
+          'keyword' => keyword,
+          'category_id' => category_id,
+          'brand_id' => brand_id,
+          'status' => status,
+          'page' => page,
+          'page_size' => page_size
+        }
+        get(MATERIALS_PATH, access_token: access_token, params: params)
+      end
+
+      def get(path, access_token: nil, params: nil, read_timeout: @read_timeout)
+        request('GET', path, access_token: access_token, params: params, read_timeout: read_timeout)
       end
 
       def post(path, body: nil, access_token: nil, read_timeout: @read_timeout)
         request('POST', path, body: body, access_token: access_token, read_timeout: read_timeout)
       end
 
-      def request(method, path, body: nil, access_token: nil, read_timeout: @read_timeout)
-        uri = build_uri(path)
+      def request(method, path, body: nil, access_token: nil, params: nil, read_timeout: @read_timeout)
+        uri = build_uri(path, params)
         req = request_class(method).new(uri)
         req['Accept'] = 'application/json'
         req['X-Request-Id'] = request_id
@@ -117,10 +131,11 @@ module SuTakeoff
         raise ArgumentError, 'API Base URL 格式无效'
       end
 
-      def build_uri(path)
+      def build_uri(path, params = nil)
         clean_path = path.to_s.start_with?('/') ? path.to_s : "/#{path}"
         uri = @base_uri.dup
         uri.path = "#{@base_uri.path}#{clean_path}"
+        uri.query = URI.encode_www_form(params.reject { |_, v| v.nil? }) if params && !params.empty?
         uri
       end
 

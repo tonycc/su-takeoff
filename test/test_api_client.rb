@@ -165,4 +165,35 @@ class TestApiClient < Minitest::Test
 
     assert_equal('http://127.0.0.1:8000', client.base_url)
   end
+
+  def test_materials_builds_query_and_parses_items
+    transport = Transport.new(FakeResponse.new(
+      '200', '{"total":1,"page":2,"page_size":5,"items":[{"sku_id":"s1","code":"SKU-1","name":"白橡木 18mm"}]}'
+    ))
+    client = SuTakeoff::Api::ApiClient.new(base_url: 'https://api.example.com', transport: transport)
+
+    result = client.materials(access_token: 'tok', keyword: '橡木', page: 2, page_size: 5)
+
+    assert_equal(1, result['total'])
+    assert_equal('SKU-1', result['items'].first['code'])
+    call = transport.calls.first
+    assert_equal('/api/v1/su/materials', call[:uri].path)
+    assert_equal('Bearer tok', call[:request]['Authorization'])
+    query = URI.decode_www_form(call[:uri].query).to_h
+    assert_equal('橡木', query['keyword'])
+    assert_equal('2', query['page'])
+    assert_equal('5', query['page_size'])
+    assert_equal('active', query['status'])
+    refute(query.key?('category_id'), 'nil 参数不应出现在 query')
+  end
+
+  def test_materials_error_becomes_api_error
+    transport = Transport.new(FakeResponse.new(
+      '403', '{"detail":{"code":"MODULE_DISABLED","message":"租户未启用供应链模块"}}'
+    ))
+    client = SuTakeoff::Api::ApiClient.new(base_url: 'https://api.example.com', transport: transport)
+
+    err = assert_raises(SuTakeoff::Api::ApiError) { client.materials(access_token: 'tok') }
+    assert_equal('MODULE_DISABLED', err.code)
+  end
 end
