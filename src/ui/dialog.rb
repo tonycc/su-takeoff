@@ -86,6 +86,7 @@ module SuTakeoff
 
       @faces_cache = {}
       @cloud_busy = false
+      @sku_search_pending = 0
       @cloud_ui_queue = Queue.new
       @cloud_login_request_id = nil
       @cloud_ui_pump_timer = nil
@@ -695,6 +696,7 @@ module SuTakeoff
       data = JSON.parse(json)
       keyword = data['keyword'].to_s
       req_id = data['req_id']
+      @sku_search_pending = @sku_search_pending.to_i + 1
       ensure_cloud_ui_pump
       Thread.new do
         begin
@@ -709,11 +711,13 @@ module SuTakeoff
           total = result.is_a?(Hash) ? (result['total'] || items.size) : items.size
           payload = JSON.generate({ req_id: req_id, total: total, items: items })
           run_on_ui_thread do
+            @sku_search_pending = [@sku_search_pending.to_i - 1, 0].max
             @dialog.execute_script("window.receiveSkuResults(#{payload})") rescue nil
           end
         rescue => e
           err = JSON.generate({ req_id: req_id, error: login_error_message(e) })
           run_on_ui_thread do
+            @sku_search_pending = [@sku_search_pending.to_i - 1, 0].max
             @dialog.execute_script("window.receiveSkuResults(#{err})") rescue nil
           end
         end
@@ -954,7 +958,7 @@ module SuTakeoff
       @cloud_ui_queue ||= Queue.new
       @cloud_ui_pump_timer = UI.start_timer(0.2, true) do
         drain_cloud_ui_queue
-        next if @cloud_busy || !@cloud_ui_queue.empty?
+        next if @cloud_busy || @sku_search_pending.to_i > 0 || !@cloud_ui_queue.empty?
 
         UI.stop_timer(@cloud_ui_pump_timer) rescue nil
         @cloud_ui_pump_timer = nil
