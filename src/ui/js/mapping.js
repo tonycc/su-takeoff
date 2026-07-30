@@ -87,6 +87,7 @@ function renderSimpleMappingTable(mappings) {
         '<th>SU材质</th>' +
         '<th>真实材料名</th>' +
         '<th style="width:100px">平台标签</th>' +
+        '<th style="width:160px">平台SKU</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
         '<th style="width:100px">操作</th>' +
@@ -103,6 +104,7 @@ function renderSimpleMappingTable(mappings) {
         '<th>部位分布</th>' +
         '<th>真实材料名</th>' +
         '<th style="width:100px">平台标签</th>' +
+        '<th style="width:160px">平台SKU</th>' +
         '<th style="width:80px">分类</th>' +
         '<th style="width:60px">单位</th>' +
         '<th style="width:100px">操作</th>' +
@@ -129,6 +131,12 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.u-platform-tag').value = m.platform_material_tag || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions(m.category);
       tr.querySelector('.u-unit').value = m.unit || 'm²';
+      tr.dataset.skuId = m.platform_sku_id || '';
+      tr.dataset.skuCode = m.platform_sku_code || '';
+      tr.dataset.skuName = m.platform_sku_name || '';
+      tr.querySelector('.u-sku').value =
+        m.platform_sku_code ? (m.platform_sku_code + ' ' + (m.platform_sku_name || '')) : '';
+      bindSkuAutocomplete(tr);
 
       var actions = tr.querySelector('.col-actions');
       actions.innerHTML = '<button>保存</button><button>删除</button>';
@@ -178,6 +186,12 @@ function renderSimpleMappingTable(mappings) {
       tr.querySelector('.u-platform-tag').value = m.platform_material_tag || '';
       tr.querySelector('.u-cat').innerHTML = buildCatOptions('其他');
       tr.querySelector('.u-unit').value = suggested;
+      tr.dataset.skuId = m.platform_sku_id || '';
+      tr.dataset.skuCode = m.platform_sku_code || '';
+      tr.dataset.skuName = m.platform_sku_name || '';
+      tr.querySelector('.u-sku').value =
+        m.platform_sku_code ? (m.platform_sku_code + ' ' + (m.platform_sku_name || '')) : '';
+      bindSkuAutocomplete(tr);
 
       var actions = tr.querySelector('.col-actions');
       actions.innerHTML = '<button>保存</button><button>忽略</button>';
@@ -232,6 +246,9 @@ function saveMappingRow(suName) {
     category: tr.querySelector('.u-cat').value,
     unit: tr.querySelector('.u-unit').value,
     spec: (tr.querySelector('.u-spec') || {}).value || '',
+    platform_sku_id: tr.dataset.skuId || '',
+    platform_sku_code: tr.dataset.skuCode || '',
+    platform_sku_name: tr.dataset.skuName || '',
     waste_rate: 0.0
   }));
 }
@@ -261,4 +278,94 @@ function openAddMapping() {
     platform_material_tag: '',
     unit: 'm²', spec: spec, waste_rate: 0.0
   }));
+}
+
+// ---------------- SKU 自动补全 ----------------
+window._skuReqId = 0;
+window._skuActiveRow = null;
+
+(function() {
+  var bound = false;
+  window._ensureSkuCloser = function() {
+    if (bound) return;
+    bound = true;
+    document.addEventListener('click', function(e) {
+      document.querySelectorAll('.sku-dropdown').forEach(function(dd) {
+        var tr = dd.closest('tr');
+        if (!tr || !tr.contains(e.target)) dd.style.display = 'none';
+      });
+    });
+  };
+})();
+
+function bindSkuAutocomplete(tr) {
+  var input = tr.querySelector('.u-sku');
+  var dd = tr.querySelector('.sku-dropdown');
+  if (!input || !dd) return;
+  window._ensureSkuCloser();
+  var timer = null;
+  input.addEventListener('input', function() {
+    clearTimeout(timer);
+    // 手动编辑即视为撤销已选，需重新从下拉选择才会写回 sku 字段
+    tr.dataset.skuId = '';
+    tr.dataset.skuCode = '';
+    tr.dataset.skuName = '';
+    var kw = input.value.trim();
+    timer = setTimeout(function() {
+      window._skuReqId += 1;
+      window._skuActiveRow = tr;
+      callSketchUp('search_skus', JSON.stringify({ keyword: kw, req_id: window._skuReqId }));
+    }, 300);
+  });
+  input.addEventListener('focus', function() {
+    if (dd.children.length > 0) dd.style.display = '';
+  });
+}
+
+window.receiveSkuResults = function(data) {
+  if (data.req_id !== window._skuReqId) return; // 丢弃过期响应
+  var tr = window._skuActiveRow;
+  if (!tr) return;
+  var dd = tr.querySelector('.sku-dropdown');
+  if (!dd) return;
+  dd.innerHTML = '';
+  if (data.error) {
+    dd.appendChild(skuOption('查询失败：' + data.error, null, tr));
+    dd.style.display = '';
+    return;
+  }
+  var items = data.items || [];
+  if (items.length === 0) {
+    dd.appendChild(skuOption('无匹配产品', null, tr));
+    dd.style.display = '';
+    return;
+  }
+  items.forEach(function(it) {
+    var label = (it.code || '') + ' · ' + (it.name || '');
+    if (it.spec) label += ' · ' + it.spec;
+    if (it.brand && it.brand.name) label += ' · ' + it.brand.name;
+    dd.appendChild(skuOption(label, it, tr));
+  });
+  var foot = document.createElement('div');
+  foot.className = 'sku-opt sku-foot';
+  foot.textContent = '共 ' + (data.total || items.length) + ' 条';
+  dd.appendChild(foot);
+  dd.style.display = '';
+};
+
+function skuOption(label, item, tr) {
+  var div = document.createElement('div');
+  div.className = 'sku-opt';
+  div.textContent = label;
+  if (item) {
+    div.onclick = function() {
+      var input = tr.querySelector('.u-sku');
+      input.value = (item.code || '') + ' ' + (item.name || '');
+      tr.dataset.skuId = item.sku_id || '';
+      tr.dataset.skuCode = item.code || '';
+      tr.dataset.skuName = item.name || '';
+      tr.querySelector('.sku-dropdown').style.display = 'none';
+    };
+  }
+  return div;
 }

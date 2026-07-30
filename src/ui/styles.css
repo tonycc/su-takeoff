@@ -531,3 +531,17 @@ tr.unmapped td:first-child { color: #f38ba8; }
   width: 90px;
   padding: 4px 6px;
 }
+
+/* SKU 自动补全 */
+.col-sku { position: relative; }
+.u-sku { width: 150px; }
+.sku-dropdown {
+  position: absolute; z-index: 1000; left: 0; right: 0;
+  max-height: 240px; overflow-y: auto;
+  background: #fff; border: 1px solid #d0d0d8; border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .12); margin-top: 2px;
+}
+.sku-opt { padding: 6px 8px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.sku-opt:hover { background: #eef1ff; }
+.sku-foot { color: #6c7086; cursor: default; border-top: 1px solid #eee; }
+.sku-foot:hover { background: transparent; }
