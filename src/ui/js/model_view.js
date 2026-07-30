@@ -616,8 +616,12 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
 
   row.appendChild(tdName);
 
-  // 产品信息（空白列）
+  // 产品信息（材料汇总行展示关联 SKU：编码 + 名称）
   var tdInfo = document.createElement('td');
+  if (usage.sku_code) {
+    tdInfo.textContent = usage.sku_code + ' ' + (usage.sku_name || '');
+    tdInfo.title = tdInfo.textContent;
+  }
   row.appendChild(tdInfo);
 
   // 空标记列（对齐表头）
