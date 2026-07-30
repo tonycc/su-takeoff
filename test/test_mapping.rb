@@ -96,5 +96,43 @@ module SuTakeoff
       assert_nil @mapping.get('a').platform_material_tag
     end
 
+    def test_platform_sku_roundtrips_json_and_csv
+      @mapping.add('a', 'A', 'cat', 'm²', '', 0.05, 'wood', 'sku-1', 'SKU-001', '白橡木饰面板 18mm')
+
+      json_file = Tempfile.new(['mapping', '.json'])
+      @mapping.save_json(json_file.path)
+      from_json = MaterialMapping.new
+      from_json.load_json(json_file.path)
+      assert_equal 'sku-1', from_json.get('a').platform_sku_id
+      assert_equal 'SKU-001', from_json.get('a').platform_sku_code
+      assert_equal '白橡木饰面板 18mm', from_json.get('a').platform_sku_name
+
+      csv_file = Tempfile.new(['mapping', '.csv'])
+      @mapping.export_csv(csv_file.path)
+      from_csv = MaterialMapping.new
+      from_csv.import_csv(csv_file.path)
+      assert_equal 'SKU-001', from_csv.get('a').platform_sku_code
+      assert_equal '白橡木饰面板 18mm', from_csv.get('a').platform_sku_name
+    end
+
+    def test_platform_sku_empty_string_normalizes_to_nil
+      @mapping.add('a', 'A', 'cat', 'm²', '', 0.05, 'wood', '', '  ', nil)
+      assert_nil @mapping.get('a').platform_sku_id
+      assert_nil @mapping.get('a').platform_sku_code
+      assert_nil @mapping.get('a').platform_sku_name
+    end
+
+    def test_old_json_without_sku_still_loads_nil
+      file = Tempfile.new(['mapping', '.json'])
+      file.write(JSON.generate('a' => {
+        material_name: 'A', category: 'cat', unit: 'm²', spec: '',
+        default_waste_rate: 0.05, platform_material_tag: 'wood'
+      }))
+      file.close
+      @mapping.load_json(file.path)
+      assert_nil @mapping.get('a').platform_sku_id
+      assert_nil @mapping.get('a').platform_sku_code
+    end
+
   end
 end

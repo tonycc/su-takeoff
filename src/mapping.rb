@@ -4,7 +4,8 @@ require 'json'
 module SuTakeoff
   MappingRecord = Struct.new(
     :su_material_name, :material_name, :category,
-    :unit, :spec, :default_waste_rate, :platform_material_tag, keyword_init: true
+    :unit, :spec, :default_waste_rate, :platform_material_tag,
+    :platform_sku_id, :platform_sku_code, :platform_sku_name, keyword_init: true
   )
 
   class MaterialMapping
@@ -13,7 +14,8 @@ module SuTakeoff
     end
 
     def add(su_name, material_name, category, unit = 'm²',
-            spec = '', default_waste_rate = 0.05, platform_material_tag = nil)
+            spec = '', default_waste_rate = 0.05, platform_material_tag = nil,
+            platform_sku_id = nil, platform_sku_code = nil, platform_sku_name = nil)
       @records[su_name] = MappingRecord.new(
         su_material_name: su_name,
         material_name: material_name,
@@ -21,7 +23,10 @@ module SuTakeoff
         unit: unit,
         spec: spec,
         default_waste_rate: default_waste_rate,
-        platform_material_tag: normalize_optional(platform_material_tag)
+        platform_material_tag: normalize_optional(platform_material_tag),
+        platform_sku_id: normalize_optional(platform_sku_id),
+        platform_sku_code: normalize_optional(platform_sku_code),
+        platform_sku_name: normalize_optional(platform_sku_name)
       )
     end
 
@@ -43,10 +48,11 @@ module SuTakeoff
 
     def export_csv(path)
       CSV.open(path, 'w') do |csv|
-        csv << %w[su_material_name material_name category unit spec default_waste_rate platform_material_tag]
+        csv << %w[su_material_name material_name category unit spec default_waste_rate platform_material_tag platform_sku_id platform_sku_code platform_sku_name]
         @records.each_value do |r|
           csv << [r.su_material_name, r.material_name, r.category,
-                  r.unit, r.spec, r.default_waste_rate, r.platform_material_tag]
+                  r.unit, r.spec, r.default_waste_rate, r.platform_material_tag,
+                  r.platform_sku_id, r.platform_sku_code, r.platform_sku_name]
         end
       end
     end
@@ -60,7 +66,10 @@ module SuTakeoff
           row['unit'] || 'm²',
           row['spec'] || '',
           (row['default_waste_rate'] || '0.05').to_f,
-          row['platform_material_tag']
+          row['platform_material_tag'],
+          row['platform_sku_id'],
+          row['platform_sku_code'],
+          row['platform_sku_name']
         )
       end
     end
@@ -70,7 +79,10 @@ module SuTakeoff
         {
           material_name: r.material_name, category: r.category,
           unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate,
-          platform_material_tag: r.platform_material_tag
+          platform_material_tag: r.platform_material_tag,
+          platform_sku_id: r.platform_sku_id,
+          platform_sku_code: r.platform_sku_code,
+          platform_sku_name: r.platform_sku_name
         }
       }))
     end
@@ -81,7 +93,8 @@ module SuTakeoff
       data.each do |su_name, h|
         add(su_name, h['material_name'], h['category'],
             h['unit'], h['spec'] || '', h['default_waste_rate'].to_f,
-            h['platform_material_tag'])
+            h['platform_material_tag'],
+            h['platform_sku_id'], h['platform_sku_code'], h['platform_sku_name'])
       end
     end
 
@@ -90,7 +103,8 @@ module SuTakeoff
       data.each do |su_name, h|
         add(su_name, h['material_name'], h['category'],
             h['unit'], h['spec'] || '', h['default_waste_rate'].to_f,
-            h['platform_material_tag'])
+            h['platform_material_tag'],
+            h['platform_sku_id'], h['platform_sku_code'], h['platform_sku_name'])
       end
     end
 
@@ -99,7 +113,10 @@ module SuTakeoff
         {
           material_name: r.material_name, category: r.category,
           unit: r.unit, spec: r.spec, default_waste_rate: r.default_waste_rate,
-          platform_material_tag: r.platform_material_tag
+          platform_material_tag: r.platform_material_tag,
+          platform_sku_id: r.platform_sku_id,
+          platform_sku_code: r.platform_sku_code,
+          platform_sku_name: r.platform_sku_name
         }
       })
     end
