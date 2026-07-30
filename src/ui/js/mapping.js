@@ -298,10 +298,11 @@ window._skuActiveRow = null;
   };
 })();
 
-function bindSkuAutocomplete(tr) {
+function bindSkuAutocomplete(tr, onSelect) {
   var input = tr.querySelector('.u-sku');
   var dd = tr.querySelector('.sku-dropdown');
   if (!input || !dd) return;
+  tr._skuOnSelect = onSelect; // 可选：选中 SKU 后的回调（映射页留空走保存按钮，模型视图直接持久化）
   window._ensureSkuCloser();
   var timer = null;
   input.addEventListener('input', function() {
@@ -365,6 +366,7 @@ function skuOption(label, item, tr) {
       tr.dataset.skuCode = item.code || '';
       tr.dataset.skuName = item.name || '';
       tr.querySelector('.sku-dropdown').style.display = 'none';
+      if (tr._skuOnSelect) tr._skuOnSelect(item);
     };
   }
   return div;

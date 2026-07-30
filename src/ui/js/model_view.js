@@ -616,11 +616,30 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
 
   row.appendChild(tdName);
 
-  // 产品信息（材料汇总行展示关联 SKU：编码 + 名称）
+  // 产品信息（材料汇总行内联选择关联 SKU：编码 + 名称）
   var tdInfo = document.createElement('td');
-  if (usage.sku_code) {
-    tdInfo.textContent = usage.sku_code + ' ' + (usage.sku_name || '');
-    tdInfo.title = tdInfo.textContent;
+  tdInfo.className = 'col-sku';
+  var skuInput = document.createElement('input');
+  skuInput.type = 'text';
+  skuInput.className = 'u-sku';
+  skuInput.autocomplete = 'off';
+  skuInput.placeholder = '搜索SKU';
+  skuInput.value = usage.sku_code ? (usage.sku_code + ' ' + (usage.sku_name || '')) : '';
+  tdInfo.appendChild(skuInput);
+  var skuDd = document.createElement('div');
+  skuDd.className = 'sku-dropdown';
+  skuDd.style.display = 'none';
+  tdInfo.appendChild(skuDd);
+  if (typeof bindSkuAutocomplete === 'function') {
+    var suMat = usage.su_material;
+    bindSkuAutocomplete(tdInfo, function(item) {
+      callSketchUp('set_material_sku', JSON.stringify({
+        su_name: suMat,
+        platform_sku_id: item.sku_id || '',
+        platform_sku_code: item.code || '',
+        platform_sku_name: item.name || ''
+      }));
+    });
   }
   row.appendChild(tdInfo);
 
