@@ -1,6 +1,7 @@
 require_relative 'test_helper'
 require 'src/mapping'
 require 'src/component_mapping'
+require 'src/component_sku_mapping'
 require 'src/takeoff_policy'
 require 'src/calculator'
 require 'src/workbench_presenter'
@@ -45,6 +46,35 @@ module SuTakeoff
       refute_nil usage, '未映射材质仍应出现在 geometry_usages'
       assert_nil usage[:sku_code]
       assert_nil usage[:sku_name]
+    end
+
+    def test_build_includes_component_skus
+      store = ComponentSkuMapping.new
+      store.set('橱柜', 'sku-1', 'SKU-001', '白橡木饰面板 18mm')
+      mapping = MaterialMapping.new
+      presenter = WorkbenchPresenter.new(
+        items: [], openings: [],
+        hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
+                     definition_name: nil, depth: 0, hidden: false, children: [] },
+        colors: {}, mapping: mapping, component_mapping: ComponentMapping.new,
+        policy: TakeoffPolicy.new(mapping: mapping), ignored: [], tag_defs: {},
+        component_sku: store
+      )
+      skus = presenter.build[:component_skus]
+      assert_equal 'SKU-001', skus['橱柜'][:sku_code]
+      assert_equal '白橡木饰面板 18mm', skus['橱柜'][:sku_name]
+    end
+
+    def test_build_component_skus_empty_without_store
+      mapping = MaterialMapping.new
+      presenter = WorkbenchPresenter.new(
+        items: [], openings: [],
+        hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
+                     definition_name: nil, depth: 0, hidden: false, children: [] },
+        colors: {}, mapping: mapping, component_mapping: ComponentMapping.new,
+        policy: TakeoffPolicy.new(mapping: mapping), ignored: [], tag_defs: {}
+      )
+      assert_equal({}, presenter.build[:component_skus])
     end
   end
 end

@@ -4,7 +4,7 @@ module SuTakeoff
   class WorkbenchPresenter
     def initialize(items:, openings:, hierarchy:, colors:,
                    mapping:, component_mapping:, policy:,
-                   ignored: [], tag_defs: {})
+                   ignored: [], tag_defs: {}, component_sku: nil)
       @items = items
       @openings = openings
       @hierarchy = hierarchy
@@ -14,6 +14,7 @@ module SuTakeoff
       @policy = policy
       @ignored = ignored
       @tag_defs = tag_defs
+      @component_sku = component_sku
     end
 
     def build
@@ -25,11 +26,25 @@ module SuTakeoff
         unresolved: unresolved_names,
         hierarchy: @hierarchy,
         geometry_usages: build_geometry_usages,
+        component_skus: build_component_skus,
         tag_defs: @tag_defs
       }
     end
 
     private
+
+    # 组件级 SKU 关联表：definition_name => { sku_id, sku_code, sku_name }
+    def build_component_skus
+      return {} unless @component_sku
+
+      @component_sku.all.each_with_object({}) do |r, memo|
+        memo[r.definition_name] = {
+          sku_id: r.platform_sku_id,
+          sku_code: r.platform_sku_code,
+          sku_name: r.platform_sku_name
+        }
+      end
+    end
 
     def face_items
       @face_items ||= @items.reject { |it| it.kind == :instance }

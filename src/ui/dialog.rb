@@ -55,6 +55,7 @@ module SuTakeoff
       @dialog.add_action_callback('save_mapping') { |_ctx, json| require_login! && save_mapping(json) }
       @dialog.add_action_callback('search_skus') { |_ctx, json| require_login! && search_skus(json) }
       @dialog.add_action_callback('set_material_sku') { |_ctx, json| require_login! && set_material_sku(json) }
+      @dialog.add_action_callback('set_component_sku') { |_ctx, json| require_login! && set_component_sku(json) }
       @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| require_login! && delete_mapping(su_name) }
       @dialog.add_action_callback('import_csv') { |_ctx| require_login! && import_csv_dialog }
       @dialog.add_action_callback('export_csv') { |_ctx| require_login! && export_csv_dialog }
@@ -217,7 +218,8 @@ module SuTakeoff
           component_mapping: PluginState.instance.component_mapping,
           policy: PluginState.instance.takeoff_policy,
           ignored: PluginState.instance.ignored,
-          tag_defs: PluginState.instance.config['tag_defs'] || {}
+          tag_defs: PluginState.instance.config['tag_defs'] || {},
+          component_sku: PluginState.instance.component_sku
         ).build
 
         # 剥除 faces 并缓存：避免初始 JSON 过大
@@ -444,6 +446,18 @@ module SuTakeoff
       m.save_json(PluginState.mapping_path)
       PluginState.instance.save_mapping_to_model_dict
       send_mappings
+      send_workbench_state if @last_scan
+    end
+
+    # 模型视图「产品信息」列组件级选择：按组件定义名存 SKU 关联（独立存储，不影响算量），
+    # 保存后刷新工作台，使所有同定义名的组件行同步显示。
+    def set_component_sku(json)
+      data = JSON.parse(json)
+      store = PluginState.instance.component_sku
+      store.set(data['definition_name'], data['platform_sku_id'],
+                data['platform_sku_code'], data['platform_sku_name'])
+      store.save_json(PluginState.component_sku_path)
+      PluginState.instance.save_component_sku_to_model_dict
       send_workbench_state if @last_scan
     end
 

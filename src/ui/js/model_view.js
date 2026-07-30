@@ -715,9 +715,38 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   }
 }
 
+// 构建组件行「产品信息」单元格：内联 SKU 自动补全，选中即存到组件级关联（按定义名）
+function buildSkuCell(definitionName, data) {
+  var td = document.createElement('td');
+  td.className = 'col-sku';
+  var skus = (data && data.component_skus) || {};
+  var cur = skus[definitionName] || {};
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'u-sku';
+  input.autocomplete = 'off';
+  input.placeholder = '搜索SKU';
+  input.value = cur.sku_code ? (cur.sku_code + ' ' + (cur.sku_name || '')) : '';
+  td.appendChild(input);
+  var dd = document.createElement('div');
+  dd.className = 'sku-dropdown';
+  dd.style.display = 'none';
+  td.appendChild(dd);
+  if (typeof bindSkuAutocomplete === 'function') {
+    bindSkuAutocomplete(td, function(item) {
+      callSketchUp('set_component_sku', JSON.stringify({
+        definition_name: definitionName,
+        platform_sku_id: item.sku_id || '',
+        platform_sku_code: item.code || '',
+        platform_sku_name: item.name || ''
+      }));
+    });
+  }
+  return td;
+}
+
 function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches, depthOverride, skipSearch, ancestorHasTag) {
-  var tag = cls[node.entity_id];
-  if (!tag) return seq;
+  var tag = cls[node.entity_id];  if (!tag) return seq;
 
   // Skip hidden
   if (node.hidden && !_mv.showHidden) return seq;
@@ -865,8 +894,10 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
 
   row.appendChild(tdName);
 
-  // 产品信息（空白列）
-  var tdInfo = document.createElement('td');
+  // 产品信息（组件级 SKU 选择：有定义名的组件可选产品）
+  var tdInfo = node.definition_name
+    ? buildSkuCell(node.definition_name, data)
+    : document.createElement('td');
   row.appendChild(tdInfo);
 
   // Tag column
@@ -1065,8 +1096,10 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
 
   row.appendChild(tdName);
 
-  // 产品信息（空白列）
-  var tdInfo = document.createElement('td');
+  // 产品信息（组件级 SKU 选择：合并行按定义名可选产品）
+  var tdInfo = first.definition_name
+    ? buildSkuCell(first.definition_name, data)
+    : document.createElement('td');
   row.appendChild(tdInfo);
 
   // Tag column
