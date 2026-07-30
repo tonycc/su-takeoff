@@ -38,5 +38,13 @@ module SuTakeoff
       assert_nil usage[:sku_code]
       assert_nil usage[:sku_name]
     end
+
+    def test_usage_sku_nil_when_material_unmapped
+      mapping = MaterialMapping.new # 空映射，'paint' 完全未映射
+      usage = build_usages(mapping).find { |u| u[:su_material] == 'paint' }
+      refute_nil usage, '未映射材质仍应出现在 geometry_usages'
+      assert_nil usage[:sku_code]
+      assert_nil usage[:sku_name]
+    end
   end
 end
