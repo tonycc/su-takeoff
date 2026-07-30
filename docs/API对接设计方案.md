@@ -720,9 +720,9 @@ sequenceDiagram
 - [x] 确认 `/identity/me` 完整响应结构。→ 生产测试账号联调通过，顶层返回 `client_id`、`permissions` 等字段。
 - [x] 确认统一错误响应结构。→ FastAPI `{"detail": {"code", "message"}}` 信封；422 校验为 `{"detail": [{type, loc, msg}]}` 数组。已在 ApiClient 适配。
 - [x] 确认 `component_type` 枚举和默认值。→ 自由字符串（示例 cabinet/wall/floor），非固定枚举。
-- [ ] 确认 code、material_tag、idempotency_key 长度和字符限制。→ 需联调验证。
+- [x] 确认 code、material_tag、idempotency_key 长度和字符限制。→ `source_version` 上限 64 字符（实测 64→200 / 65→500，超长返回未捕获 500 而非 422）；`idempotency_key` 实测 59 字符正常；`code` 为 19 字符短码。插件已将 `source_version` 截断至 23 字符。
 - [x] 确认 Part 单位使用 `m²/m³` 还是 `m2/m3`。→ 纯 ASCII（`m2`/`m3`/`m`/`套`/`件`）。
-- [ ] 确认单次 payload 字节数和数组数量限制。→ 需联调验证。
+- [ ] 确认单次 payload 字节数和数组数量限制。→ 20000 组件 / ~3.5MB 可通过，确切上限未探到。
 - [ ] 确认是否需要组件父子关系、置信度或策略来源字段。→ 需与服务端沟通。
 
 ### 阶段 1：HTTP 与认证
@@ -761,11 +761,11 @@ sequenceDiagram
 ### 阶段 5：联调与发布
 
 - [ ] 使用测试租户验证全部认证错误。
-- [ ] 验证权限和模块开关。
-- [ ] 验证多租户登录。
+- [x] 验证权限和模块开关。→ 生产账号 `quantity:ingest` 权限校验通过（`can_push?`）；模块开关未单独切换验证。
+- [ ] 验证多租户登录。→ 当前测试账号为单租户，`TENANT_SELECTION_REQUIRED` 分支仅单测覆盖，需多租户账号线上复验。
 - [x] 使用生产测试账号验证登录、`/identity/me` 和 `quantity:ingest` 权限。
-- [ ] 验证幂等和模型版本创建。
-- [ ] 验证大模型超时、413 和网关限制。
+- [x] 验证幂等和模型版本创建。→ 相同 payload 二次推送 `sheet_id`/`model_version_id` 完全一致（去重生效）；新 idempotency_key 创建新模型版本。
+- [ ] 验证大模型超时、413 和网关限制。→ 20000 组件 / ~3.5MB 未触发 413；确切上限与超时未专项验证。
 - [ ] Windows/macOS 安全存储和重启恢复测试。
 - [x] 浏览器预览验证独立登录页、登录门禁、错误提示和登录后解锁。
 - [x] 检查 RBZ 包含新增文件。

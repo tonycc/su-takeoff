@@ -186,6 +186,7 @@ Scanner → WorkbenchPresenter → JSON → frontend _workbench → renderPositi
 - **显式优于隐式**：会改变算量结果的判定必须有视觉锚点。几何启发只能产生「待确认建议」，不默默改结果。
 - **Token 安全**：access_token 仅存内存，refresh_token 存系统安全存储（macOS Keychain）。密码不入日志、不持久化。安全存储不可用时降级为进程内会话（重启需重新登录）。
 - **推送幂等**：`idempotency_key = su-v2-<model_key>-<payload_hash[0,16]>`，payload_hash 基于规范化 JSON 的 SHA256。同一模型内容不变则 key 不变，服务端据此去重。
+- **`source_version` 服务端上限 64 字符**：联调实测 64→200 / 65→500（超长触发服务端未捕获异常，返回 500 而非 422）。`QuantityPayloadBuilder` 必须用 `sha256:<payload_hash[0,16]>`（23 字符），切勿改回完整 64 位 hash（71 字符会恒 500）。payload_hash 不含 source_version，截断不影响幂等键。
 - **云端同步不阻塞 UI**：推送在后台线程执行（`Thread.new`），结果通过 `dialog.execute_script` 回主线程派发。Dialog 销毁后安全跳过回调。
 - **API 测试不依赖网络和 SU 运行时**：通过 `transport:` 注入 mock HTTP 层、`sleeper:` / `jitter:` 注入跳过真实等待、`persist_success: false` 跳过模型写入。
 - **服务端错误响应格式（FastAPI）**：业务错误为 `{"detail": {"code": "...", "message": "..."}}`，422 校验为 `{"detail": [{type, loc, msg}]}` 数组。`ApiClient#unwrap_detail` 统一解包。`ApiError.body` 保留原始响应（含 `detail` 信封），上层（如 `AuthSession#tenant_options_from`）从 `body['detail']` 读取扩展字段。生产 Base URL：`https://gzzyai.com`。
