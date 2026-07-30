@@ -54,6 +54,7 @@ module SuTakeoff
       @dialog.add_action_callback('get_mappings') { |_ctx| require_login! && send_mappings }
       @dialog.add_action_callback('save_mapping') { |_ctx, json| require_login! && save_mapping(json) }
       @dialog.add_action_callback('search_skus') { |_ctx, json| require_login! && search_skus(json) }
+      @dialog.add_action_callback('set_material_sku') { |_ctx, json| require_login! && set_material_sku(json) }
       @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| require_login! && delete_mapping(su_name) }
       @dialog.add_action_callback('import_csv') { |_ctx| require_login! && import_csv_dialog }
       @dialog.add_action_callback('export_csv') { |_ctx| require_login! && export_csv_dialog }
@@ -427,6 +428,19 @@ module SuTakeoff
             data['unit'], data['spec'], (data['waste_rate'] || 0.0).to_f,
             data['platform_material_tag'],
             data['platform_sku_id'], data['platform_sku_code'], data['platform_sku_name'])
+      m.save_json(PluginState.mapping_path)
+      PluginState.instance.save_mapping_to_model_dict
+      send_mappings
+      send_workbench_state if @last_scan
+    end
+
+    # 模型视图「产品信息」列内联选择：仅更新该材质的 SKU 关联（未映射自动建映射），
+    # 保存后刷新映射表与工作台，使所有同材质行同步显示。
+    def set_material_sku(json)
+      data = JSON.parse(json)
+      m = PluginState.instance.mapping
+      m.update_sku(data['su_name'], data['platform_sku_id'],
+                   data['platform_sku_code'], data['platform_sku_name'])
       m.save_json(PluginState.mapping_path)
       PluginState.instance.save_mapping_to_model_dict
       send_mappings
