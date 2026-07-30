@@ -53,6 +53,7 @@ module SuTakeoff
 
       @dialog.add_action_callback('get_mappings') { |_ctx| require_login! && send_mappings }
       @dialog.add_action_callback('save_mapping') { |_ctx, json| require_login! && save_mapping(json) }
+      @dialog.add_action_callback('search_skus') { |_ctx, json| require_login! && search_skus(json) }
       @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| require_login! && delete_mapping(su_name) }
       @dialog.add_action_callback('import_csv') { |_ctx| require_login! && import_csv_dialog }
       @dialog.add_action_callback('export_csv') { |_ctx| require_login! && export_csv_dialog }
@@ -423,7 +424,8 @@ module SuTakeoff
       m = PluginState.instance.mapping
       m.add(data['su_name'], data['material_name'], data['category'],
             data['unit'], data['spec'], (data['waste_rate'] || 0.0).to_f,
-            data['platform_material_tag'])
+            data['platform_material_tag'],
+            data['platform_sku_id'], data['platform_sku_code'], data['platform_sku_name'])
       m.save_json(PluginState.mapping_path)
       PluginState.instance.save_mapping_to_model_dict
       send_mappings
@@ -685,6 +687,35 @@ module SuTakeoff
         run_on_ui_thread do
           @cloud_busy = false
           send_cloud_error(e)
+        end
+      end
+    end
+
+    def search_skus(json)
+      data = JSON.parse(json)
+      keyword = data['keyword'].to_s
+      req_id = data['req_id']
+      ensure_cloud_ui_pump
+      Thread.new do
+        begin
+          result = auth_session.with_access_token_retry do |token|
+            api_client.materials(
+              access_token: token,
+              keyword: keyword.empty? ? nil : keyword,
+              page_size: 20
+            )
+          end
+          items = result.is_a?(Hash) ? Array(result['items']) : []
+          total = result.is_a?(Hash) ? (result['total'] || items.size) : items.size
+          payload = JSON.generate({ req_id: req_id, total: total, items: items })
+          run_on_ui_thread do
+            @dialog.execute_script("window.receiveSkuResults(#{payload})") rescue nil
+          end
+        rescue => e
+          err = JSON.generate({ req_id: req_id, error: login_error_message(e) })
+          run_on_ui_thread do
+            @dialog.execute_script("window.receiveSkuResults(#{err})") rescue nil
+          end
         end
       end
     end
