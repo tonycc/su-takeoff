@@ -24,18 +24,16 @@ module SuTakeoff
 
       DEFAULT_RETRY_DELAYS = [1, 2, 4].freeze
 
-      def initialize(api_client:, auth_session:, outbox:, binding:, mapping:, component_mapping:,
-                     policy:, ignored: [], retry_delays: DEFAULT_RETRY_DELAYS,
+      def initialize(api_client:, auth_session:, outbox:, binding:, component_mapping:,
+                     policy:, retry_delays: DEFAULT_RETRY_DELAYS,
                      sleeper: ->(seconds) { sleep(seconds) }, jitter: ->(_attempt) { 0.0 },
                      persist_success: true)
         @api_client = api_client
         @auth_session = auth_session
         @outbox = outbox
         @binding = binding
-        @mapping = mapping
         @component_mapping = component_mapping
         @policy = policy
-        @ignored = ignored || []
         @retry_delays = retry_delays
         @sleeper = sleeper
         @jitter = jitter
@@ -109,11 +107,9 @@ module SuTakeoff
         build = QuantityPayloadBuilder.new(
           items: items,
           openings: openings,
-          mapping: @mapping,
           component_mapping: @component_mapping,
           policy: @policy,
-          binding: @binding,
-          ignored: @ignored
+          binding: @binding
         ).build
 
         return build if build.issues.empty?

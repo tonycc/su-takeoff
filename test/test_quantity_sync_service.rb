@@ -1,6 +1,5 @@
 require_relative 'test_helper'
 require 'tmpdir'
-require 'src/mapping'
 require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/calculator'
@@ -63,8 +62,6 @@ class TestQuantitySyncService < Minitest::Test
   end
 
   def setup
-    @mapping = SuTakeoff::MaterialMapping.new
-    @mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
     @component_mapping = SuTakeoff::ComponentMapping.new
     @policy = SuTakeoff::TakeoffPolicy.new
     @binding = Binding.new
@@ -91,7 +88,6 @@ class TestQuantitySyncService < Minitest::Test
       auth_session: auth,
       outbox: outbox,
       binding: @binding,
-      mapping: @mapping,
       component_mapping: @component_mapping,
       policy: @policy,
       retry_delays: retry_delays,
@@ -103,7 +99,6 @@ class TestQuantitySyncService < Minitest::Test
     SuTakeoff::Api::QuantityPayloadBuilder.new(
       items: [item],
       openings: [],
-      mapping: @mapping,
       component_mapping: @component_mapping,
       policy: @policy,
       binding: @binding
@@ -129,9 +124,7 @@ class TestQuantitySyncService < Minitest::Test
 
   def test_validation_failure_does_not_call_api_or_write_outbox
     Dir.mktmpdir do |dir|
-      @mapping = SuTakeoff::MaterialMapping.new
-      @mapping.add('paint', '乳胶漆', '涂料', 'm²')
-      @policy = SuTakeoff::TakeoffPolicy.new
+      @binding.project_code = ''
       outbox = SuTakeoff::Api::SyncOutbox.new(dir: dir)
       client = Client.new
       sync = service(client: client, outbox: outbox)
@@ -139,7 +132,7 @@ class TestQuantitySyncService < Minitest::Test
       result = sync.push(items: [item], openings: [])
 
       refute result.success?
-      assert_includes result.issues.map { |i| i[:code] }, :missing_platform_material_tag
+      assert_includes result.issues.map { |i| i[:code] }, :missing_project_code
       assert_empty client.calls
       assert_empty outbox.all
     end
@@ -218,7 +211,6 @@ class TestQuantitySyncService < Minitest::Test
         auth_session: Auth.new,
         outbox: outbox,
         binding: @binding,
-        mapping: @mapping,
         component_mapping: @component_mapping,
         policy: @policy,
         retry_delays: [],

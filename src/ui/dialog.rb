@@ -706,11 +706,9 @@ module SuTakeoff
       build = Api::QuantityPayloadBuilder.new(
         items: @last_scan[:items],
         openings: @last_scan[:openings],
-        mapping: PluginState.instance.mapping,
         component_mapping: PluginState.instance.component_mapping,
         policy: PluginState.instance.takeoff_policy,
-        binding: binding,
-        ignored: PluginState.instance.ignored
+        binding: binding
       ).build
 
       unless build.issues.empty?
@@ -729,10 +727,8 @@ module SuTakeoff
           auth_session: auth_session,
           outbox: outbox,
           binding: binding,
-          mapping: PluginState.instance.mapping,
           component_mapping: PluginState.instance.component_mapping,
           policy: PluginState.instance.takeoff_policy,
-          ignored: PluginState.instance.ignored,
           persist_success: false
         )
         result = sync.push_built(build)
