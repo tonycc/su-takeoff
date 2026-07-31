@@ -208,10 +208,8 @@ module SuTakeoff
           openings: @last_scan[:openings],
           hierarchy: @last_scan[:hierarchy],
           colors: @last_scan[:colors],
-          mapping: PluginState.instance.mapping,
           component_mapping: PluginState.instance.component_mapping,
           policy: PluginState.instance.takeoff_policy,
-          ignored: PluginState.instance.ignored,
           tag_defs: PluginState.instance.config['tag_defs'] || {},
           component_sku: PluginState.instance.component_sku
         ).build

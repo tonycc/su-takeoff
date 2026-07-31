@@ -3,16 +3,14 @@ module SuTakeoff
   # Dialog 不再重复做 policy 决议、unit 选择、geometry 聚合，只负责 IO。
   class WorkbenchPresenter
     def initialize(items:, openings:, hierarchy:, colors:,
-                   mapping:, component_mapping:, policy:,
-                   ignored: [], tag_defs: {}, component_sku: nil)
+                   component_mapping:, policy:,
+                   tag_defs: {}, component_sku: nil)
       @items = items
       @openings = openings
       @hierarchy = hierarchy
       @colors = colors
-      @mapping = mapping
       @component_mapping = component_mapping
       @policy = policy
-      @ignored = ignored
       @tag_defs = tag_defs
       @component_sku = component_sku
     end
@@ -22,8 +20,6 @@ module SuTakeoff
         overview: build_overview,
         items: serialize_items,
         openings: @openings.map(&:to_h),
-        ignored: ignored_names,
-        unresolved: unresolved_names,
         hierarchy: @hierarchy,
         geometry_usages: build_geometry_usages,
         component_skus: build_component_skus,
@@ -58,18 +54,6 @@ module SuTakeoff
       @used_names ||= face_items.map(&:su_material).compact.uniq
     end
 
-    def unresolved_names
-      @unresolved_names ||= used_names.reject { |n| @mapping.get(n) || @ignored.include?(n) }
-    end
-
-    def ignored_names
-      @ignored_names ||= @ignored & used_names
-    end
-
-    def mapped_names
-      @mapped_names ||= used_names.select { |n| @mapping.get(n) }
-    end
-
     def calc
       @calc ||= Calculator.new(@component_mapping, policy: @policy)
     end
@@ -84,10 +68,7 @@ module SuTakeoff
         instance_total: instance_items.sum(&:qty).round(0),
         total_openings: @openings.size,
         total_opening_area: @openings.sum(&:area).round(2),
-        material_count: used_names.size,
-        mapped: mapped_names.size,
-        ignored_count: ignored_names.size,
-        unresolved_count: unresolved_names.size
+        material_count: used_names.size
       }
     end
 

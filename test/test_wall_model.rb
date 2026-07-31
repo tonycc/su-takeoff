@@ -1,6 +1,5 @@
 require_relative 'test_helper'
 require 'src/calculator'
-require 'src/mapping'
 require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/workbench_presenter'
@@ -13,15 +12,10 @@ module SuTakeoff
   # 验证：洞口扣减、薄板去重、踢脚线线材识别仍然正确。
   class TestWallModel < Minitest::Test
     def setup
-      @mapping = MaterialMapping.new
-      @mapping.add('marble_01',  '爵士白大理石', '石材', 'm²', '大板',      0.08)
-      @mapping.add('tile_302',   '马可波罗灰砖',   '瓷砖', 'm²', '600×600',  0.05)
-      @mapping.add('paint_w',    '多乐士净味白',   '涂料', 'm²', '18L/桶',   0.05)
-      @mapping.add('wood_oak',   '橡木复合地板',   '木材', 'm²', '1200×200', 0.05)
-      @mapping.add('skirting',   '实木踢脚线',     '木材', 'm',  '80mm',     0.05)
-
       @cm = ComponentMapping.new
-      @policy = TakeoffPolicy.new
+      # 踢脚线通过图层规则触发 :length → solid_linear 路由
+      # （3.5 档策略自动匹配已随材料映射移除，改由第 2 档图层规则触发）
+      @policy = TakeoffPolicy.new(layer_rules: { '踢脚线' => :length })
     end
 
     # 各房间的 entity_id：客厅=101 主卧=201 卫生间=301
@@ -79,6 +73,7 @@ module SuTakeoff
     end
 
     # 客厅踢脚线 — 绕墙一圈 (8+5)*2 = 26m, 高80mm 宽80mm → 长宽比 2.8/0.08 >15 → 线材
+    # layer_name='踢脚线' + policy.layer_rules={'踢脚线'=>:length} → solid_linear 路由
     def living_skirting
       walls = [
         { id: 7,  w: 8.0, normal: [0,1,0] },
@@ -89,7 +84,7 @@ module SuTakeoff
       walls.map do |w|
         ScanItem.face(face_id: w[:id], su_material: 'skirting', area: w[:w] * 0.08,
                       normal: w[:normal], width: 0.08, height: w[:w],
-                      layer_name: 'Layer0', component_path: ['客厅'],
+                      layer_name: '踢脚线', component_path: ['客厅'],
                       component_path_ids: [LIVING_EID], z_center: 0.04)
       end
     end
@@ -213,8 +208,8 @@ module SuTakeoff
         hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
                      definition_name: nil, depth: 0, hidden: false, children: [] },
         colors: {},
-        mapping: @mapping, component_mapping: @cm,
-        policy: @policy, ignored: [], tag_defs: {}
+        component_mapping: @cm,
+        policy: @policy, tag_defs: {}
       ).build[:geometry_usages]
     end
 
@@ -239,8 +234,9 @@ module SuTakeoff
       floor = find_usage(usages, LIVING_EID, 'marble_01')
       refute_nil floor
       assert_in_delta 40.0, floor[:qty_area], 0.01
-      # 来自映射，非启发
-      assert_equal 'explicit', floor[:confidence]
+      # 无显式标签/图层规则时落到几何启发式 → confidence='heuristic'
+      # （材料映射档已移除，原 mapping unit 触发的 'explicit' 不再适用）
+      assert_equal 'heuristic', floor[:confidence]
     end
 
     def test_living_paint_combines_walls_and_ceiling_with_opening_deduction
@@ -354,7 +350,9 @@ module SuTakeoff
     end
 
     def test_skirting_strategy_name_in_geometry_usage
-      # 踢脚线 mapping unit='m' → solid_linear 默认策略
+      # 踢脚线 layer_name='踢脚线' + policy layer_rules={'踢脚线'=>:length}
+      # → 第 2 档图层规则决议为 :length → solid_linear 默认策略
+      # （原 3.5 档 SkirtingLinear 自动匹配已随材料映射移除）
       usages = usages_for(all_items, [])
       skirting = find_usage(usages, LIVING_EID, 'skirting')
       refute_nil skirting
