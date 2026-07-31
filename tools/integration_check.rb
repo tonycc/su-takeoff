@@ -132,7 +132,7 @@ def build_payload(items)
   Api::QuantityPayloadBuilder.new(
     items: items, openings: [], mapping: build_mapping,
     component_mapping: ComponentMapping.new,
-    policy: TakeoffPolicy.new(mapping: build_mapping),
+    policy: TakeoffPolicy.new,
     binding: fake_binding
   ).build
 end
@@ -208,7 +208,7 @@ service = Api::QuantitySyncService.new(
   api_client: client, auth_session: session, outbox: outbox,
   binding: fake_binding, mapping: build_mapping,
   component_mapping: ComponentMapping.new,
-  policy: TakeoffPolicy.new(mapping: build_mapping),
+  policy: TakeoffPolicy.new,
   persist_success: false
 )
 

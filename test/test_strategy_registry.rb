@@ -132,10 +132,10 @@ module SuTakeoff
       isolated.register(Strategies::InstanceCount.new)
       isolated.register(Strategies::FaceLinear.new)
 
-      m = SuTakeoff::MaterialMapping.new
-      m.add('xxx', 'X', 'cat', 'm²', '', 0.05)
-
-      policy = SuTakeoff::TakeoffPolicy.new(mapping: m, strategies: isolated)
+      # 材料映射已移除：用 layer_rules 触发 :area 决议，验证注入的 Registry
+      # 的 default_for(:area) 被使用（而非 global）。
+      policy = SuTakeoff::TakeoffPolicy.new(strategies: isolated,
+                                            layer_rules: { 'L0' => :area })
       item = SuTakeoff::ScanItem.face(
         face_id: 1, su_material: 'xxx', area: 5.0, normal: [0,0,1],
         width: 2.0, height: 2.5, layer_name: 'L0',

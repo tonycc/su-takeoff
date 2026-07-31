@@ -1,17 +1,10 @@
 require_relative 'test_helper'
-require 'src/mapping'
 require 'src/takeoff_policy'
 
 module SuTakeoff
   class TestTakeoffPolicy < Minitest::Test
-    def setup
-      @mapping = MaterialMapping.new
-      @mapping.add('marble_01', '爵士白', '石材', 'm²', '大板', 0.08)
-      @mapping.add('skirting_m', '踢脚线', '木材', 'm', '80mm', 0.05)
-      @mapping.add('lamp_01', '台灯', '灯具', '个', '', 0)
-    end
-
     # 构造一个 :face ScanItem。所有调用都使用默认 kind: :face。
+    # su_material 仅作为标签保留，不再参与 policy 决议（材料映射已移除）。
     def make_item(su_material: 'marble_01',
                   normal: [0, 1, 0], width: 5.0, height: 3.0,
                   layer_name: 'Layer0', tags: nil)
@@ -28,8 +21,7 @@ module SuTakeoff
     # ---- 优先级 1: AttrDict ----
 
     def test_attr_dict_overrides_everything
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { 'Layer0' => :area })
+      policy = TakeoffPolicy.new(layer_rules: { 'Layer0' => :area })
       item = make_item(tags: { method: 'length' })
       r = policy.resolve(item)
       assert_equal :length, r.method
@@ -37,7 +29,7 @@ module SuTakeoff
     end
 
     def test_attr_dict_skip
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       item = make_item(tags: { method: 'skip' })
       r = policy.resolve(item)
       assert_equal :skip, r.method
@@ -45,19 +37,18 @@ module SuTakeoff
     end
 
     def test_attr_dict_invalid_method_falls_through
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       item = make_item(tags: { method: 'bogus' })
       r = policy.resolve(item)
-      # 落入 mapping 兜底（marble_01 → area）
-      assert_equal :area, r.method
-      assert_equal :mapping, r.source
+      # 无效 method 不命中任何档 → default skip（材料映射已移除）
+      assert_equal :skip, r.method
+      assert_equal :default, r.source
     end
 
     # ---- 优先级 2: layer_rules ----
 
     def test_layer_rule_length
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { '线条' => :length })
+      policy = TakeoffPolicy.new(layer_rules: { '线条' => :length })
       item = make_item(layer_name: '线条')
       r = policy.resolve(item)
       assert_equal :length, r.method
@@ -65,35 +56,33 @@ module SuTakeoff
     end
 
     def test_layer_rule_string_value_normalized
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { '线条' => 'length' })
+      policy = TakeoffPolicy.new(layer_rules: { '线条' => 'length' })
       item = make_item(layer_name: '线条')
       assert_equal :length, policy.resolve(item).method
     end
 
     def test_layer_rule_unknown_layer_falls_through
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { '线条' => :length })
+      policy = TakeoffPolicy.new(layer_rules: { '线条' => :length })
       item = make_item(layer_name: 'Layer0')
       r = policy.resolve(item)
-      assert_equal :area, r.method
-      assert_equal :mapping, r.source
+      # 无规则命中 → default skip（材料映射已移除）
+      assert_equal :skip, r.method
+      assert_equal :default, r.source
     end
 
     def test_layer_rule_invalid_method_dropped
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { 'Layer0' => :bogus })
+      policy = TakeoffPolicy.new(layer_rules: { 'Layer0' => :bogus })
       item = make_item(layer_name: 'Layer0')
       r = policy.resolve(item)
-      # 规则被 normalize 丢弃，落 mapping
-      assert_equal :area, r.method
-      assert_equal :mapping, r.source
+      # 规则被 normalize 丢弃 → default skip
+      assert_equal :skip, r.method
+      assert_equal :default, r.source
     end
 
-    # ---- 优先级 3: 启发式 ----
+    # ---- 优先级 4: 启发式（弱信号，仅产生待确认建议）----
 
     def test_heuristic_recognizes_narrow_vertical_face
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       # 0.05m 短边 + 8m 长边，长宽比 160 → 命中
       item = make_item(su_material: 'unknown', normal: [0, 1, 0],
                        width: 0.05, height: 8.0)
@@ -103,17 +92,16 @@ module SuTakeoff
     end
 
     def test_heuristic_excludes_horizontal_face
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       # 顶面，即使形状窄长也不应被判线材
       item = make_item(su_material: 'unknown', normal: [0, 0, 1],
                        width: 0.05, height: 8.0)
       r = policy.resolve(item)
-      # mapping 不存在 unknown，落 default skip
       assert_equal :skip, r.method
     end
 
     def test_heuristic_excludes_wide_face
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       # 短边 0.5m > 阈值 0.2m，不算线材（窗台板那种）
       item = make_item(su_material: 'unknown', normal: [0, 1, 0],
                        width: 0.5, height: 9.0)
@@ -122,7 +110,7 @@ module SuTakeoff
     end
 
     def test_heuristic_excludes_low_aspect_ratio
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       # 长宽比 10 < 15
       item = make_item(su_material: 'unknown', normal: [0, 1, 0],
                        width: 0.1, height: 1.0)
@@ -131,52 +119,16 @@ module SuTakeoff
     end
 
     def test_heuristic_disabled_falls_through
-      policy = TakeoffPolicy.new(mapping: @mapping, heuristics_enabled: false)
+      policy = TakeoffPolicy.new(heuristics_enabled: false)
       item = make_item(su_material: 'unknown', normal: [0, 1, 0],
                        width: 0.05, height: 8.0)
       r = policy.resolve(item)
-      # 启发式关 → 落 default skip（无映射）
+      # 启发式关 → default skip
       assert_equal :skip, r.method
     end
 
-    def test_mapping_overrides_heuristic
-      # 材质映射（显式配置）优先级高于几何启发式（自动猜测）
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'marble_01', normal: [0, 1, 0],
-                       width: 0.05, height: 8.0)
-      r = policy.resolve(item)
-      assert_equal :area, r.method
-      assert_equal :mapping, r.source
-    end
-
-    # ---- 优先级 4: mapping 兜底 ----
-
-    def test_mapping_area
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'marble_01')
-      r = policy.resolve(item)
-      assert_equal :area, r.method
-      assert_equal :mapping, r.source
-    end
-
-    def test_mapping_length_unit
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'skirting_m', width: 1.0, height: 5.0)
-      r = policy.resolve(item)
-      assert_equal :length, r.method
-      assert_equal :mapping, r.source
-    end
-
-    def test_mapping_count_unit
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'lamp_01')
-      r = policy.resolve(item)
-      assert_equal :count, r.method
-      assert_equal :mapping, r.source
-    end
-
     def test_unmapped_no_heuristic_no_layer_skip
-      policy = TakeoffPolicy.new(mapping: @mapping, heuristics_enabled: false)
+      policy = TakeoffPolicy.new(heuristics_enabled: false)
       item = make_item(su_material: 'unknown')
       r = policy.resolve(item)
       assert_equal :skip, r.method
@@ -186,50 +138,48 @@ module SuTakeoff
     # ---- instance 分支 ----
 
     def test_instance_always_count
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       item = ScanItem.instance(face_id: 100, su_material: 'lamp_01', unit: '个',
                                layer_name: 'Layer0', component_path: ['客厅'],
                                component_path_ids: [101])
       r = policy.resolve(item)
       assert_equal :count, r.method
+      assert_equal :component, r.source
     end
 
     # ---- resolve_container ----
 
     def test_container_attr_length
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       assert_equal :length, policy.resolve_container(layer_name: 'X', attr_method: 'length')
     end
 
     def test_container_attr_volume
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       assert_equal :volume, policy.resolve_container(layer_name: 'X', attr_method: :volume)
     end
 
     def test_container_attr_area_returns_nil
       # 容器级只识别 length/volume；area 让 Scanner 正常下钻
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       assert_nil policy.resolve_container(layer_name: 'X', attr_method: 'area')
     end
 
     def test_container_layer_rule
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { '线条' => :length, '砌体' => :volume })
+      policy = TakeoffPolicy.new(layer_rules: { '线条' => :length, '砌体' => :volume })
       assert_equal :length, policy.resolve_container(layer_name: '线条')
       assert_equal :volume, policy.resolve_container(layer_name: '砌体')
     end
 
     def test_container_layer_rule_area_returns_nil
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 layer_rules: { '面砖' => :area })
+      policy = TakeoffPolicy.new(layer_rules: { '面砖' => :area })
       assert_nil policy.resolve_container(layer_name: '面砖')
     end
 
     # ---- 阈值可配 ----
 
     def test_threshold_override
-      policy = TakeoffPolicy.new(mapping: @mapping,
-                                 thresholds: { linear_min_aspect_ratio: 5,
+      policy = TakeoffPolicy.new(thresholds: { linear_min_aspect_ratio: 5,
                                                linear_max_short_edge_m: 0.5 })
       # 长宽比 6, 短边 0.3 → 默认会被排除，覆盖后命中
       item = make_item(su_material: 'unknown', normal: [0, 1, 0],
@@ -241,25 +191,8 @@ module SuTakeoff
 
     # ---- Stage 3: ResolveResult.strategy ----
 
-    def test_resolve_returns_strategy_for_mapped_material
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'marble_01')
-      r = policy.resolve(item)
-      refute_nil r.strategy
-      assert_equal :face_area, r.strategy.name
-      assert_equal :area, r.method  # method 字段从 strategy.method 派生
-    end
-
-    def test_resolve_returns_strategy_for_length_mapping
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'skirting_m')
-      r = policy.resolve(item)
-      assert_equal :solid_linear, r.strategy.name
-      assert_equal :length, r.method
-    end
-
     def test_resolve_returns_face_linear_for_heuristic
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       item = make_item(su_material: 'unknown', normal: [0, 1, 0],
                        width: 0.05, height: 8.0)
       r = policy.resolve(item)
@@ -270,60 +203,13 @@ module SuTakeoff
     end
 
     def test_resolve_instance_returns_solid_count_strategy
-      policy = TakeoffPolicy.new(mapping: @mapping)
+      policy = TakeoffPolicy.new
       item = ScanItem.instance(face_id: 100, su_material: 'lamp_01', unit: '个',
                                layer_name: 'Layer0', component_path: ['客厅'], component_path_ids: [101])
       r = policy.resolve(item)
       assert_equal :solid_count, r.strategy.name
       assert_equal :count, r.method
-    end
-
-    # ---- Stage 4: auto_match 档（3.5）----
-
-    def test_auto_match_skirting_by_definition_name
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'skirting_m')
-      item.component_path = ['主卧踢脚线-001']
-      r = policy.resolve(item)
-      refute_equal :solid_linear, r.strategy.name
-      assert_includes [:skirting_linear, :skirting_linear_default], r.strategy.name
-      assert_equal :auto_match, r.source
-    end
-
-    def test_no_auto_match_falls_to_default_mapping
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'skirting_m')
-      item.component_path = ['普通线条']
-      r = policy.resolve(item)
-      assert_equal :solid_linear, r.strategy.name
-      assert_equal :mapping, r.source
-    end
-
-    def test_auto_match_pipe_by_pattern
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'skirting_m')
-      item.component_path = ['PVC管道-DN50']
-      r = policy.resolve(item)
-      # WirePath（内置）和 pipe_length_default（JSON）都能匹配，
-      # 注册顺序决定具体哪个先命中；都是合理结果
-      assert_includes [:pipe_length_default, :wire_path], r.strategy.name
-      assert_equal :auto_match, r.source
-    end
-
-    def test_auto_match_only_within_same_method
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'marble_01')
-      item.component_path = ['踢脚线-001']
-      r = policy.resolve(item)
-      assert_equal :face_area, r.strategy.name
-      assert_equal :mapping, r.source
-    end
-
-    def test_auto_match_skipped_when_no_mapping
-      policy = TakeoffPolicy.new(mapping: @mapping)
-      item = make_item(su_material: 'unknown')
-      r = policy.resolve(item)
-      assert_equal :skip, r.method
+      assert_equal :component, r.source
     end
   end
 end

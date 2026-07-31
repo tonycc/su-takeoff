@@ -17,7 +17,7 @@ module SuTakeoff
         hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
                      definition_name: nil, depth: 0, hidden: false, children: [] },
         colors: {}, mapping: mapping, component_mapping: ComponentMapping.new,
-        policy: TakeoffPolicy.new(mapping: mapping), ignored: [], tag_defs: {},
+        policy: TakeoffPolicy.new, ignored: [], tag_defs: {},
         component_sku: store
       )
       skus = presenter.build[:component_skus]
@@ -32,7 +32,7 @@ module SuTakeoff
         hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
                      definition_name: nil, depth: 0, hidden: false, children: [] },
         colors: {}, mapping: mapping, component_mapping: ComponentMapping.new,
-        policy: TakeoffPolicy.new(mapping: mapping), ignored: [], tag_defs: {}
+        policy: TakeoffPolicy.new, ignored: [], tag_defs: {}
       )
       assert_equal({}, presenter.build[:component_skus])
     end

@@ -20,7 +20,7 @@ module SuTakeoff
       @cm = ComponentMapping.new
       @cm.add('lamp_01', '台灯', '灯具', '个', '', 0.0, 'aggregate')
 
-      @policy = TakeoffPolicy.new(mapping: @mapping)
+      @policy = TakeoffPolicy.new
       @calc = Calculator.new(@mapping, @cm, policy: @policy)
     end
 

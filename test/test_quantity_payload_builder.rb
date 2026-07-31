@@ -8,7 +8,7 @@ class TestQuantityPayloadBuilder < Minitest::Test
   def setup
     @mapping = SuTakeoff::MaterialMapping.new
     @component_mapping = SuTakeoff::ComponentMapping.new
-    @policy = SuTakeoff::TakeoffPolicy.new(mapping: @mapping)
+    @policy = SuTakeoff::TakeoffPolicy.new
     @binding = Struct.new(
       :project_code,
       :project_name,

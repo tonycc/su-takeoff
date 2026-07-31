@@ -1,12 +1,12 @@
 module SuTakeoff
-  # 算量策略 —— 4 档优先级链
+  # 算量策略 —— 3 档优先级链
   #
   #   1. AttributeDictionary（每实例覆盖）  显式 · ScanItem.tags[:method]
   #   2. 图层规则                          显式 · layer_rules[layer_name]
-  #   3. 材质映射 unit                     显式 · 由 unit 词表反推
-  #   4. 几何启发                          自动 · 弱信号 · 仅当面满足严格条件且前三档均未命中
+  #   3. 几何启发                          自动 · 弱信号 · 仅当面满足严格条件且前两档均未命中
   #
   # 任意一档命中即返回，下面不再考虑。
+  # 材料映射档（原第 3 档 unit 兜底）与策略自动匹配档（原 3.5 档）已随材料映射一并移除。
   #
   # 不在内部读 PluginState/config.json，而是构造时注入 —— 单元测试可以直接造一个
   # Policy 实例不依赖 SU 运行时。
@@ -33,15 +33,13 @@ module SuTakeoff
 
     attr_reader :vertical_slab_gap, :vertical_slab_area_tol, :strategies
 
-    # mapping: MaterialMapping 实例（用于 unit 兜底）
     # layer_rules: { '线条' => :length, '砌体' => :volume, ... }
     #              值可以是 String 或 Symbol，内部归一为 Symbol
     # heuristics_enabled: 启发式开关
     # thresholds: { linear_min_aspect_ratio:, linear_max_short_edge_m: }
     # strategies: Strategies::Registry 实例；不传则使用 Registry.global
-    def initialize(mapping:, layer_rules: {}, heuristics_enabled: true,
+    def initialize(layer_rules: {}, heuristics_enabled: true,
                    tag_defs: {}, thresholds: {}, strategies: nil)
-      @mapping = mapping
       @layer_rules = normalize_layer_rules(layer_rules)
       @tag_defs = tag_defs || {}
       @heuristics = heuristics_enabled
@@ -54,12 +52,12 @@ module SuTakeoff
 
     # 面级判定。返回 ResolveResult（携带 Strategy 对象）。
     def resolve(item)
-      # instance：永远按整件统计，绕过 4 档策略
+      # instance：永远按整件统计，绕过策略链
       if item.kind == :instance
-        return result_for(:count, :mapping)
+        return result_for(:count, :component)
       end
 
-      # P3: 容器级整体量取已固化为 ScanItem.kind，Calculator 直接信任。
+      # 容器级整体量取已固化为 ScanItem.kind，Calculator 直接信任
       if item.kind == :solid
         return result_for(:volume, :layer)
       end
@@ -81,16 +79,7 @@ module SuTakeoff
         return result_for(m, :layer)
       end
 
-      # 3. 材质映射 unit（+ 3.5 自动匹配同 method 下的专用策略）
-      if @mapping && (record = @mapping.get(item.su_material))
-        hint_method = method_from_unit(record.unit)
-        if (matched = auto_match_strategy(item, hint_method, record))
-          return ResolveResult.new(strategy: matched, source: :auto_match)
-        end
-        return result_for(hint_method, :mapping)
-      end
-
-      # 4. 启发式（弱信号，仅产生待确认建议；仅在没有显式配置时触发）
+      # 3. 启发式（弱信号，仅产生待确认建议）
       if @heuristics && linear_face?(item)
         # 启发判定线材：用 face_linear（含 height fallback）而非 solid_linear
         strategy = @strategies.get(:face_linear) || @strategies.default_for(:length)
@@ -148,28 +137,6 @@ module SuTakeoff
       ResolveResult.new(strategy: strategy, source: source)
     end
 
-    # 遍历同 method 下的非默认策略，第一个 matches? 命中的返回。
-    # 跳过 default_for(method) 那个（避免默认策略反复命中自己）。
-    def auto_match_strategy(item, hint_method, record)
-      context = build_match_context(item, hint_method, record)
-      default = @strategies.default_for(hint_method)
-      @strategies.all.each do |s|
-        next if s.method != hint_method
-        next if default && s.name == default.name
-        return s if s.matches?(item, context)
-      end
-      nil
-    end
-
-    def build_match_context(item, hint_method, record)
-      def_name = item.component_path && item.component_path.last
-      {
-        definition_name: def_name,
-        unit: record && record.unit,
-        hint_method: hint_method
-      }
-    end
-
     # 严格的几何启发：必须是垂直面 + 横向窄长
     #   - |normal.z| < 0.5    排除水平面（地/顶不该被判线材）
     #   - width <= 0.2 m      排除宽面（窗台板那种短粗形状）
@@ -183,10 +150,6 @@ module SuTakeoff
       return false if item.width > @max_short_edge
       return false if item.height.nil? || item.height <= 0
       (item.height / item.width) > @min_aspect
-    end
-
-    def method_from_unit(unit)
-      self.class.classify_unit(unit)
     end
 
     def normalize_layer_rules(rules)

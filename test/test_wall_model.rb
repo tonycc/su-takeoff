@@ -21,7 +21,7 @@ module SuTakeoff
       @mapping.add('skirting',   '实木踢脚线',     '木材', 'm',  '80mm',     0.05)
 
       @cm = ComponentMapping.new
-      @policy = TakeoffPolicy.new(mapping: @mapping)
+      @policy = TakeoffPolicy.new
     end
 
     # 各房间的 entity_id：客厅=101 主卧=201 卫生间=301

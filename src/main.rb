@@ -29,11 +29,11 @@ module SuTakeoff
       end
     end
 
-    # 算量策略：基于当前 mapping + config 构造一个 TakeoffPolicy。
+    # 算量策略：基于当前 config 构造一个 TakeoffPolicy。
     # 每次调用都拿最新配置，避免缓存陈旧规则。
+    # 注：@mapping 仍保留（后续 P4 才删），但不再传给 Policy。
     def takeoff_policy
       TakeoffPolicy.new(
-        mapping: @mapping,
         layer_rules: @config['layer_rules'] || {},
         tag_defs: @config['tag_defs'] || {},
         heuristics_enabled: @config.fetch('heuristics_enabled', true),

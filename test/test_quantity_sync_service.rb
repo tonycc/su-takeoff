@@ -66,7 +66,7 @@ class TestQuantitySyncService < Minitest::Test
     @mapping = SuTakeoff::MaterialMapping.new
     @mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
     @component_mapping = SuTakeoff::ComponentMapping.new
-    @policy = SuTakeoff::TakeoffPolicy.new(mapping: @mapping)
+    @policy = SuTakeoff::TakeoffPolicy.new
     @binding = Binding.new
   end
 
@@ -131,7 +131,7 @@ class TestQuantitySyncService < Minitest::Test
     Dir.mktmpdir do |dir|
       @mapping = SuTakeoff::MaterialMapping.new
       @mapping.add('paint', '乳胶漆', '涂料', 'm²')
-      @policy = SuTakeoff::TakeoffPolicy.new(mapping: @mapping)
+      @policy = SuTakeoff::TakeoffPolicy.new
       outbox = SuTakeoff::Api::SyncOutbox.new(dir: dir)
       client = Client.new
       sync = service(client: client, outbox: outbox)
