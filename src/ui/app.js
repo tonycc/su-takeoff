@@ -28,7 +28,6 @@ function switchPage(page) {
   document.querySelectorAll('.page-content').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById('page-' + page).style.display = 'block';
   if (page === 'login' && previousPage !== 'login') callSketchUp('get_cloud_state');
-  if (page === 'mapping') callSketchUp('get_mappings');
   if (page === 'comp-mapping') callSketchUp('get_component_mappings');
   if (page === 'settings') callSketchUp('get_settings');
   if (page === 'cloud') callSketchUp('get_cloud_state');
