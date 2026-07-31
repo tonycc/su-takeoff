@@ -51,13 +51,8 @@ module SuTakeoff
       @dialog.add_action_callback('scan_all') { |_ctx| require_login! && do_scan(selection_only: false) }
       @dialog.add_action_callback('scan_selected') { |_ctx| require_login! && do_scan(selection_only: true) }
 
-      @dialog.add_action_callback('get_mappings') { |_ctx| require_login! && send_mappings }
-      @dialog.add_action_callback('save_mapping') { |_ctx, json| require_login! && save_mapping(json) }
       @dialog.add_action_callback('search_skus') { |_ctx, json| require_login! && search_skus(json) }
       @dialog.add_action_callback('set_component_sku') { |_ctx, json| require_login! && set_component_sku(json) }
-      @dialog.add_action_callback('delete_mapping') { |_ctx, su_name| require_login! && delete_mapping(su_name) }
-      @dialog.add_action_callback('import_csv') { |_ctx| require_login! && import_csv_dialog }
-      @dialog.add_action_callback('export_csv') { |_ctx| require_login! && export_csv_dialog }
       @dialog.add_action_callback('get_settings') { |_ctx| require_login! && send_settings }
 
       @dialog.add_action_callback('locate_material') { |_ctx, su_name| require_login! && locate_material(su_name) }
@@ -407,33 +402,6 @@ module SuTakeoff
       nil
     end
 
-    def send_mappings
-      mappings = PluginState.instance.mapping.all.map(&:to_h)
-      # 每次从文件读取最新配置，避免因插件加载时序导致使用旧默认值
-      cfg = if File.exist?(PluginState.config_path)
-              JSON.parse(File.read(PluginState.config_path))
-            else
-              {}
-            end
-      config = {
-        category_units: cfg['material_category_units'] || cfg['category_units'] || [],
-        config_units: cfg['units'] || []
-      }
-      @dialog.execute_script("window.renderMappings(#{JSON.generate(mappings)}, #{JSON.generate(config)})")
-    end
-
-    def save_mapping(json)
-      data = JSON.parse(json)
-      m = PluginState.instance.mapping
-      m.add(data['su_name'], data['material_name'], data['category'],
-            data['unit'], data['spec'], (data['waste_rate'] || 0.0).to_f,
-            data['platform_material_tag'])
-      m.save_json(PluginState.mapping_path)
-      PluginState.instance.save_mapping_to_model_dict
-      send_mappings
-      send_workbench_state if @last_scan
-    end
-
     # 模型视图「产品信息」列组件级选择：按组件定义名存 SKU 关联（独立存储，不影响算量），
     # 保存后刷新工作台，使所有同定义名的组件行同步显示。
     def set_component_sku(json)
@@ -443,15 +411,6 @@ module SuTakeoff
                 data['platform_sku_code'], data['platform_sku_name'])
       store.save_json(PluginState.component_sku_path)
       PluginState.instance.save_component_sku_to_model_dict
-      send_workbench_state if @last_scan
-    end
-
-    def delete_mapping(su_name)
-      m = PluginState.instance.mapping
-      m.delete(su_name)
-      m.save_json(PluginState.mapping_path)
-      PluginState.instance.save_mapping_to_model_dict
-      send_mappings
       send_workbench_state if @last_scan
     end
 
@@ -513,21 +472,6 @@ module SuTakeoff
       PluginState.instance.save_component_mapping_to_model_dict
       send_component_mappings
       send_workbench_state if @last_scan
-    end
-
-    def import_csv_dialog
-      path = UI.openpanel('选择映射CSV文件', '', 'CSV Files|*.csv||')
-      return unless path
-      PluginState.instance.mapping.import_csv(path)
-      PluginState.instance.mapping.save_json(PluginState.mapping_path)
-      PluginState.instance.save_mapping_to_model_dict
-      send_mappings
-    end
-
-    def export_csv_dialog
-      path = UI.savepanel('导出映射CSV', '', 'material_mapping.csv')
-      return unless path
-      PluginState.instance.mapping.export_csv(path)
     end
 
     def send_settings
