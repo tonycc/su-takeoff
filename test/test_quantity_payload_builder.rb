@@ -1,12 +1,10 @@
 require_relative 'test_helper'
-require 'src/mapping'
 require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/calculator'
 
 class TestQuantityPayloadBuilder < Minitest::Test
   def setup
-    @mapping = SuTakeoff::MaterialMapping.new
     @component_mapping = SuTakeoff::ComponentMapping.new
     @policy = SuTakeoff::TakeoffPolicy.new
     @binding = Struct.new(
@@ -25,7 +23,6 @@ class TestQuantityPayloadBuilder < Minitest::Test
     SuTakeoff::Api::QuantityPayloadBuilder.new(
       items: items,
       openings: openings,
-      mapping: @mapping,
       component_mapping: @component_mapping,
       policy: @policy,
       binding: @binding
@@ -33,7 +30,6 @@ class TestQuantityPayloadBuilder < Minitest::Test
   end
 
   def test_builds_area_face_payload_with_opening_deduction
-    @mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
     item = SuTakeoff::ScanItem.face(
       face_id: 1,
       face_persistent_id: 101,
@@ -59,13 +55,11 @@ class TestQuantityPayloadBuilder < Minitest::Test
     component = payload[:components].first
     assert_equal 'component_instance', component[:component_type]
     assert_equal 1, component[:faces].size
-    assert_equal 'paint', component[:faces].first[:material_tag]
     assert_equal 8.75, component[:faces].first[:area_m2]
     assert_empty component[:parts]
   end
 
   def test_aggregates_length_items_into_parts
-    @mapping.add('skirting', '踢脚线', '线材', 'm', '', 0.0, 'skirting')
     a = SuTakeoff::ScanItem.linear_solid(
       face_id: 1,
       face_persistent_id: 101,
@@ -91,34 +85,12 @@ class TestQuantityPayloadBuilder < Minitest::Test
 
     assert_empty result.issues
     part = result.payload[:components].first[:parts].first
-    assert_equal '踢脚线', part[:name]
+    assert_equal 'skirting', part[:name]
     assert_equal 5.5, part[:quantity]
     assert_equal 'm', part[:unit]
-    assert_equal 'skirting', part[:material_tag]
-  end
-
-  def test_missing_platform_material_tag_is_reported
-    @mapping.add('paint', '乳胶漆', '涂料', 'm²')
-    item = SuTakeoff::ScanItem.face(
-      face_id: 1,
-      su_material: 'paint',
-      area: 10.0,
-      normal: [0, 0, 1],
-      width: 2.0,
-      height: 5.0,
-      layer_name: '墙面',
-      component_path: [],
-      component_path_ids: []
-    )
-
-    result = build([item])
-
-    assert_equal [:missing_platform_material_tag, :empty_payload], result.issues.map { |i| i[:code] }
-    assert_empty result.payload[:components]
   end
 
   def test_same_input_produces_same_hash_and_idempotency_key
-    @mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
     item = SuTakeoff::ScanItem.face(
       face_id: 1,
       face_persistent_id: 101,
@@ -140,7 +112,6 @@ class TestQuantityPayloadBuilder < Minitest::Test
   end
 
   def test_source_version_within_server_limit_and_stable
-    @mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
     item = SuTakeoff::ScanItem.face(
       face_id: 1,
       face_persistent_id: 101,

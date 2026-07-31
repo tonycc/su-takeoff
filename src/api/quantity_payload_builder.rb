@@ -8,14 +8,12 @@ module SuTakeoff
     class QuantityPayloadBuilder
       BuildResult = Struct.new(:payload, :payload_hash, :issues, keyword_init: true)
 
-      def initialize(items:, openings:, mapping:, component_mapping:, policy:, binding:, ignored: [])
+      def initialize(items:, openings:, component_mapping:, policy:, binding:)
         @items = items
         @openings = openings || []
-        @mapping = mapping
         @component_mapping = component_mapping
         @policy = policy
         @binding = binding
-        @ignored = ignored || []
       end
 
       def build
@@ -64,19 +62,6 @@ module SuTakeoff
 
         resolutions.each do |resolution|
           item = resolution[:item]
-          next if ignored?(item.su_material)
-
-          record = lookup_record(item)
-          unless record
-            issues << issue(:unmapped_material, "未映射材料：#{item.su_material}", material: item.su_material)
-            next
-          end
-          material_tag = record.respond_to?(:platform_material_tag) ? record.platform_material_tag : nil
-          if material_tag.to_s.strip.empty?
-            issues << issue(:missing_platform_material_tag, "缺少平台材料标签：#{item.su_material}", material: item.su_material)
-            next
-          end
-
           component_code = component_code_for(item)
           grouped[component_code] ||= {
             code: component_code,
@@ -89,11 +74,10 @@ module SuTakeoff
           if resolution[:method] == :area && item.kind == :face
             grouped[component_code][:faces] << {
               code: face_code_for(item),
-              material_tag: material_tag,
               area_m2: round_quantity([(item.qty_area || item.qty).to_f - (opening_area_by_face[item.face_id] || 0.0), 0.0].max)
             }
           else
-            add_part(grouped[component_code], item, resolution, record, material_tag)
+            add_part(grouped[component_code], item, resolution)
           end
         end
 
@@ -116,19 +100,17 @@ module SuTakeoff
         end
       end
 
-      def add_part(component, item, resolution, record, material_tag)
+      def add_part(component, item, resolution)
         method = resolution[:method]
         unit = resolution[:unit].to_s.empty? ? item.unit.to_s : resolution[:unit].to_s
-        spec = record.respond_to?(:spec) ? record.spec.to_s : ''
-        name = record.respond_to?(:material_name) ? record.material_name.to_s : item.su_material.to_s
-        key = [component[:code], material_tag, method, unit, spec, name].join('|')
+        name = item.su_material.to_s
+        key = [component[:code], method, unit, name].join('|')
         code = code_with_prefix('p', key)
         component[:part_accumulator][code] ||= {
           code: code,
           name: name,
           quantity: 0.0,
-          unit: unit,
-          material_tag: material_tag
+          unit: unit
         }
         component[:part_accumulator][code][:quantity] += quantity_for(item, method)
       end
@@ -143,14 +125,6 @@ module SuTakeoff
           (item.qty_count || item.qty || 0).to_f
         else
           (item.qty_area || item.qty || 0).to_f
-        end
-      end
-
-      def lookup_record(item)
-        if %i[instance count_solid].include?(item.kind)
-          @component_mapping.get(item.su_material) || @mapping.get(item.su_material)
-        else
-          @mapping.get(item.su_material) || @component_mapping.get(item.su_material)
         end
       end
 
@@ -189,10 +163,6 @@ module SuTakeoff
 
       def code_with_prefix(prefix, raw)
         "#{prefix}-#{Digest::SHA256.hexdigest(raw.to_s)[0, 16]}"
-      end
-
-      def ignored?(material)
-        @ignored.include?(material)
       end
 
       def round_quantity(value)
