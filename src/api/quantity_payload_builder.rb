@@ -57,7 +57,7 @@ module SuTakeoff
       end
 
       def build_components(issues)
-        resolutions = Calculator.new(@mapping, @component_mapping, policy: @policy)
+        resolutions = Calculator.new(@component_mapping, policy: @policy)
                                 .compute_geometry_only(@items, @openings)
         opening_area_by_face = build_opening_area_map
         grouped = {}

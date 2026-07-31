@@ -71,7 +71,7 @@ module SuTakeoff
     end
 
     def calc
-      @calc ||= Calculator.new(@mapping, @component_mapping, policy: @policy)
+      @calc ||= Calculator.new(@component_mapping, policy: @policy)
     end
 
     # ---- overview ----

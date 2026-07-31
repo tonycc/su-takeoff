@@ -14,8 +14,7 @@ module SuTakeoff
     VERTICAL_SLAB_AREA_TOLERANCE = 0.02
     VERTICAL_SLAB_GAP_M = 0.05      # 5 cm 薄板厚度
 
-    def initialize(mapping, component_mapping = nil, policy: nil)
-      @mapping = mapping
+    def initialize(component_mapping = nil, policy: nil)
       @component_mapping = component_mapping
       @policy = policy
     end
@@ -49,11 +48,6 @@ module SuTakeoff
       out
     end
 
-    # Returns the unmapped material names from items
-    def unmapped_materials(items)
-      @mapping.unmapped_materials(items.map(&:su_material).compact)
-    end
-
     def self.face_orientation(normal)
       return 'object' if normal.nil? || normal[2].nil?
       z = normal[2].abs
@@ -85,7 +79,7 @@ module SuTakeoff
     end
 
     # 决议单个 item 的 method + source + strategy_name + unit。
-    # 优先走注入的 Policy；缺失时回到 mapping 兜底 + 未映射启发，保持旧调用兼容。
+    # 优先走注入的 Policy；policy 缺失时直接走启发兜底（保持旧调用兼容）。
     def resolve_method(item)
       if @policy
         r = @policy.resolve(item)
@@ -98,20 +92,6 @@ module SuTakeoff
           source: r.source,
           strategy_name: r.strategy && r.strategy.name,
           unit: unit_for(item, r.method, r.source)
-        }
-      end
-
-      # policy 缺失：mapping 兜底
-      record = lookup_record(item)
-      if record
-        method = item.kind == :instance ? :count : TakeoffPolicy.classify_unit(record.unit)
-        strategies = @policy&.strategies || Strategies::Registry.global
-        strategy = strategies.default_for(method)
-        return {
-          method: method,
-          source: :mapping,
-          strategy_name: strategy && strategy.name,
-          unit: unit_for(item, method, :mapping, record)
         }
       end
 
@@ -133,9 +113,9 @@ module SuTakeoff
       }
     end
 
-    # 单位选择：method 决定语义，source/record 决定细节。
+    # 单位选择：method 决定语义，record（仅 instance 来自组件映射）补充细节。
     #   :count   → record.unit（个/件/套），缺省回退 item.unit → Registry.default_for(:count)
-    #   :length  → mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位用 Registry 默认
+    #   :length  → Registry.default_for(:length)（'m'）
     #   :volume  → Registry.default_for(:volume)（'m³'）
     #   :area    → record.unit（m²），缺省回退 item.unit → Registry.default_for(:area)
     def unit_for(item, method, source, record = nil)
@@ -143,12 +123,7 @@ module SuTakeoff
       strategies = @policy&.strategies || Strategies::Registry.global
       case method
       when :length
-        # mapping 兜底时尊重 record.unit（'m'/'mm' 都可），其他档位用 strategy 默认
-        if source == :mapping && record && TakeoffPolicy.classify_unit(record.unit) == :length
-          record.unit
-        else
-          strategies.default_for(:length)&.default_unit || 'm'
-        end
+        strategies.default_for(:length)&.default_unit || 'm'
       when :count
         record&.unit || item.unit || strategies.default_for(:count)&.default_unit || '个'
       when :area
@@ -160,11 +135,9 @@ module SuTakeoff
     end
 
     def lookup_record(item)
-      if item.kind == :instance
-        @component_mapping&.get(item.su_material)
-      else
-        @mapping.get(item.su_material)
-      end
+      return @component_mapping&.get(item.su_material) if item.kind == :instance
+
+      nil
     end
 
     # ---- 字段读取兜底（仅 dedup 内部使用）----
