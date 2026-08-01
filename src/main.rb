@@ -6,12 +6,11 @@ module SuTakeoff
   class PluginState
     include Singleton
 
-    attr_reader :mapping, :component_mapping, :component_sku, :ignored, :config
+    attr_reader :component_mapping, :component_sku, :ignored, :config
 
     DICT_NAME = 'su_takeoff_data'
 
     def initialize
-      @mapping = MaterialMapping.new
       @component_mapping = ComponentMapping.new
       @component_sku = ComponentSkuMapping.new
       @ignored = []
@@ -31,7 +30,6 @@ module SuTakeoff
 
     # 算量策略：基于当前 config 构造一个 TakeoffPolicy。
     # 每次调用都拿最新配置，避免缓存陈旧规则。
-    # 注：@mapping 仍保留（后续 P4 才删），但不再传给 Policy。
     def takeoff_policy
       TakeoffPolicy.new(
         layer_rules: @config['layer_rules'] || {},
@@ -56,10 +54,6 @@ module SuTakeoff
     def unignore!(name)
       @ignored.delete(name)
       save_ignored
-    end
-
-    def self.mapping_path
-      File.join(PLUGIN_DIR, 'data', 'default_mapping.json')
     end
 
     def self.component_mapping_path
@@ -102,14 +96,6 @@ module SuTakeoff
       puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
     end
 
-    def save_mapping_to_model_dict
-      model = Sketchup.active_model
-      dict = model.attribute_dictionary(DICT_NAME, true)
-      dict['mapping'] = @mapping.save_json_string
-    rescue => e
-      puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
-    end
-
     def save_component_mapping_to_model_dict
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
@@ -139,12 +125,6 @@ module SuTakeoff
     def load_data
       # Priority: model attribute dict > local JSON files > empty defaults
       model_dict = load_from_model_dict
-
-      if model_dict[:mapping]
-        @mapping.load_json_string(model_dict[:mapping])
-      else
-        @mapping.load_json(self.class.mapping_path)
-      end
 
       if model_dict[:component_mapping]
         @component_mapping.load_json_string(model_dict[:component_mapping])
@@ -195,7 +175,6 @@ module SuTakeoff
       return {} unless dict
 
       result = {}
-      result[:mapping] = dict['mapping'] if dict['mapping']
       result[:component_mapping] = dict['component_mapping'] if dict['component_mapping']
       result[:component_sku] = dict['component_sku'] if dict['component_sku']
       result[:ignored] = dict['ignored'] if dict['ignored']
@@ -206,7 +185,6 @@ module SuTakeoff
 
   def self.reset_plugin_state!
     state = PluginState.instance
-    state.instance_variable_set(:@mapping, MaterialMapping.new)
     state.instance_variable_set(:@component_mapping, ComponentMapping.new)
     state.instance_variable_set(:@component_sku, ComponentSkuMapping.new)
     state.instance_variable_set(:@ignored, [])

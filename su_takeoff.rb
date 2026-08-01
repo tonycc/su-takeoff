@@ -31,7 +31,6 @@ module SuTakeoff
     'src/length_calculators/chained',
     'src/length_calculators/path_sum',
 
-    'src/mapping',
     'src/component_mapping',
     'src/component_sku_mapping',
     'src/api/api_error',

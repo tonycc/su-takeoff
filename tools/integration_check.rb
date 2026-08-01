@@ -47,7 +47,6 @@ require 'src/strategies/skirting_linear'
 require 'src/strategies/wire_path'
 require 'src/strategies/builtin'
 require 'src/strategies/loader'
-require 'src/mapping'
 require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/calculator'
@@ -90,13 +89,6 @@ def section(title)
 end
 
 # ---------------------------------------------------------------- 合成数据
-def build_mapping
-  mapping = MaterialMapping.new
-  mapping.add('paint', '乳胶漆', '涂料', 'm²', '', 0.0, 'paint')
-  mapping.add('skirting', '踢脚线', '线材', 'm', '', 0.0, 'skirting')
-  mapping
-end
-
 def fake_binding
   Struct.new(:project_code, :project_name, :model_key, keyword_init: true) do
     def ensure_model_key!
@@ -130,7 +122,7 @@ end
 
 def build_payload(items)
   Api::QuantityPayloadBuilder.new(
-    items: items, openings: [], mapping: build_mapping,
+    items: items, openings: [],
     component_mapping: ComponentMapping.new,
     policy: TakeoffPolicy.new,
     binding: fake_binding
@@ -206,7 +198,7 @@ FileUtils.mkdir_p(outbox_dir)
 outbox = Api::SyncOutbox.new(dir: outbox_dir)
 service = Api::QuantitySyncService.new(
   api_client: client, auth_session: session, outbox: outbox,
-  binding: fake_binding, mapping: build_mapping,
+  binding: fake_binding,
   component_mapping: ComponentMapping.new,
   policy: TakeoffPolicy.new,
   persist_success: false

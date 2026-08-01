@@ -10,7 +10,6 @@ require 'src/strategies/solid_count'
 require 'src/strategies/skip'
 require 'src/strategies/builtin'
 require 'src/strategies/loader'
-require 'src/mapping'
 require 'src/takeoff_policy'
 
 module SuTakeoff
