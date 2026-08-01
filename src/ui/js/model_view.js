@@ -17,10 +17,6 @@ function classifyNodes(data) {
   if (data._classification) return;
   var cls = {};
   var usagesByEid = data._usagesByEntityId || {};
-  var unresolvedSet = {};
-  (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
-  var ignoredSet = {};
-  (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
 
   function walk(node) {
     if (node.hidden) {
@@ -75,7 +71,7 @@ function getMergeKey(node) {
 
 // 合并多个节点的 stats（rollupStats 的聚合版）
 function mergeStats(nodes, data) {
-  var merged = { area: 0, length: 0, volume: 0, count: 0, floor: 0, wall: 0, ceiling: 0, unresolvedCount: 0 };
+  var merged = { area: 0, length: 0, volume: 0, count: 0, floor: 0, wall: 0, ceiling: 0 };
   nodes.forEach(function(n) {
     var s = rollupStats(n, data);
     merged.area    += s.area;
@@ -85,7 +81,6 @@ function mergeStats(nodes, data) {
     merged.floor   += s.floor;
     merged.wall    += s.wall;
     merged.ceiling += s.ceiling;
-    merged.unresolvedCount += s.unresolvedCount;
   });
   return merged;
 }
@@ -111,12 +106,8 @@ function mergeSelfUsages(nodes, data) {
 function rollupStats(node, data) {
   var usagesByEid = data._usagesByEntityId || {};
   var cls = data._classification || {};
-  var unresolvedSet = {};
-  (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
-  var ignoredSet = {};
-  (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
   var materials = {};
-  var result = { area: 0, length: 0, volume: 0, count: 0, floor: 0, wall: 0, ceiling: 0, matCount: 0, unresolvedCount: 0 };
+  var result = { area: 0, length: 0, volume: 0, count: 0, floor: 0, wall: 0, ceiling: 0, matCount: 0 };
 
   // Self usages
   var selfUsages = usagesByEid[node.entity_id] || [];
@@ -140,10 +131,7 @@ function rollupStats(node, data) {
         result.wall += u.by_part.wall || 0;
         result.ceiling += u.by_part.ceiling || 0;
       }
-      if (!ignoredSet[u.su_material]) {
-        materials[u.su_material] = true;
-        if (unresolvedSet[u.su_material]) result.unresolvedCount++;
-      }
+      materials[u.su_material] = true;
     }
   });
 
@@ -161,7 +149,6 @@ function rollupStats(node, data) {
     result.floor += child.floor;
     result.wall += child.wall;
     result.ceiling += child.ceiling;
-    result.unresolvedCount += child.unresolvedCount;
     for (var m in child._materials) materials[m] = true;
   });
   result._materials = materials;
@@ -237,7 +224,7 @@ function renderToolbar(data, container) {
 
 // ---------------- Position mode: tree table ----------------
 // Sortable column keys mapped to column index
-var POS_SORT_COLS = { 1: 'name', 3: 'tag', 4: 'area', 5: 'length', 6: 'volume', 7: 'count', 8: 'floor', 9: 'wall', 10: 'ceiling', 11: 'unresolved' };
+var POS_SORT_COLS = { 1: 'name', 3: 'tag', 4: 'area', 5: 'length', 6: 'volume', 7: 'count', 8: 'floor', 9: 'wall', 10: 'ceiling' };
 
 function renderPositionTable(data, container) {
   var cls = data._classification;
@@ -258,7 +245,7 @@ function renderPositionTable(data, container) {
   // Header with sort indicators
   var thead = document.createElement('thead');
   var hrow = document.createElement('tr');
-  var cols = ['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理', '操作'];
+  var cols = ['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '操作'];
   cols.forEach(function(c, i) {
     var th = document.createElement('th');
     if (i >= 3 && i <= 9) th.className = 'mv-th-num';
@@ -443,8 +430,7 @@ function renderSpecGroupRow(dimLabel, faces, usage, depth, matKey, tbody) {
     '-',
     fmtNum(partFloor),
     fmtNum(partWall),
-    fmtNum(partCeiling),
-    '-'
+    fmtNum(partCeiling)
   ];
   numCols.forEach(function(v) {
     var td = document.createElement('td');
@@ -539,11 +525,6 @@ function renderFaceDetailRow(face, usage, depth, tbody) {
     row.appendChild(td);
   });
 
-  var tdUnr = document.createElement('td');
-  tdUnr.className = 'mv-col-num mv-face-num';
-  tdUnr.textContent = '-';
-  row.appendChild(tdUnr);
-
   var tdAct = document.createElement('td');
   tdAct.className = 'mv-col-act';
   var locateBtn = document.createElement('button');
@@ -561,16 +542,9 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   var matKey = parentEntityId + ':' + usage.su_material;
   var isMatExpanded = _mv.expandedMaterials && _mv.expandedMaterials[matKey];
   var isLinear = usage.unit === 'm';
-  var unresolvedSet = {};
-  (data.unresolved || []).forEach(function(n) { unresolvedSet[n] = true; });
-  var ignoredSet = {};
-  (data.ignored || []).forEach(function(n) { ignoredSet[n] = true; });
-  var matStatus = 'mapped';
-  if (ignoredSet[usage.su_material]) matStatus = 'ignored';
-  else if (unresolvedSet[usage.su_material]) matStatus = 'unresolved';
 
   var row = document.createElement('tr');
-  row.className = 'mv-mat-summary-row mv-mat-summary-' + matStatus;
+  row.className = 'mv-mat-summary-row mv-mat-summary-mapped';
   row.dataset.matKey = matKey;
 
   var tdSeq = document.createElement('td');
@@ -640,8 +614,7 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
     usage.qty_count > 0 ? fmtNum(usage.qty_count) : '-',
     fmtNum(byPart.floor || 0),
     fmtNum(byPart.wall || 0),
-    fmtNum(byPart.ceiling || 0),
-    unresolvedSet[usage.su_material] ? '待' : '-'
+    fmtNum(byPart.ceiling || 0)
   ];
   numCols.forEach(function(v) {
     var td = document.createElement('td');
@@ -678,7 +651,7 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
       var loadRow = document.createElement('tr');
       loadRow.className = 'mv-face-row';
       var loadTd = document.createElement('td');
-      loadTd.colSpan = 13;
+      loadTd.colSpan = 12;
       loadTd.style.cssText = 'text-align:center;color:#6c7086;font-size:12px;padding:6px';
       loadTd.textContent = '加载面详情…';
       loadRow.appendChild(loadTd);
@@ -746,7 +719,6 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
 
   // Determine display values based on tag
   var area = '-', length = '-', volume = '-', count = '-', floor = '-', wall = '-', ceiling = '-';
-  var unresolved = '-';
 
   if (tag === 'has_face_items' || tag === 'has_descendant_stats') {
     area = fmtNum(stats.area);
@@ -756,7 +728,6 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
     floor = fmtNum(stats.floor);
     wall = fmtNum(stats.wall);
     ceiling = fmtNum(stats.ceiling);
-    unresolved = stats.unresolvedCount > 0 ? stats.unresolvedCount : '-';
   } else if (tag === 'has_instance_items') {
     area = '-';
     length = '-';
@@ -911,7 +882,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   row.appendChild(tdTag);
 
   // Numeric cols
-  var numCols = [area, length, volume, count, floor, wall, ceiling, unresolved];
+  var numCols = [area, length, volume, count, floor, wall, ceiling];
   numCols.forEach(function(v) {
     var td = document.createElement('td');
     td.className = 'mv-col-num';
@@ -1122,9 +1093,8 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
   var floor  = fmtNum(mergedStats.floor);
   var wall   = fmtNum(mergedStats.wall);
   var ceiling = fmtNum(mergedStats.ceiling);
-  var unresolved = mergedStats.unresolvedCount > 0 ? mergedStats.unresolvedCount : '-';
 
-  [area, length, volume, count, floor, wall, ceiling, unresolved].forEach(function(v) {
+  [area, length, volume, count, floor, wall, ceiling].forEach(function(v) {
     var td = document.createElement('td');
     td.className = 'mv-col-num';
     td.textContent = v;
@@ -1240,7 +1210,7 @@ function renderModelView(data) {
 // ---------------- CSV export ----------------
 function exportModelCsv(data) {
   var rows = [];
-  rows.push(['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花', '待处理']);
+  rows.push(['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花']);
   var seq = 0;
   collectPositionCsvRows(data.hierarchy, data, rows, seq);
 
@@ -1287,8 +1257,7 @@ function collectPositionCsvRows(node, data, rows, seq) {
     fmtNum(stats.count),
     fmtNum(stats.floor),
     fmtNum(stats.wall),
-    fmtNum(stats.ceiling),
-    stats.unresolvedCount
+    fmtNum(stats.ceiling)
   ]);
 
   if (isNodeExpanded(node, {})) {
