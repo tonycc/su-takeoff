@@ -19,9 +19,6 @@ module SuTakeoff
     'src/strategies/solid_count',
     'src/strategies/skip',
     'src/length_calculators/base',
-    'src/length_calculators/segmented_path',
-    'src/strategies/skirting_linear',
-    'src/strategies/wire_path',
     'src/strategies/builtin',
     'src/strategies/loader',
 

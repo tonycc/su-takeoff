@@ -474,7 +474,7 @@ module SuTakeoff
     end
 
     # 找匹配的 Strategy，如果它暴露 compute_length 就用，让专用算法生效
-    # （如 SkirtingLinear 强制 EdgeBased）。
+    # （如某些专用策略可强制使用 EdgeBased 等算法）。
     # 找不到匹配策略或策略没有 compute_length 时返回 nil，
     # 调用方走默认 compute_linear_length（Chained）。
     def compute_length_via_strategy(entity, scale)

@@ -352,7 +352,7 @@ module SuTakeoff
     def test_skirting_strategy_name_in_geometry_usage
       # 踢脚线 layer_name='踢脚线' + policy layer_rules={'踢脚线'=>:length}
       # → 第 2 档图层规则决议为 :length → solid_linear 默认策略
-      # （原 3.5 档 SkirtingLinear 自动匹配已随材料映射移除）
+      # （原 3.5 档自动匹配已随材料映射移除）
       usages = usages_for(all_items, [])
       skirting = find_usage(usages, LIVING_EID, 'skirting')
       refute_nil skirting
