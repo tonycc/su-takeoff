@@ -58,9 +58,6 @@ module SuTakeoff
       @dialog.add_action_callback('locate_material') { |_ctx, su_name| require_login! && locate_material(su_name) }
       @dialog.add_action_callback('locate_face') { |_ctx, json| require_login! && locate_face(json) }
       @dialog.add_action_callback('locate_entity') { |_ctx, json| require_login! && locate_entity(json) }
-      @dialog.add_action_callback('ignore_material') { |_ctx, name| require_login! && ignore_material(name) }
-      @dialog.add_action_callback('unignore') { |_ctx, name| require_login! && unignore(name) }
-      @dialog.add_action_callback('clear_ignored') { |_ctx| require_login! && clear_ignored }
       @dialog.add_action_callback('save_config') { |_ctx, json| require_login! && save_config(json) }
 
       @dialog.add_action_callback('get_component_mappings') { |_ctx| require_login! && send_component_mappings }
@@ -197,7 +194,7 @@ module SuTakeoff
       (node[:children] || []).any? { |child| update_hierarchy_node_tag(child, entity_id, tag_name) }
     end
 
-    # Unified state push — called after scan and after any mapping/ignored change.
+    # Unified state push — called after scan and after any mapping change.
     # Computes usages for all mapped materials; unmapped are returned for editing UI.
     # faces 数组从 geometry_usages 中剥除并缓存在服务端，前端通过 get_faces 按需请求。
     def send_workbench_state
@@ -475,7 +472,6 @@ module SuTakeoff
     def send_settings
       state = PluginState.instance
       data = {
-        ignored: state.ignored,
         material_category_units: state.config['material_category_units'] || [],
         component_category_units: state.config['component_category_units'] || [],
         config_units: state.config['units'] || [],
@@ -496,23 +492,6 @@ module SuTakeoff
         heuristic_thresholds: data['heuristic_thresholds'],
         tag_defs: data['tag_defs']
       )
-      send_workbench_state if @last_scan
-    end
-
-    def ignore_material(name)
-      PluginState.instance.ignore!(name)
-      send_workbench_state if @last_scan
-    end
-
-    def unignore(name)
-      PluginState.instance.unignore!(name)
-      send_settings
-      send_workbench_state if @last_scan
-    end
-
-    def clear_ignored
-      PluginState.instance.set_ignored!([])
-      send_settings
       send_workbench_state if @last_scan
     end
 

@@ -4,6 +4,5 @@
 .superpowers/
 .claude/
 tmp/
-data/ignored_materials.json
 data/config.json
 *.rbz
