@@ -24,7 +24,7 @@ module SuTakeoff
       #   definition_name_includes: [String, ...] —— 组件定义名含任一关键字
       #   definition_name_pattern: String/Regexp —— 正则匹配
       #   layer: [String, ...] —— 图层名精确匹配
-      #   unit: [String, ...] —— mapping 表中 unit 匹配
+      #   unit: [String, ...] —— unit 字符串匹配
       # 无规则的策略不自动匹配，返回 false。
       def matches?(item, context = {})
         return false unless any_rule?

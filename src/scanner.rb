@@ -380,7 +380,7 @@ module SuTakeoff
         end
       end
 
-      # 档 4：策略自动匹配（命名约定，新增）
+      # 档 4：策略自动匹配（命名约定；当前无策略带匹配规则，处于休眠）
       if method.nil?
         matched_strategy = find_container_strategy(entity)
         if matched_strategy && %i[length count volume].include?(matched_strategy.method)
@@ -393,7 +393,7 @@ module SuTakeoff
     end
 
     # 容器级策略匹配：根据 entity 的 definition_name 查找命名匹配的非默认策略。
-    # 用于"含线/管/wire/pipe"等关键字的组件自动按长度统计。
+    # （当前内置策略均无 match_rules，本方法处于休眠，命中恒为 nil。）
     def find_container_strategy(entity)
       return nil unless @policy
       def_name = container_definition_name(entity)

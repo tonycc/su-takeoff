@@ -1298,7 +1298,7 @@ function bindSkuAutocomplete(tr, onSelect) {
   var input = tr.querySelector('.u-sku');
   var dd = tr.querySelector('.sku-dropdown');
   if (!input || !dd) return;
-  tr._skuOnSelect = onSelect; // 可选：选中 SKU 后的回调（映射页留空走保存按钮，模型视图直接持久化）
+  tr._skuOnSelect = onSelect; // 可选：选中 SKU 后的回调（buildSkuCell 用它直接持久化组件级关联）
   window._ensureSkuCloser();
   var timer = null;
   input.addEventListener('input', function() {

@@ -98,7 +98,7 @@ module SuTakeoff
       geometry_unmapped_fallback(item)
     end
 
-    # 未映射面 item 的兜底判定：长宽比 > 15 视为线材，否则面材。
+    # 无显式决议面 item 的兜底判定：长宽比 > 15 视为线材，否则面材。
     def geometry_unmapped_fallback(item)
       is_linear = item.kind == :face && item.width && item.width > 0 &&
                   item.height && (item.height / item.width) > 15

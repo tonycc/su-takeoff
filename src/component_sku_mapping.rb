@@ -7,7 +7,7 @@ module SuTakeoff
   )
 
   # 组件级 SKU 关联（按组件定义名 definition_name）。
-  # 独立于 ComponentMapping / MaterialMapping，仅用于选型展示，
+  # 独立于 ComponentMapping，仅用于选型展示，
   # 不参与算量决议——选择/更换 SKU 不会改变算量结果。
   class ComponentSkuMapping
     def initialize

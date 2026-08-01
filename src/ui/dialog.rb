@@ -194,8 +194,8 @@ module SuTakeoff
       (node[:children] || []).any? { |child| update_hierarchy_node_tag(child, entity_id, tag_name) }
     end
 
-    # Unified state push — called after scan and after any mapping change.
-    # Computes usages for all mapped materials; unmapped are returned for editing UI.
+    # Unified state push — called after scan and after any component mapping change.
+    # Computes usages for all materials.
     # faces 数组从 geometry_usages 中剥除并缓存在服务端，前端通过 get_faces 按需请求。
     def send_workbench_state
       return unless @last_scan

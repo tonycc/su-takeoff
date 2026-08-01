@@ -355,31 +355,6 @@ td { padding: 6px; border: 1px solid #45475a; }
 
 
 
-/* ---------- Mapping page: toggle layout ---------- */
-#mapping-tbody td { vertical-align: middle; }
-#mapping-tbody input[type=text], #mapping-tbody input[type=number], #mapping-tbody select {
-  width: 100%; padding: 4px 6px; border: 1px solid #45475a; border-radius: 3px;
-  background: #1e1e2e; color: #cdd6f4; font-size: 12px;
-}
-#mapping-tbody button {
-  padding: 4px 8px; border: 1px solid #45475a; border-radius: 3px;
-  background: #313244; color: #cdd6f4; cursor: pointer; margin-right: 3px; font-size: 11px;
-}
-#mapping-tbody button:hover { background: #89b4fa; color: #1e1e2e; }
-#mapping-tbody .u-name {
-  font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
-}
-
-#mapping-tbody .u-name-row { display: flex; align-items: center; gap: 6px; }
-#mapping-tbody .swatch {
-  display: inline-block; width: 16px; height: 16px; border-radius: 3px;
-  border: 1px solid #45475a; flex-shrink: 0;
-}
-#mapping-tbody .swatch-empty {
-  background: repeating-linear-gradient(45deg, #313244, #313244 3px, #1e1e2e 3px, #1e1e2e 6px);
-  color: #6c7086; font-size: 10px; text-align: center; line-height: 16px;
-}
-
 /* ---------- Component mapping table ---------- */
 #comp-mapping-tbody td { vertical-align: middle; }
 #comp-mapping-tbody input[type=text], #comp-mapping-tbody input[type=number], #comp-mapping-tbody select {
