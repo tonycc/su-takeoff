@@ -13,8 +13,7 @@ module SuTakeoff
     def initialize
       @component_mapping = ComponentMapping.new
       @component_sku = ComponentSkuMapping.new
-      @config = { 'material_category_units' => [], 'component_category_units' => [],
-                  'units' => [],
+      @config = { 'component_category_units' => [],
                   'layer_rules' => {},
                   'tag_defs' => {},
                   'heuristics_enabled' => true }
@@ -50,13 +49,10 @@ module SuTakeoff
       File.join(PLUGIN_DIR, 'data', 'config.json')
     end
 
-    def save_config(material_category_units:, component_category_units:, units:,
-                    layer_rules: nil, heuristics_enabled: nil,
+    def save_config(component_category_units:, layer_rules: nil, heuristics_enabled: nil,
                     heuristic_thresholds: nil, tag_defs: nil)
       @config = {
-        'material_category_units' => material_category_units,
         'component_category_units' => component_category_units,
-        'units' => units,
         'layer_rules' => layer_rules || @config['layer_rules'] || {},
         'tag_defs' => tag_defs || @config['tag_defs'] || {},
         'heuristics_enabled' => heuristics_enabled.nil? ? @config.fetch('heuristics_enabled', true) : heuristics_enabled,
@@ -113,11 +109,6 @@ module SuTakeoff
       elsif File.exist?(self.class.config_path)
         @config = JSON.parse(File.read(self.class.config_path))
       end
-      # Migrate old single category_units to material_category_units
-      if @config['category_units'] && !@config['material_category_units']
-        @config['material_category_units'] = @config['category_units']
-      end
-      @config['material_category_units'] ||= []
       @config['component_category_units'] ||= []
       @config['layer_rules']         ||= {}
       # 首次迁移：layer_rules 非空且 tag_defs 不存在时，复制为初始标记
@@ -146,9 +137,7 @@ module SuTakeoff
     state.instance_variable_set(:@component_mapping, ComponentMapping.new)
     state.instance_variable_set(:@component_sku, ComponentSkuMapping.new)
     state.instance_variable_set(:@config, {
-      'material_category_units' => [],
       'component_category_units' => [],
-      'units' => [],
       'layer_rules' => {},
       'tag_defs' => {},
       'heuristics_enabled' => true

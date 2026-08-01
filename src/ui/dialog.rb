@@ -429,8 +429,7 @@ module SuTakeoff
               {}
             end
       config = {
-        category_units: cfg['component_category_units'] || [],
-        config_units: cfg['units'] || []
+        category_units: cfg['component_category_units'] || []
       }
       @dialog.execute_script("window.renderComponentMappings(#{JSON.generate(mappings)}, #{JSON.generate(entries)}, #{JSON.generate(config)})")
     end
@@ -472,9 +471,7 @@ module SuTakeoff
     def send_settings
       state = PluginState.instance
       data = {
-        material_category_units: state.config['material_category_units'] || [],
         component_category_units: state.config['component_category_units'] || [],
-        config_units: state.config['units'] || [],
         tag_defs: state.config['tag_defs'] || {},
         heuristics_enabled: state.config.fetch('heuristics_enabled', true),
         heuristic_thresholds: state.config['heuristic_thresholds'] || {}
@@ -485,9 +482,7 @@ module SuTakeoff
     def save_config(json)
       data = JSON.parse(json)
       PluginState.instance.save_config(
-        material_category_units: data['material_category_units'] || data['category_units'] || [],
         component_category_units: data['component_category_units'] || [],
-        units: data['units'] || [],
         heuristics_enabled: data['heuristics_enabled'],
         heuristic_thresholds: data['heuristic_thresholds'],
         tag_defs: data['tag_defs']

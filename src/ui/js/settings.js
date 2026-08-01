@@ -1,4 +1,4 @@
-// src/ui/js/settings.js — 设置页：分类单位、可选单位、标签定义、启发式、忽略材料
+// src/ui/js/settings.js — 设置页：分类单位、标签定义、启发式、启发式阈值
 
 function renderSettings(data) {
   window._sharedConfig = data;
@@ -6,19 +6,16 @@ function renderSettings(data) {
   if (!container) return;
 
   var html = '';
-  html += '<div class="settings-card">' + renderCategoryUnitConfig('材料分类', 'material_category_units', data.material_category_units || data.category_units || []) + '</div>';
   html += '<div class="settings-card">' + renderCategoryUnitConfig('组件分类', 'component_category_units', data.component_category_units || []) + '</div>';
-  html += '<div class="settings-card">' + renderUnitTagConfig(data.config_units || []) + '</div>';
   html += '<div class="settings-card">' + renderTagDefsConfig(data.tag_defs || {}) + '</div>';
   html += '<div class="settings-card">' + renderHeuristicsConfig(data.heuristics_enabled !== false) + '</div>';
   html += '<div class="settings-card">' + renderHeuristicThresholdsConfig(data.heuristic_thresholds || {}) + '</div>';
-  html += '<div class="settings-card">' + renderIgnoredSection(data.ignored || []) + '</div>';
   container.innerHTML = html;
 }
 
 // ---------------- Category-unit config ----------------
 function renderCategoryUnitConfig(title, key, categoryUnits) {
-  var cfgUnits = (window._sharedConfig && window._sharedConfig.config_units) || [];
+  var cfgUnits = ['m²', 'm', 'm³', '个'];
   var unitOptions = cfgUnits.map(function(u) {
     return '<option value="' + esc(u) + '">' + esc(u) + '</option>';
   }).join('');
@@ -67,47 +64,6 @@ function addCategoryUnit(key) {
   unitSelect.selectedIndex = 0;
 }
 
-// ---------------- Unit tag config ----------------
-function renderUnitTagConfig(units) {
-  var html = '<div class="sc-head">可选单位</div>';
-  html += '<div class="sc-body">';
-  html += '<div class="tag-list" id="unit-tag-list">';
-  units.forEach(function(u) {
-    html += '<span class="tag-chip">' + esc(u) +
-      '<button onclick="removeUnitTag(this, \'' + escAttr(u) + '\')" class="tag-chip-del">×</button></span>';
-  });
-  html += '</div>';
-  html += '<div class="cu-add-row" style="margin-top:8px">' +
-    '<input type="text" id="new-unit-input" placeholder="新单位" style="width:100px">' +
-    '<button onclick="addUnitTag()" class="primary-btn">添加</button>' +
-    '</div>';
-  html += '</div>';
-  return html;
-}
-
-function addUnitTag() {
-  var input = document.getElementById('new-unit-input');
-  var val = input.value.trim();
-  if (!val) return;
-  var data = window._sharedConfig;
-  if (data.config_units.indexOf(val) >= 0) return;
-  data.config_units.push(val);
-  persistConfig();
-  var chip = document.createElement('span');
-  chip.className = 'tag-chip';
-  chip.innerHTML = esc(val) + ' <button onclick="removeUnitTag(this, \'' + escAttr(val) + '\')" class="tag-chip-del">×</button>';
-  document.getElementById('unit-tag-list').appendChild(chip);
-  input.value = '';
-}
-
-function removeUnitTag(btn, val) {
-  var data = window._sharedConfig;
-  var idx = data.config_units.indexOf(val);
-  if (idx >= 0) data.config_units.splice(idx, 1);
-  persistConfig();
-  btn.parentElement.remove();
-}
-
 function removeCategoryUnit(btn, key) {
   var card = btn.closest('.cu-card');
   var cat = card.querySelector('.cu-card-name').textContent;
@@ -120,9 +76,7 @@ function removeCategoryUnit(btn, key) {
 function persistConfig() {
   var data = window._sharedConfig;
   callSketchUp('save_config', JSON.stringify({
-    material_category_units: data.material_category_units || [],
     component_category_units: data.component_category_units || [],
-    units: data.config_units || [],
     heuristics_enabled: data.heuristics_enabled !== false,
     heuristic_thresholds: data.heuristic_thresholds || {},
     tag_defs: data.tag_defs || {}
@@ -273,7 +227,7 @@ function renderHeuristicsConfig(enabled) {
     '<span>开启启发式判定</span>' +
     '</label>';
   html += '<p class="hint" style="margin-top:6px">' +
-    '关闭后，未在图层规则或材质映射中显式标注的窄长面将不会被自动判定为线材。' +
+    '关闭后，未在图层规则或算量标签中显式标注的窄长面将不会被自动判定为线材。' +
     '</p>';
   html += '</div>';
   return html;
@@ -330,33 +284,3 @@ function updateThreshold(key, val) {
   persistConfig();
 }
 
-// ---------------- Ignored materials ----------------
-function renderIgnoredSection(ignored) {
-  var html = '<div class="sc-head">忽略材料管理</div>';
-  html += '<div class="sc-body">';
-  if (!ignored || ignored.length === 0) {
-    html += '<p class="hint">当前没有被忽略的材料</p>';
-  } else {
-    html += '<div class="toolbar">' +
-      '<button onclick="clearAllIgnored()" style="color:#f38ba8;border-color:#f38ba8">清空全部</button>' +
-      '</div><table><thead><tr><th>SU 材质名</th><th>操作</th></tr></thead><tbody>';
-    ignored.forEach(function(name) {
-      html += '<tr>' +
-        '<td>' + esc(name) + '</td>' +
-        '<td><button onclick="unignoreMaterial(\'' + escAttr(name) + '\')">取消忽略</button></td>' +
-        '</tr>';
-    });
-    html += '</tbody></table>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function unignoreMaterial(name) {
-  callSketchUp('unignore', name);
-}
-
-function clearAllIgnored() {
-  if (!confirm('确认清空全部忽略材料？')) return;
-  callSketchUp('clear_ignored');
-}

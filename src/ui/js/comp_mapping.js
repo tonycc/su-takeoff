@@ -8,7 +8,6 @@ function renderComponentMappings(mappings, definitions, config) {
   // Sync config data for consistent category/unit lists
   window._sharedConfig = window._sharedConfig || {};
   if (config.category_units) window._sharedConfig.category_units = config.category_units;
-  if (config.config_units) window._sharedConfig.config_units = config.config_units;
 
   // Index existing mappings by definition_name
   var mappedByDef = {};
