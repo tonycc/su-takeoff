@@ -6,7 +6,7 @@ require_relative 'sync_outbox'
 module SuTakeoff
   module Api
     class QuantitySyncService
-      SyncResult = Struct.new(
+      sync_result_members = [
         :success,
         :payload,
         :payload_hash,
@@ -14,9 +14,17 @@ module SuTakeoff
         :response,
         :error,
         :attempts,
-        :outbox_record,
-        keyword_init: true
-      ) do
+        :outbox_record
+      ]
+      if const_defined?(:SyncResult, false)
+        unless SyncResult.members == sync_result_members
+          raise 'SyncResult 字段已变化，请重启 SketchUp 以完成开发版更新'
+        end
+      else
+        SyncResult = Struct.new(*sync_result_members, keyword_init: true)
+      end
+
+      class SyncResult
         def success?
           !!success
         end
@@ -24,20 +32,23 @@ module SuTakeoff
 
       DEFAULT_RETRY_DELAYS = [1, 2, 4].freeze
 
-      def initialize(api_client:, auth_session:, outbox:, binding:, component_mapping:,
+      def initialize(api_client:, auth_session:, outbox:, binding:,
                      policy:, retry_delays: DEFAULT_RETRY_DELAYS,
                      sleeper: ->(seconds) { sleep(seconds) }, jitter: ->(_attempt) { 0.0 },
-                     persist_success: true)
+                     persist_success: true, component_sku: nil, hierarchy: nil,
+                     designer_account: nil)
         @api_client = api_client
         @auth_session = auth_session
         @outbox = outbox
         @binding = binding
-        @component_mapping = component_mapping
         @policy = policy
         @retry_delays = retry_delays
         @sleeper = sleeper
         @jitter = jitter
         @persist_success = persist_success
+        @component_sku = component_sku
+        @hierarchy = hierarchy
+        @designer_account = designer_account
         @busy = false
       end
 
@@ -107,9 +118,11 @@ module SuTakeoff
         build = QuantityPayloadBuilder.new(
           items: items,
           openings: openings,
-          component_mapping: @component_mapping,
           policy: @policy,
-          binding: @binding
+          binding: @binding,
+          component_sku: @component_sku,
+          hierarchy: @hierarchy,
+          designer_account: @designer_account || @auth_session.account
         ).build
 
         return build if build.issues.empty?

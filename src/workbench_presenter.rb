@@ -3,33 +3,281 @@ module SuTakeoff
   # Dialog 不再重复做 policy 决议、unit 选择、geometry 聚合，只负责 IO。
   class WorkbenchPresenter
     def initialize(items:, openings:, hierarchy:, colors:,
-                   component_mapping:, policy:,
+                   policy:,
                    tag_defs: {}, component_sku: nil)
       @items = items
       @openings = openings
       @hierarchy = hierarchy
       @colors = colors
-      @component_mapping = component_mapping
       @policy = policy
       @tag_defs = tag_defs
       @component_sku = component_sku
     end
 
-    def build
-      {
-        overview: build_overview,
-        items: serialize_items,
-        openings: @openings.map(&:to_h),
+    def build(compact: false)
+      geometry_usages = build_geometry_usages
+      result = {
         hierarchy: @hierarchy,
-        geometry_usages: build_geometry_usages,
+        geometry_usages: geometry_usages,
+        # 页面按组件行使用的最终汇总值。推送也复用这份数据，避免标签变更后
+        # 页面与服务端分别聚合导致数值不一致。
+        component_rows: build_component_rows(geometry_usages),
         component_skus: build_component_skus,
         tag_defs: @tag_defs
       }
+      unless compact
+        result[:overview] = build_overview
+        result[:items] = serialize_items
+        result[:openings] = @openings.map(&:to_h)
+      end
+      result
+    end
+
+    # 返回按组件视图的最终行数据。
+    # 数值单位与页面保持一致：面积 m²、长度 mm、体积 m³、件数个。
+    # 模型根也返回给页面使用，但推送构建器会显式排除 entity_id=0。
+    def build_component_rows(geometry_usages = nil)
+      return [] unless @hierarchy.is_a?(Hash)
+
+      usages = geometry_usages || build_geometry_usages
+      usages_by_path = usages.group_by { |usage| path_key(usage[:component_path_ids]) }
+      classifications = {}
+      classify_component_node(@hierarchy, [], usages_by_path, classifications)
+      stats_cache = {}
+      rows = []
+
+      stats_for = lambda do |node, parent_path|
+        path_ids = component_path_for_node(node, parent_path)
+        key = path_key(path_ids)
+        return stats_cache[key] if stats_cache.key?(key)
+
+        result = empty_component_stats
+        Array(usages_by_path[key]).each do |usage|
+          add_usage_to_component_stats!(result, usage)
+        end
+
+        Array(node_value(node, :children)).each do |child|
+          next if node_value(child, :hidden)
+
+          child_path = component_path_for_node(child, path_ids)
+          child_tag = classifications[path_key(child_path)]
+          next if %w[hidden_skipped pure_organizational].include?(child_tag)
+
+          merge_component_stats!(result, stats_for.call(child, path_ids))
+        end
+
+        stats_cache[key] = result
+      end
+
+      walk = lambda do |node, parent_path|
+        eid = node_value(node, :entity_id).to_i
+        path_ids = component_path_for_node(node, parent_path)
+        key = path_key(path_ids)
+        classification = classifications[key]
+        stats = stats_for.call(node, parent_path)
+        display = if classification == 'has_instance_items'
+                    stats.merge(area: 0.0, length: 0.0, volume: 0.0)
+                  else
+                    stats
+                  end
+
+        rows << {
+          entity_id: eid,
+          occurrence_key: key,
+          component_path_ids: path_ids,
+          component_path_persistent_ids: persistent_path_for_node(node, path_ids),
+          name: component_display_name(node, path_ids),
+          kind: node_value(node, :kind).to_s,
+          component_type: component_type_for_node(node, eid),
+          definition_name: node_value(node, :definition_name),
+          tag: node_value(node, :tag),
+          depth: node_value(node, :depth).to_i,
+          hidden: !!node_value(node, :hidden),
+          classification: classification,
+          area_m2: display[:area].to_f,
+          length_mm: display[:length].to_f,
+          volume_m3: display[:volume].to_f,
+          count: display[:count].to_f,
+          floor: display[:floor].to_f,
+          wall: display[:wall].to_f,
+          ceiling: display[:ceiling].to_f,
+          materials: display[:materials].keys
+        }
+
+        Array(node_value(node, :children)).each { |child| walk.call(child, path_ids) }
+      end
+
+      walk.call(@hierarchy, [])
+      rows
     end
 
     private
 
-    # 组件级 SKU 关联表：definition_name => { sku_id, sku_code, sku_name }
+    def node_value(node, key)
+      return nil unless node.is_a?(Hash)
+
+      node[key] || node[key.to_s]
+    end
+
+    def classify_component_node(node, parent_path, usages_by_path, classifications)
+      path_ids = component_path_for_node(node, parent_path)
+      key = path_key(path_ids)
+      usages = usages_by_path[key] || []
+      has_face = usages.any? { |usage| !usage[:is_instance] }
+      has_instance = usages.any? { |usage| usage[:is_instance] }
+      child_tags = Array(node_value(node, :children)).map do |child|
+        classify_component_node(child, path_ids, usages_by_path, classifications)
+      end
+      child_has_stats = child_tags.any? do |tag|
+        %w[has_face_items has_instance_items has_descendant_stats actionable_empty].include?(tag)
+      end
+
+      classification = if node_value(node, :hidden)
+                         'hidden_skipped'
+                       elsif has_face
+                         'has_face_items'
+                       elsif has_instance && !has_face
+                         'has_instance_items'
+                       elsif child_has_stats
+                         'has_descendant_stats'
+                       elsif node_value(node, :kind).to_s == 'component_instance'
+                         'actionable_empty'
+                       else
+                         'pure_organizational'
+                       end
+      classifications[key] = classification
+    end
+
+    def empty_component_stats
+      {
+        area: 0.0,
+        length: 0.0,
+        volume: 0.0,
+        count: 0.0,
+        floor: 0.0,
+        wall: 0.0,
+        ceiling: 0.0,
+        materials: {}
+      }
+    end
+
+    def numeric_value(value)
+      value.nil? ? 0.0 : value.to_f
+    end
+
+    def add_usage_to_component_stats!(stats, usage)
+      if usage[:is_instance]
+        count = numeric_value(usage[:qty_count])
+        count = numeric_value(usage[:qty]) if count.zero?
+        stats[:count] += count
+        return
+      end
+
+      area = numeric_value(usage[:qty_area])
+      length = numeric_value(usage[:qty_length])
+      count = numeric_value(usage[:qty_count])
+      if area.zero? && length.zero? && count.zero?
+        if usage[:unit] == 'm'
+          length = numeric_value(usage[:qty])
+        elsif usage[:unit] != 'm³'
+          area = numeric_value(usage[:qty])
+        end
+      end
+
+      stats[:area] += area
+      stats[:length] += length * 1000.0
+      stats[:volume] += numeric_value(usage[:qty_volume])
+      stats[:count] += count
+      by_part = usage[:by_part] || {}
+      stats[:floor] += numeric_value(by_part[:floor] || by_part['floor'])
+      stats[:wall] += numeric_value(by_part[:wall] || by_part['wall'])
+      stats[:ceiling] += numeric_value(by_part[:ceiling] || by_part['ceiling'])
+      material = usage[:su_material]
+      stats[:materials][material] = true unless material.nil?
+    end
+
+    def merge_component_stats!(target, source)
+      %i[area length volume count floor wall ceiling].each do |key|
+        target[key] += source[key].to_f
+      end
+      source[:materials].each_key { |material| target[:materials][material] = true }
+      target
+    end
+
+    def component_display_name(node, path_ids)
+      name = node_value(node, :name).to_s.strip
+      return name unless name.empty?
+
+      item = item_by_component_path[path_key(path_ids)]
+      item_name = item && Array(item.component_path).last.to_s.strip
+      return item_name unless item_name.to_s.empty?
+
+      path_ids.empty? ? '(模型根)' : '未命名组件'
+    end
+
+    def component_type_for_node(node, eid)
+      return 'model_root' if eid.zero?
+
+      kind = node_value(node, :kind).to_s
+      kind.empty? ? 'component_instance' : kind
+    end
+
+    def persistent_path_for_entity_path(path_ids)
+      return [] if path_ids.empty?
+
+      found = persistent_path_by_component_path[path_key(path_ids)]
+      return found if found
+
+      path_ids
+    end
+
+    def persistent_path_for_node(node, path_ids)
+      explicit = Array(node_value(node, :component_path_persistent_ids)).compact
+      return explicit if explicit.length == path_ids.length
+
+      persistent_path_for_entity_path(path_ids)
+    end
+
+    def path_key(path_ids)
+      ScanItem.path_key(path_ids)
+    end
+
+    def component_path_for_node(node, parent_path)
+      explicit = node_value(node, :component_path_ids)
+      return Array(explicit).map(&:to_i) if explicit
+
+      eid = node_value(node, :entity_id).to_i
+      eid.zero? ? Array(parent_path) : Array(parent_path) + [eid]
+    end
+
+    def build_item_path_indexes
+      return if defined?(@item_by_component_path) && @item_by_component_path
+
+      @item_by_component_path = {}
+      @persistent_path_by_component_path = {}
+      @items.each do |item|
+        ids = Array(item.component_path_ids).map(&:to_i)
+        pids = Array(item.component_path_persistent_ids).compact
+        next if ids.empty?
+
+        @item_by_component_path[path_key(ids)] ||= item
+        1.upto([ids.length, pids.length].min) do |length|
+          @persistent_path_by_component_path[path_key(ids.first(length))] ||= pids.first(length)
+        end
+      end
+    end
+
+    def item_by_component_path
+      build_item_path_indexes
+      @item_by_component_path
+    end
+
+    def persistent_path_by_component_path
+      build_item_path_indexes
+      @persistent_path_by_component_path
+    end
+
+    # 组件级项目产品关联表：definition_name => 项目产品与实际产品字段
     def build_component_skus
       return {} unless @component_sku
 
@@ -37,7 +285,12 @@ module SuTakeoff
         memo[r.definition_name] = {
           sku_id: r.platform_sku_id,
           sku_code: r.platform_sku_code,
-          sku_name: r.platform_sku_name
+          sku_name: r.platform_sku_name,
+          project_product_id: r.project_product_id,
+          product_id: r.product_id,
+          catalog_code: r.catalog_code,
+          product_name: r.product_name,
+          project_product_code: r.project_product_code
         }
       end
     end
@@ -55,7 +308,7 @@ module SuTakeoff
     end
 
     def calc
-      @calc ||= Calculator.new(@component_mapping, policy: @policy)
+      @calc ||= Calculator.new(policy: @policy)
     end
 
     # ---- overview ----
@@ -91,34 +344,38 @@ module SuTakeoff
       resolutions = calc.compute_geometry_only(@items, @openings)
       opening_area_by_face = build_opening_area_map
 
-      # 按 (entity_id, su_material) 重新聚合，供前端组件树视图消费
+      # 按 (完整实例路径, su_material) 聚合。末级 entity_id 在共享定义中并不唯一。
       # 复合标签（如 count+length）会产出多条 item 共享同一 eid，全部保留
       geo_agg = {}
       resolutions.each do |r|
         it = r[:item]
-        eid = it.component_path_ids.last || 0
-        key = [eid, it.su_material]
+        component_path_ids = Array(it.component_path_ids).map(&:to_i)
+        key = [path_key(component_path_ids), it.su_material]
         geo_agg[key] ||= []
         geo_agg[key] << it
       end
 
-      geo_agg.map do |(eid, su_mat), mat_items|
-        build_geometry_usage_entry(eid, su_mat, mat_items, opening_area_by_face)
+      geo_agg.map do |(_occurrence_key, su_mat), mat_items|
+        build_geometry_usage_entry(Array(mat_items.first.component_path_ids), su_mat, mat_items, opening_area_by_face)
       end
     end
 
     def build_opening_area_map
       map = {}
       @openings.each do |op|
-        op.host_face_ids.each do |fid|
-          map[fid] ||= 0.0
-          map[fid] += op.area
+        keys = Array(op.host_face_keys).compact
+        keys = Array(op.host_face_ids) if keys.empty?
+        keys.each do |face_key|
+          map[face_key] ||= 0.0
+          map[face_key] += op.area
         end
       end
       map
     end
 
-    def build_geometry_usage_entry(eid, su_mat, mat_items, opening_area_by_face)
+    def build_geometry_usage_entry(component_path_ids, su_mat, mat_items, opening_area_by_face)
+      component_path_ids = Array(component_path_ids).map(&:to_i)
+      eid = component_path_ids.last || 0
       face_items_in_group = mat_items.reject { |i| i.kind == :instance }
       is_instance = mat_items.any? { |i| i.kind == :instance } && face_items_in_group.empty?
 
@@ -161,7 +418,9 @@ module SuTakeoff
           when :area
             qty_area += face_area ? face_area.aggregate(sub_items, ctx)
                                   : sub_items.sum { |i|
-                                      d = opening_area_by_face[i.face_id] || 0.0
+                                      d = opening_area_by_face[i.face_occurrence_key]
+                                      d = opening_area_by_face[i.face_id] if d.nil?
+                                      d ||= 0.0
                                       [i.qty - d, 0.0].max
                                     }
           end
@@ -197,6 +456,8 @@ module SuTakeoff
 
       {
         entity_id: eid,
+        occurrence_key: path_key(component_path_ids),
+        component_path_ids: component_path_ids,
         su_material: su_mat,
         unit: primary_unit,
         qty: primary_qty.round(4),

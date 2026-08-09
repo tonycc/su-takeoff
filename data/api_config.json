@@ -1,4 +1,5 @@
 {
   "environment": "production",
-  "base_url": "https://gzzyai.com"
+  "base_url": "https://gzzyai.com",
+  "development_base_url": "http://127.0.0.1:8001"
 }

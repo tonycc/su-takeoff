@@ -13,7 +13,16 @@ module SuTakeoff
   class TakeoffPolicy
     # Stage 3: ResolveResult 内部 strategy 是 Strategies::Base 对象。
     # method 字段由 strategy.method 派生（向后兼容）。
-    ResolveResult = Struct.new(:strategy, :source, keyword_init: true) do
+    resolve_result_members = %i[strategy source]
+    if const_defined?(:ResolveResult, false)
+      unless ResolveResult.members == resolve_result_members
+        raise 'ResolveResult 字段已变化，请重启 SketchUp 以完成开发版更新'
+      end
+    else
+      ResolveResult = Struct.new(*resolve_result_members, keyword_init: true)
+    end
+
+    class ResolveResult
       def method
         strategy && strategy.method
       end
@@ -32,6 +41,10 @@ module SuTakeoff
     DEFAULT_VERTICAL_SLAB_TOL    = 0.02
 
     attr_reader :vertical_slab_gap, :vertical_slab_area_tol, :strategies
+
+    def heuristics_enabled?
+      !!@heuristics
+    end
 
     # layer_rules: { '线条' => :length, '砌体' => :volume, ... }
     #              值可以是 String 或 Symbol，内部归一为 Symbol
@@ -59,13 +72,13 @@ module SuTakeoff
 
       # 容器级整体量取已固化为 ScanItem.kind，Calculator 直接信任
       if item.kind == :solid
-        return result_for(:volume, :layer)
+        return result_for(:volume, container_item_source(item))
       end
       if item.kind == :linear_solid
-        return result_for(:length, :layer)
+        return result_for(:length, container_item_source(item))
       end
       if item.kind == :count_solid
-        return result_for(:count, :layer)
+        return result_for(:count, container_item_source(item))
       end
 
       # 1. AttrDict 覆盖
@@ -135,6 +148,10 @@ module SuTakeoff
     def result_for(method, source)
       strategy = @strategies.default_for(method)
       ResolveResult.new(strategy: strategy, source: source)
+    end
+
+    def container_item_source(item)
+      item.tags && item.tags[:method] ? :attr : :layer
     end
 
     # 严格的几何启发：必须是垂直面 + 横向窄长

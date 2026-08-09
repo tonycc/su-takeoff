@@ -1,6 +1,7 @@
 # src/api/auth_session.rb
 require_relative 'api_client'
 require_relative 'credential_store'
+require 'thread'
 
 module SuTakeoff
   module Api
@@ -17,6 +18,7 @@ module SuTakeoff
         @credential_store = credential_store
         @time_source = time_source
         @token_skew = token_skew
+        @refresh_mutex = Mutex.new
         reset_memory!
       end
 
@@ -34,6 +36,7 @@ module SuTakeoff
         response = @api_client.login(username: @account, password: password, tenant_id: tenant_id)
         accept_token_response(response)
         validate_identity!
+        write_refresh_token
         @status = :signed_in
         state
       rescue ApiError => e
@@ -45,6 +48,7 @@ module SuTakeoff
         end
         @status = :error
         @last_error = e
+        clear_memory_tokens!
         raise
       end
 
@@ -62,23 +66,26 @@ module SuTakeoff
       end
 
       def refresh!(refresh_token: nil)
-        @status = :refreshing
-        token = refresh_token || @refresh_token || @credential_store.read(credential_account)
-        unless token
-          @status = :expired
-          raise ApiError.new('登录已过期，请重新登录', code: 'SESSION_EXPIRED', retryable: false)
-        end
+        @refresh_mutex.synchronize do
+          @status = :refreshing
+          token = refresh_token || @refresh_token || @credential_store.read(credential_account)
+          unless token
+            @status = :expired
+            raise ApiError.new('登录已过期，请重新登录', code: 'SESSION_EXPIRED', retryable: false)
+          end
 
-        response = @api_client.refresh(refresh_token: token)
-        accept_token_response(response)
-        validate_identity!
-        @status = :signed_in
-        state
-      rescue ApiError => e
-        @status = :expired
-        @last_error = e
-        clear_tokens!
-        raise
+          response = @api_client.refresh(refresh_token: token)
+          accept_token_response(response)
+          validate_identity!
+          write_refresh_token
+          @status = :signed_in
+          state
+        rescue ApiError => e
+          @status = :expired
+          @last_error = e
+          clear_tokens!
+          raise
+        end
       end
 
       def logout
@@ -137,7 +144,6 @@ module SuTakeoff
         @refresh_token = response.fetch('refresh_token')
         @expires_at = now + response.fetch('expires_in', 0).to_i
         @subject = response['subject'] || {}
-        write_refresh_token
       rescue KeyError => e
         raise ApiError.new('登录响应缺少必要字段', code: 'INVALID_AUTH_RESPONSE', details: e.message, retryable: false)
       end
@@ -175,6 +181,10 @@ module SuTakeoff
 
       def clear_tokens!
         @credential_store.delete(credential_account) if @account && @credential_store.available?
+        clear_memory_tokens!
+      end
+
+      def clear_memory_tokens!
         @access_token = nil
         @refresh_token = nil
         @expires_at = nil

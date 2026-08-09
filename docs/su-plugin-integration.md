@@ -261,7 +261,10 @@ Authorization: Bearer <access_token>
     "code": "XM-001",
     "name": "样板房"
   },
+  "designer_account": "designer@example.com",
   "model_key": "sketchup-model-guid",
+  "model_version_no": "V2026.08.05",
+  "update_content": "调整卫生间龙头数量并补充灯具",
   "source_version": "2026-07-27T10:30:00+08:00",
   "components": []
 }
@@ -275,7 +278,10 @@ Authorization: Bearer <access_token>
 | `idempotency_key` | string | 是 | 幂等键；同一次模型版本重复推送必须保持一致 |
 | `project.code` | string | 是 | 平台项目编号；同一编号会归入同一算量单 |
 | `project.name` | string | 是 | 项目名称；首次创建算量单时使用 |
+| `designer_account` | string | 是 | 当前登录设计师账号；由插件从登录会话带入，不是密码或 Token |
 | `model_key` | string | 是 | SU 模型唯一标识 |
+| `model_version_no` | string | 否 | 用户在推送确认窗口填写的模型版本号，最长 64 个字符；旧插件未发送时为空 |
+| `update_content` | string | 否 | 用户在推送确认窗口填写的本次更新内容，最长 2000 个字符；旧插件未发送时为空 |
 | `source_version` | string | 是 | 插件侧模型版本标识 |
 | `components` | array | 是 | 组件列表，可以为空数组 |
 
@@ -284,6 +290,8 @@ Authorization: Bearer <access_token>
 - 同一租户下，`idempotency_key` 已存在时，后端返回已有 `sheet_id` 和 `model_version_id`，不会重复创建模型版本。
 - 新的 `idempotency_key` 会创建新的只读模型版本。
 - 同一 `project.code` 会复用已有算量单。
+- `model_version_no`、`update_content` 与页面最终算量数据共同参与内容 hash；用户确认新的版本信息后会生成新的 `idempotency_key`。
+- 同一版本信息和同一页面数据的失败重试必须复用原 key；不要因为网络重试随机生成 key。
 
 ### 4.4 Component 结构
 
@@ -292,6 +300,7 @@ Authorization: Bearer <access_token>
   "code": "cabinet-1",
   "name": "橱柜",
   "component_type": "cabinet",
+  "quantity_tag": "按面积+个数",
   "faces": [],
   "parts": []
 }
@@ -304,10 +313,13 @@ Authorization: Bearer <access_token>
 | `code` | string | 是 | 组件稳定编码；同一次 payload 内不可重复 |
 | `name` | string | 是 | 组件名称 |
 | `component_type` | string | 是 | 组件类型，例如 `cabinet`、`wall`、`floor` |
+| `quantity_tag` | string | 否 | 组件当前选择的算量标签；复合标签（例如 `按面积+个数`）作为一个整体传递 |
 | `faces` | array | 否 | 面级明细，默认空数组 |
 | `parts` | array | 否 | 部品清单，默认空数组 |
 
-### 4.5 Face 结构
+当前 SU 插件复用“按组件”页面的最终行，只发送确认推送时页面可见的群组/组件树节点，包括四个数量列都显示 `-` 的组件（此时 `parts` 为空数组）；不发送模型根、折叠状态下不可见的子级组件，也不会发送具体的 `faces[]` 明细。页面面积、长度、体积、件数分别转换为 `parts[]` 的 `面积/m2`、`长度/m`、`体积/m3`、`件数/个`；页面组件行有用户选择的算量标签时，通过 `quantity_tag` 原样传递。服务端可以保留 `faces` 字段以兼容旧客户端，但不应要求本插件上传面数据。
+
+### 4.5 Face 结构（兼容旧客户端）
 
 ```json
 {
@@ -325,15 +337,14 @@ Authorization: Bearer <access_token>
 | `material_tag` | string | 是 | 材料标签，用于后续 SKU 匹配 |
 | `area_m2` | decimal | 是 | 面面积，单位平方米 |
 
-### 4.6 Part 结构
+### 4.6 Part 结构（当前插件使用页面计量列）
 
 ```json
 {
   "code": "part-1",
-  "name": "地柜",
-  "quantity": 1,
-  "unit": "套",
-  "material_tag": "wood"
+  "name": "面积",
+  "quantity": 2.5,
+  "unit": "m2"
 }
 ```
 
@@ -342,10 +353,10 @@ Authorization: Bearer <access_token>
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `code` | string | 是 | 部品稳定编码 |
-| `name` | string | 是 | 部品名称 |
+| `name` | string | 是 | 页面计量列名称：面积、长度、体积或件数 |
 | `quantity` | decimal | 是 | 算量结果 |
-| `unit` | string | 是 | 单位，例如 `套`、`件`、`m`、`m2` |
-| `material_tag` | string | 是 | 材料标签，用于后续 SKU 匹配 |
+| `unit` | string | 是 | `m2`、`m`、`m3` 或 `个` |
+| `material_tag` | string | 否 | 当前插件不发送；旧客户端兼容字段 |
 
 ### 4.7 完整示例
 
@@ -357,28 +368,19 @@ Authorization: Bearer <access_token>
     "code": "XM-001",
     "name": "样板房"
   },
+  "designer_account": "designer@example.com",
   "model_key": "model-001",
   "source_version": "v001",
+  "model_version_no": "V1.0",
+  "update_content": "新增卫生间产品关联",
   "components": [
     {
       "code": "cabinet-1",
       "name": "橱柜",
       "component_type": "cabinet",
-      "faces": [
-        {
-          "code": "face-1",
-          "material_tag": "wood",
-          "area_m2": 2.5
-        }
-      ],
       "parts": [
-        {
-          "code": "part-1",
-          "name": "地柜",
-          "quantity": 1,
-          "unit": "套",
-          "material_tag": "wood"
-        }
+        {"code": "part-area", "name": "面积", "quantity": 2.5, "unit": "m2"},
+        {"code": "part-length", "name": "长度", "quantity": 10.64, "unit": "m"}
       ]
     }
   ]
@@ -419,8 +421,11 @@ curl -sS \
       "code": "XM-001",
       "name": "样板房"
     },
+    "designer_account": "designer@example.com",
     "model_key": "model-001",
     "source_version": "v001",
+    "model_version_no": "V1.0",
+    "update_content": "首次同步模型算量数据",
     "components": []
   }' \
   "$BASE_URL/api/v1/su/quantities"
@@ -524,6 +529,8 @@ su-<project_code>-<model_guid>-<source_version>
 如果插件支持手动重试，同一次模型版本必须复用同一个 `idempotency_key`。
 
 如果用户修改了模型并重新计算，应生成新的 `source_version` 和新的 `idempotency_key`。
+
+推送确认窗口填写的 `model_version_no` 和 `update_content` 也属于业务版本信息：两者任一变化，都应生成新的 `source_version` 和新的 `idempotency_key`。`source_version` 仍使用内容 SHA-256，不直接使用用户输入的版本号，避免同一版本号下内容变化被错误去重。平台内部自动递增的 `version_no` 与插件填写的 `model_version_no` 不是同一个字段。
 
 ### 8.3 编码稳定性
 

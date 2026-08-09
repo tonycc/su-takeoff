@@ -25,9 +25,9 @@
 
     <div class="sidebar-group">
       <div class="sidebar-label">管理</div>
-      <button class="sb-nav" data-page="comp-mapping" disabled>群组/组件映射</button>
-      <button class="sb-nav" data-page="settings" disabled>设置</button>
-      <button class="sb-nav" data-page="cloud" disabled>云端同步</button>
+      <button class="sb-nav" data-page="settings" disabled>参数管理</button>
+      <button class="sb-nav" data-page="cloud" disabled>项目绑定</button>
+      <button class="sb-nav" data-page="system" disabled>系统管理</button>
     </div>
   </nav>
 
@@ -42,13 +42,9 @@
     <div id="page-login" class="page-content">
       <div id="login-content">
         <div class="login-shell">
-          <section class="panel login-panel">
-            <h2>登录 SU Takeoff</h2>
-            <p class="cloud-hint">请先登录平台账号，登录成功后才能使用扫描、映射、设置和云端同步功能。</p>
-            <p class="cloud-hint">正在校验登录状态...</p>
-            <label>账号</label><input id="login-username" type="text">
-            <label>密码</label><input id="login-password" type="password">
-            <button class="primary-btn" onclick="window.cloudLoginFromLoginPage && window.cloudLoginFromLoginPage()">登录</button>
+          <section class="panel login-panel login-checking">
+            <div class="loading-spinner"></div>
+            <p class="login-checking-text">正在校验登录状态…</p>
           </section>
         </div>
       </div>
@@ -56,14 +52,14 @@
     <div id="page-position" class="page-content" style="display:none">
       <div class="empty-state"><p>请先点击「扫描全部」或「仅选中面」</p></div>
     </div>
-    <div id="page-comp-mapping" class="page-content" style="display:none">
-      <div id="comp-mapping-content"></div>
-    </div>
     <div id="page-settings" class="page-content" style="display:none">
       <div id="settings-content"></div>
     </div>
     <div id="page-cloud" class="page-content" style="display:none">
       <div id="cloud-content"></div>
+    </div>
+    <div id="page-system" class="page-content" style="display:none">
+      <div id="system-content"></div>
     </div>
   </main>
 
@@ -73,8 +69,8 @@
 
 <script src="app.js?v=login-gate-20260727"></script>
 <script src="js/model_view.js"></script>
-<script src="js/comp_mapping.js"></script>
 <script src="js/settings.js"></script>
+<script src="js/system_management.js"></script>
 <script src="js/cloud_sync.js?v=login-gate-20260727"></script>
 </body>
 </html>

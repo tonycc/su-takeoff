@@ -211,5 +211,16 @@ module SuTakeoff
       assert_equal :count, r.method
       assert_equal :component, r.source
     end
+
+    def test_container_item_preserves_attribute_source
+      policy = TakeoffPolicy.new
+      item = ScanItem.linear_solid(
+        face_id: 100, su_material: '踢脚线', length: 2.0,
+        layer_name: 'Layer0', component_path: ['踢脚线'], component_path_ids: [101],
+        tags: { method: 'length' }
+      )
+
+      assert_equal :attr, policy.resolve(item).source
+    end
   end
 end

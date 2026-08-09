@@ -56,7 +56,16 @@ module SuTakeoff
       end
 
       def write_record(record)
-        File.write(record_path(record[:idempotency_key]), JSON.pretty_generate(record))
+        path = record_path(record[:idempotency_key])
+        temp_path = "#{path}.tmp-#{Process.pid}-#{Thread.current.object_id}"
+        File.open(temp_path, 'wb') do |file|
+          file.write(JSON.pretty_generate(record))
+          file.flush
+          file.fsync rescue nil
+        end
+        File.rename(temp_path, path)
+      ensure
+        FileUtils.rm_f(temp_path) if temp_path && File.exist?(temp_path)
       end
 
       def read_record(path)
@@ -64,6 +73,7 @@ module SuTakeoff
 
         JSON.parse(File.read(path))
       rescue JSON::ParserError
+        warn "[SuTakeoff::SyncOutbox] ignored corrupt record: #{path}"
         nil
       end
 

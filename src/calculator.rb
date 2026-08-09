@@ -13,9 +13,9 @@ module SuTakeoff
     # 竖直薄板（散面建模的踢脚线/装饰条）背靠背两面的配对阈值。
     VERTICAL_SLAB_AREA_TOLERANCE = 0.02
     VERTICAL_SLAB_GAP_M = 0.05      # 5 cm 薄板厚度
+    HORIZONTAL_INDEX_CELL_M = 0.1
 
-    def initialize(component_mapping = nil, policy: nil)
-      @component_mapping = component_mapping
+    def initialize(policy: nil)
       @policy = policy
     end
 
@@ -28,9 +28,9 @@ module SuTakeoff
     def compute_geometry_only(items, _openings = nil)
       # 清除上次调用写入的缓存，确保 settings 变更后重新决议
       items.each { |it| it.resolved_method = nil; it.source = nil; it.strategy_name = nil }
-      items = dedup_thin_slabs(items)
-      # 全量决议并缓存，供 dedup_vertical_slabs 直接读取
+      # 先决议，再按量纲去重，避免显式标签在 Policy 生效前被同尺寸面误删。
       items.each { |it| cache_resolve(it) unless it.su_material.nil? }
+      items = dedup_thin_slabs(items)
       items = dedup_vertical_slabs(items)
       out = []
       items.each do |item|
@@ -83,10 +83,9 @@ module SuTakeoff
     def resolve_method(item)
       if @policy
         r = @policy.resolve(item)
-        # 启发兜底（policy 决议 :skip + :default）
-        if r.method == :skip && r.source == :default
-          return geometry_unmapped_fallback(item)
-        end
+        # 普通未映射面仍按面积计量，这是面几何的确定性默认值；只有 Policy
+        # 严格命中的窄长竖直面才标为 heuristic/length。
+        return geometry_default_area(item) if r.method == :skip && r.source == :default
         return {
           method: r.method,
           source: r.source,
@@ -98,7 +97,17 @@ module SuTakeoff
       geometry_unmapped_fallback(item)
     end
 
-    # 无显式决议面 item 的兜底判定：长宽比 > 15 视为线材，否则面材。
+    def geometry_default_area(_item)
+      {
+        method: :area,
+        source: :default,
+        strategy_name: :face_area,
+        unit: 'm²'
+      }
+    end
+
+    # 仅供没有 Policy 的旧调用兼容。注入 Policy 后必须尊重其 :skip，
+    # 否则会绕过 heuristics_enabled、面朝向和用户阈值。
     def geometry_unmapped_fallback(item)
       is_linear = item.kind == :face && item.width && item.width > 0 &&
                   item.height && (item.height / item.width) > 15
@@ -113,31 +122,24 @@ module SuTakeoff
       }
     end
 
-    # 单位选择：method 决定语义，record（仅 instance 来自组件映射）补充细节。
-    #   :count   → record.unit（个/件/套），缺省回退 item.unit → Registry.default_for(:count)
+    # 单位选择：method 决定语义。
+    #   :count   → item.unit（个/件/套），缺省回退 Registry.default_for(:count)
     #   :length  → Registry.default_for(:length)（'m'）
     #   :volume  → Registry.default_for(:volume)（'m³'）
-    #   :area    → record.unit（m²），缺省回退 item.unit → Registry.default_for(:area)
-    def unit_for(item, method, source, record = nil)
-      record ||= lookup_record(item)
+    #   :area    → item.unit（m²），缺省回退 Registry.default_for(:area)
+    def unit_for(item, method, _source)
       strategies = @policy&.strategies || Strategies::Registry.global
       case method
       when :length
         strategies.default_for(:length)&.default_unit || 'm'
       when :count
-        record&.unit || item.unit || strategies.default_for(:count)&.default_unit || '个'
+        item.unit || strategies.default_for(:count)&.default_unit || '个'
       when :area
-        record&.unit || item.unit || strategies.default_for(:area)&.default_unit || 'm²'
+        item.unit || strategies.default_for(:area)&.default_unit || 'm²'
       else
         # :volume :skip 等
         strategies.default_for(method)&.default_unit || ''
       end
-    end
-
-    def lookup_record(item)
-      return @component_mapping&.get(item.su_material) if item.kind == :instance
-
-      nil
     end
 
     # ---- 字段读取兜底（仅 dedup 内部使用）----
@@ -145,6 +147,10 @@ module SuTakeoff
       v = item.qty_area
       return v.to_f if v
       (item.qty || 0).to_f
+    end
+
+    def occurrence_key(item)
+      item.respond_to?(:face_occurrence_key) ? item.face_occurrence_key : item.face_id
     end
 
     # Remove the "back side" of thin horizontal slabs.
@@ -165,7 +171,9 @@ module SuTakeoff
       # Compute per-space vertical midpoint across ALL items in the space,
       # so a slab can be located in its global context rather than against
       # only its own two faces.
-      items_by_space = items.group_by { |it| Calculator.extract_space(it) }
+      items_by_space = items.group_by do |it|
+        [Array(it.component_path_ids), Calculator.extract_space(it)]
+      end
       space_z_mid = {}
       items_by_space.each do |sp, sp_items|
         zs = sp_items.map(&:z_center).compact
@@ -173,40 +181,47 @@ module SuTakeoff
         space_z_mid[sp] = (zs.min + zs.max) / 2.0
       end
 
-      grouped = items.group_by { |it| [Calculator.extract_space(it), it.su_material] }
+      grouped = items.group_by do |it|
+        [Array(it.component_path_ids), Calculator.extract_space(it), it.su_material, it.resolved_method]
+      end
       drop_ids = {}
 
-      grouped.each do |(space, _mat), group|
+      grouped.each do |(path_ids, space, _mat, _method), group|
         next if group.empty?
-        mid = space_z_mid[space]
+        mid = space_z_mid[[path_ids, space]]
         next unless mid
 
-        ups = group.select { |it| it.normal && it.normal[2] && it.normal[2] > 0.866 }
-        downs = group.select { |it| it.normal && it.normal[2] && it.normal[2] < -0.866 }
+        ups = group.select do |it|
+          it.resolved_method == :area && it.normal && it.normal[2] && it.normal[2] > 0.866
+        end
+        downs = group.select do |it|
+          it.resolved_method == :area && it.normal && it.normal[2] && it.normal[2] < -0.866
+        end
         matched_down = {}
 
         next if ups.empty? || downs.empty?
 
+        down_index = Hash.new { |hash, key| hash[key] = [] }
+        downs.each { |down| down_index[horizontal_index_key(down)] << down }
+
         ups.each do |up|
-          pair = downs.find do |dn|
-            !matched_down[dn.face_id] &&
-              area_qty(up) > 0 &&
-              (area_qty(up) - area_qty(dn)).abs / area_qty(up) <= SLAB_AREA_TOLERANCE &&
-              (up.z_center - dn.z_center).abs <= SLAB_Z_TOLERANCE_M
+          pair = find_indexed_candidate(horizontal_neighbor_keys(up), down_index) do |dn|
+            !matched_down[occurrence_key(dn)] && area_close?(area_qty(up), area_qty(dn), SLAB_AREA_TOLERANCE) &&
+              (up.z_center - dn.z_center).abs <= SLAB_Z_TOLERANCE_M && centers_overlap?(up, dn)
           end
           next unless pair
 
-          matched_down[pair.face_id] = true
+          matched_down[occurrence_key(pair)] = true
           slab_z = (up.z_center + pair.z_center) / 2.0
           if slab_z <= mid
-            drop_ids[pair.face_id] = true
+            drop_ids[occurrence_key(pair)] = true
           else
-            drop_ids[up.face_id] = true
+            drop_ids[occurrence_key(up)] = true
           end
         end
       end
 
-      items.reject { |it| drop_ids[it.face_id] }
+      items.reject { |it| drop_ids[occurrence_key(it)] }
     end
 
     # P4: 去掉竖直薄板背靠背的另一面。
@@ -240,36 +255,33 @@ module SuTakeoff
       return items if candidates.size < 2
 
       grouped = candidates.group_by { |it|
-        [Calculator.extract_space(it), it.su_material]
+        [Array(it.component_path_ids), Calculator.extract_space(it), it.su_material]
       }
       drop_ids = {}
       matched = {}
 
       grouped.each do |_, group|
         next if group.size < 2
-        # 双重循环找配对（数据量小，不必建空间索引）
-        group.each_with_index do |a, i|
-          next if matched[a.face_id]
-          group[(i + 1)..].each do |b|
-            next if matched[b.face_id]
-            next unless anti_parallel?(a.normal, b.normal)
-            next unless area_close?(area_qty(a), area_qty(b), area_tol)
-            dx = a.center_x - b.center_x
-            dy = a.center_y - b.center_y
-            dz = (a.z_center || 0) - (b.z_center || 0)
-            dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
-            next if dist > gap_m
-
-            matched[a.face_id] = true
-            matched[b.face_id] = true
-            # 留 a 删 b（length 累加结果相同；选择固定避免不确定性）
-            drop_ids[b.face_id] = true
-            break
+        spatial_index = Hash.new { |hash, key| hash[key] = [] }
+        group.each do |item|
+          next if matched[occurrence_key(item)]
+          pair = find_indexed_candidate(spatial_neighbor_keys(item, gap_m), spatial_index) do |candidate|
+            !matched[occurrence_key(candidate)] &&
+              anti_parallel?(item.normal, candidate.normal) &&
+              area_close?(area_qty(item), area_qty(candidate), area_tol) &&
+              center_distance(item, candidate) <= gap_m
+          end
+          if pair
+            matched[occurrence_key(pair)] = true
+            matched[occurrence_key(item)] = true
+            drop_ids[occurrence_key(item)] = true
+          else
+            spatial_index[spatial_index_key(item, gap_m)] << item
           end
         end
       end
 
-      items.reject { |it| drop_ids[it.face_id] }
+      items.reject { |it| drop_ids[occurrence_key(it)] }
     end
 
     def anti_parallel?(n1, n2)
@@ -281,6 +293,69 @@ module SuTakeoff
     def area_close?(a, b, tol)
       return false if a <= 0 || b <= 0
       ((a - b).abs / [a, b].max) <= tol
+    end
+
+    def centers_overlap?(a, b)
+      return false if a.center_x.nil? || a.center_y.nil? || b.center_x.nil? || b.center_y.nil?
+      reach = [a.width, a.height, b.width, b.height].compact.map(&:to_f).max.to_f
+      return false if reach <= 0
+      (a.center_x - b.center_x).abs <= reach && (a.center_y - b.center_y).abs <= reach
+    end
+
+    def horizontal_index_key(item)
+      area_bucket = Math.log([area_qty(item), 1.0e-9].max) / Math.log(1.0 + SLAB_AREA_TOLERANCE)
+      [
+        (item.center_x.to_f / HORIZONTAL_INDEX_CELL_M).floor,
+        (item.center_y.to_f / HORIZONTAL_INDEX_CELL_M).floor,
+        (item.z_center.to_f / SLAB_Z_TOLERANCE_M).floor,
+        area_bucket.floor
+      ]
+    end
+
+    def horizontal_neighbor_keys(item)
+      base = horizontal_index_key(item)
+      keys = []
+      (-1..1).each do |dx|
+        (-1..1).each do |dy|
+          (-1..1).each do |dz|
+            (-2..2).each { |da| keys << [base[0] + dx, base[1] + dy, base[2] + dz, base[3] + da] }
+          end
+        end
+      end
+      keys
+    end
+
+    def spatial_index_key(item, cell_size)
+      [
+        (item.center_x.to_f / cell_size).floor,
+        (item.center_y.to_f / cell_size).floor,
+        (item.z_center.to_f / cell_size).floor
+      ]
+    end
+
+    def spatial_neighbor_keys(item, cell_size)
+      base = spatial_index_key(item, cell_size)
+      (-1..1).flat_map do |dx|
+        (-1..1).flat_map do |dy|
+          (-1..1).map { |dz| [base[0] + dx, base[1] + dy, base[2] + dz] }
+        end
+      end
+    end
+
+    def center_distance(a, b)
+      dx = a.center_x.to_f - b.center_x.to_f
+      dy = a.center_y.to_f - b.center_y.to_f
+      dz = a.z_center.to_f - b.z_center.to_f
+      Math.sqrt(dx * dx + dy * dy + dz * dz)
+    end
+
+    def find_indexed_candidate(keys, index)
+      keys.each do |key|
+        index[key].reverse_each do |candidate|
+          return candidate if yield(candidate)
+        end
+      end
+      nil
     end
 
     def vertical_slab_gap

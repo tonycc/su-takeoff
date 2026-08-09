@@ -43,5 +43,21 @@ module SuTakeoff
       ctx = { opening_area_by_face: { 1 => 5.0 } }
       assert_in_delta 0.0, Strategies::FaceArea.new.aggregate(items, ctx), 0.001
     end
+
+    def test_opening_deduction_is_scoped_to_full_face_occurrence_path
+      first = ScanItem.face(
+        face_id: 7, su_material: 'paint', area: 10.0,
+        normal: [0, 1, 0], width: 2, height: 5,
+        layer_name: 'L0', component_path: ['A', '共享墙'], component_path_ids: [10, 20]
+      )
+      second = ScanItem.face(
+        face_id: 7, su_material: 'paint', area: 10.0,
+        normal: [0, 1, 0], width: 2, height: 5,
+        layer_name: 'L0', component_path: ['B', '共享墙'], component_path_ids: [11, 20]
+      )
+      ctx = { opening_area_by_face: { first.face_occurrence_key => 2.0 } }
+
+      assert_in_delta 18.0, Strategies::FaceArea.new.aggregate([first, second], ctx), 0.001
+    end
   end
 end

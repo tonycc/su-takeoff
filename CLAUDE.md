@@ -33,7 +33,7 @@ CSV 字节序列错误属于 Ruby 2.6 系统环境问题，与项目代码无关
 ## 打包
 
 ```bash
-ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
+ruby tools/pack_rbz.rb    # 根据 VERSION 生成 su-takeoff-v<version>.rbz
 ```
 
 ## 架构

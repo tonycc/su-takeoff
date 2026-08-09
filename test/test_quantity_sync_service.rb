@@ -1,6 +1,5 @@
 require_relative 'test_helper'
 require 'tmpdir'
-require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/calculator'
 
@@ -31,10 +30,11 @@ class TestQuantitySyncService < Minitest::Test
   end
 
   class Auth
-    attr_reader :tokens_used
+    attr_reader :tokens_used, :account
 
-    def initialize(token: 'access-token')
+    def initialize(token: 'access-token', account: 'designer@example.com')
       @token = token
+      @account = account
       @tokens_used = []
     end
 
@@ -62,7 +62,6 @@ class TestQuantitySyncService < Minitest::Test
   end
 
   def setup
-    @component_mapping = SuTakeoff::ComponentMapping.new
     @policy = SuTakeoff::TakeoffPolicy.new
     @binding = Binding.new
   end
@@ -77,8 +76,9 @@ class TestQuantitySyncService < Minitest::Test
       width: 2.0,
       height: 5.0,
       layer_name: '墙面',
-      component_path: [],
-      component_path_ids: []
+      component_path: ['墙面组件'],
+      component_path_ids: [10],
+      component_path_persistent_ids: [1001]
     )
   end
 
@@ -88,7 +88,6 @@ class TestQuantitySyncService < Minitest::Test
       auth_session: auth,
       outbox: outbox,
       binding: @binding,
-      component_mapping: @component_mapping,
       policy: @policy,
       retry_delays: retry_delays,
       sleeper: ->(_seconds) {}
@@ -99,7 +98,6 @@ class TestQuantitySyncService < Minitest::Test
     SuTakeoff::Api::QuantityPayloadBuilder.new(
       items: [item],
       openings: [],
-      component_mapping: @component_mapping,
       policy: @policy,
       binding: @binding
     ).build
@@ -116,6 +114,7 @@ class TestQuantitySyncService < Minitest::Test
       assert result.success?
       assert_equal 1, client.calls.size
       assert_equal 'access-token', client.calls.first[:access_token]
+      assert_equal 'designer@example.com', client.calls.first[:payload][:designer_account]
       assert_equal 'sheet-1', @binding.synced.first[:sheet_id]
       assert_equal 'version-1', @binding.synced.first[:model_version_id]
       assert_empty outbox.all
@@ -211,7 +210,6 @@ class TestQuantitySyncService < Minitest::Test
         auth_session: Auth.new,
         outbox: outbox,
         binding: @binding,
-        component_mapping: @component_mapping,
         policy: @policy,
         retry_delays: [],
         sleeper: ->(_seconds) {},

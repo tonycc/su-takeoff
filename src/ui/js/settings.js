@@ -1,4 +1,4 @@
-// src/ui/js/settings.js — 设置页：分类单位、标签定义、启发式、启发式阈值
+// src/ui/js/settings.js — 参数管理页：分类单位、标签定义、启发式、启发式阈值
 
 function renderSettings(data) {
   window._sharedConfig = data;
@@ -6,11 +6,12 @@ function renderSettings(data) {
   if (!container) return;
 
   var html = '';
-  html += '<div class="settings-card">' + renderCategoryUnitConfig('组件分类', 'component_category_units', data.component_category_units || []) + '</div>';
+  // 组件分类已不参与当前 Strategy 决议，隐藏旧配置入口，避免用户误以为会改变算量。
   html += '<div class="settings-card">' + renderTagDefsConfig(data.tag_defs || {}) + '</div>';
   html += '<div class="settings-card">' + renderHeuristicsConfig(data.heuristics_enabled !== false) + '</div>';
   html += '<div class="settings-card">' + renderHeuristicThresholdsConfig(data.heuristic_thresholds || {}) + '</div>';
   container.innerHTML = html;
+  bindTagDefRows(container);
 }
 
 // ---------------- Category-unit config ----------------
@@ -75,12 +76,15 @@ function removeCategoryUnit(btn, key) {
 
 function persistConfig() {
   var data = window._sharedConfig;
-  callSketchUp('save_config', JSON.stringify({
-    component_category_units: data.component_category_units || [],
-    heuristics_enabled: data.heuristics_enabled !== false,
-    heuristic_thresholds: data.heuristic_thresholds || {},
-    tag_defs: data.tag_defs || {}
-  }));
+  clearTimeout(window._settingsPersistTimer);
+  window._settingsPersistTimer = setTimeout(function() {
+    callSketchUp('save_config', JSON.stringify({
+      component_category_units: data.component_category_units || [],
+      heuristics_enabled: data.heuristics_enabled !== false,
+      heuristic_thresholds: data.heuristic_thresholds || {},
+      tag_defs: data.tag_defs || {}
+    }));
+  }, 120);
 }
 
 // ---------------- Tag definitions config ----------------
@@ -148,7 +152,7 @@ function formatMethodLabels(methodStr) {
   var labels = { area: '面积', length: '长度', volume: '体积', count: '件数' };
   return (methodStr || 'area').split('+').map(function(m) {
     var v = m.trim();
-    return '<span class="tag-chip" style="font-size:10px;padding:1px 5px;margin:1px">' + (labels[v] || v) + '</span>';
+    return '<span class="tag-chip" style="font-size:10px;padding:1px 5px;margin:1px">' + esc(labels[v] || v) + '</span>';
   }).join('');
 }
 
@@ -162,13 +166,35 @@ function renderTagDefRow(tag, method) {
         var checked = selected.indexOf(m) >= 0 ? ' checked' : '';
         return '<label style="font-size:11px;display:inline-flex;align-items:center;gap:2px;margin-right:6px">' +
           '<input type="checkbox" value="' + m + '"' + checked +
-          ' onchange="updateTagDefCb(\'' + escAttr(tag) + '\')"> ' +
+          ' class="tag-method-checkbox"> ' +
           ({area:'面积',length:'长度',volume:'体积',count:'件数'})[m] +
           '</label>';
       }).join('') +
     '</td>' +
-    '<td><button onclick="removeTagDef(\'' + escAttr(tag) + '\')">删除</button></td>' +
+    '<td><button type="button" class="tag-remove-btn">删除</button></td>' +
     '</tr>';
+}
+
+function bindTagDefRows(root) {
+  (root || document).querySelectorAll('tr[data-tag]').forEach(function(row) {
+    row.querySelectorAll('.tag-method-checkbox').forEach(function(cb) {
+      cb.addEventListener('change', function() { updateTagDefRow(row); });
+    });
+    var removeBtn = row.querySelector('.tag-remove-btn');
+    if (removeBtn) removeBtn.addEventListener('click', function() { removeTagDef(row.dataset.tag); });
+  });
+}
+
+function updateTagDefRow(row) {
+  if (!row) return;
+  var tag = row.dataset.tag;
+  var cbs = row.querySelectorAll('input[type="checkbox"]');
+  var methods = [];
+  cbs.forEach(function(cb) { if (cb.checked) methods.push(cb.value); });
+  var data = window._sharedConfig;
+  data.tag_defs = data.tag_defs || {};
+  data.tag_defs[tag] = methods.length > 0 ? methods.join('+') : 'area';
+  persistConfig();
 }
 
 function addTagDef() {
@@ -185,16 +211,10 @@ function addTagDef() {
 }
 
 function updateTagDefCb(tag) {
-  var row = document.querySelector('tr[data-tag="' + escAttr(tag) + '"]');
-  if (!row) return;
-  var cbs = row.querySelectorAll('input[type="checkbox"]');
-  var methods = [];
-  cbs.forEach(function(cb) { if (cb.checked) methods.push(cb.value); });
-  var method = methods.length > 0 ? methods.join('+') : 'area';
-  var data = window._sharedConfig;
-  data.tag_defs = data.tag_defs || {};
-  data.tag_defs[tag] = method;
-  persistConfig();
+  var row = Array.prototype.slice.call(document.querySelectorAll('tr[data-tag]')).find(function(candidate) {
+    return candidate.dataset.tag === tag;
+  });
+  updateTagDefRow(row);
 }
 
 function removeTagDef(tag) {
@@ -211,6 +231,7 @@ function refreshTagDefsCard() {
   if (!container) return;
   var data = window._sharedConfig;
   container.innerHTML = renderTagDefsInner(data.tag_defs || {});
+  bindTagDefRows(container);
 }
 
 // ---------------- Heuristics toggle ----------------
@@ -242,10 +263,10 @@ function toggleHeuristics(enabled) {
 // ---------------- Heuristic thresholds ----------------
 // 启发式判定阈值与竖直薄板去重阈值。开放给高级用户调优。
 function renderHeuristicThresholdsConfig(th) {
-  var minAspect    = th.linear_min_aspect_ratio   || 15;
-  var maxShortEdge = th.linear_max_short_edge_m   || 0.2;
-  var slabGap      = th.vertical_slab_gap_m       || 0.05;
-  var slabAreaTol  = th.vertical_slab_area_tolerance || 0.02;
+  var minAspect = th.linear_min_aspect_ratio == null ? 15 : th.linear_min_aspect_ratio;
+  var maxShortEdge = th.linear_max_short_edge_m == null ? 0.2 : th.linear_max_short_edge_m;
+  var slabGap = th.vertical_slab_gap_m == null ? 0.05 : th.vertical_slab_gap_m;
+  var slabAreaTol = th.vertical_slab_area_tolerance == null ? 0.02 : th.vertical_slab_area_tolerance;
 
   var html = '<div class="sc-head">启发式阈值 ' +
     '<span style="font-weight:normal;font-size:11px;color:#6c7086">' +
@@ -283,4 +304,3 @@ function updateThreshold(key, val) {
   data.heuristic_thresholds[key] = num;
   persistConfig();
 }
-

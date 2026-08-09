@@ -5,4 +5,6 @@
 .claude/
 tmp/
 data/config.json
+data/component_sku_mapping.json
+data/sync_outbox/
 *.rbz

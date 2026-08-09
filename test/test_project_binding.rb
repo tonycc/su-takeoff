@@ -55,7 +55,7 @@ class TestProjectBinding < Minitest::Test
     )
 
     binding.load!
-    binding.update_project!(project_code: ' XM-001 ', project_name: ' 样板房 ')
+    binding.update_project!(project_id: ' project-1 ', project_code: ' XM-001 ', project_name: ' 样板房 ')
     binding.mark_synced!(
       payload_hash: 'hash',
       idempotency_key: 'su-v2-model-uuid-hash',
@@ -64,6 +64,7 @@ class TestProjectBinding < Minitest::Test
     )
 
     loaded = SuTakeoff::Api::ProjectBinding.load(model)
+    assert_equal 'project-1', loaded.project_id
     assert_equal 'XM-001', loaded.project_code
     assert_equal '样板房', loaded.project_name
     assert_equal 'model-uuid', loaded.model_key

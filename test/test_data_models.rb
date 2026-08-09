@@ -13,6 +13,8 @@ module SuTakeoff
       assert_equal 'marble', item.su_material
       assert_equal 5.0, item.qty
       assert_equal [101], item.component_path_ids
+      assert_equal '101', item.component_occurrence_key
+      assert_equal '101/1', item.face_occurrence_key
     end
 
     def test_strategy_name_defaults_nil_and_is_settable

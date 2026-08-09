@@ -10,6 +10,7 @@ module SuTakeoff
       KEY = 'binding'.freeze
 
       ATTRIBUTES = %w[
+        project_id
         project_code
         project_name
         model_key
@@ -46,7 +47,9 @@ module SuTakeoff
         self
       end
 
-      def update_project!(project_code:, project_name:)
+      def update_project!(project_id: nil, project_code:, project_name:)
+        @project_id = project_id.to_s.strip
+        @project_id = nil if @project_id.empty?
         @project_code = project_code.to_s.strip
         @project_name = project_name.to_s.strip
         save!

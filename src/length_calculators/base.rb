@@ -7,11 +7,9 @@ module SuTakeoff
     #
     # ctx 包含：
     #   entities: definition 内子实体集合（Sketchup::Entities 或 array）
-    #   edges: 预解析的边数组 [{ dkey:, len:, len_raw: }, ...]
-    #   baseline_id: AttrDict 中的 baseline_id（整数或 nil）
-    #   edge_scale: 累积缩放因子（parent_scale × entity_scale）
-    #   model_unit_to_m: 模型单位 → 米的换算系数
-    #   scale: parent_scale
+    #   edges: 已应用完整实例变换的边数组 [{ dkey:, len:, entity_id:, persistent_id: }, ...]
+    #   baseline_id: AttrDict 中的 entityID / persistent_id
+    #   edge_scale / model_unit_to_m: 仅供旧调用兼容
     #   volume_m3: 测试支持显式给体积，绕过 entity.volume
     #   debug: 是否输出调试日志
     class Base

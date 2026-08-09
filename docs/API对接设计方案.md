@@ -47,7 +47,7 @@
 采用“进入插件先校验登录状态，登录后才能使用插件功能”的策略：
 
 - 打开 HtmlDialog 后先进入独立登录页，尝试用安全存储中的 refresh token 恢复会话。
-- 未登录时，扫描、材料映射、组件映射、设置、本地统计、定位和标签写入均不可用。
+- 未登录时，扫描、材料映射、组件映射、参数管理、本地统计、定位和标签写入均不可用。
 - 登录成功后解锁本地插件功能。
 - 推送到平台仍需额外校验 `quantity:ingest` 权限；缺少该权限时保留登录状态并允许本地功能，但禁用云端推送。
 
@@ -69,7 +69,7 @@ Scanner -> WorkbenchPresenter -> JSON -> HtmlDialog
 | 模型标识 | 无稳定平台标识 | 必须提供持久化 `model_key` |
 | 实体编码 | 主要使用 `entityID` | 平台编码应使用 `persistent_id` 和实例路径 |
 | 材料标签 | 只有材料名称、分类、单位、规格 | 必须新增稳定的 `platform_material_tag` |
-| Payload | 只有工作台展示数据 | 必须构建 SU v2 `components/faces/parts` |
+| Payload | 只有工作台展示数据 | 必须构建 SU v2 `components/parts`；面积聚合为部品，不上传具体面 |
 | 幂等和版本 | 无 | 同一内容复用幂等键，内容变化生成新版本 |
 | 失败恢复 | 无 | 有限重试和本地待重试记录 |
 
@@ -347,7 +347,10 @@ Dialog 销毁后，异步结果应安全丢弃，不再调用已关闭的 HtmlDi
     "code": "XM-001",
     "name": "样板房"
   },
+  "designer_account": "designer@example.com",
   "model_key": "model-uuid",
+  "model_version_no": "V2026.08.05",
+  "update_content": "调整卫生间龙头数量并补充灯具",
   "source_version": "sha256:content-hash",
   "components": []
 }
@@ -360,10 +363,15 @@ Dialog 销毁后，异步结果应安全丢弃，不再调用已关闭的 HtmlDi
 | `protocol_version` | 常量 | 固定为 `2` |
 | `project.code` | ProjectBinding | 必填，不能用项目名称替代 |
 | `project.name` | ProjectBinding | 必填，可首次默认模型标题 |
+| `designer_account` | AuthSession.account | 当前登录设计师账号；写入推送请求体并参与业务 hash，不发送密码或 Token |
 | `model_key` | ProjectBinding | 首次绑定生成 UUID，后续保持不变 |
+| `model_version_no` | 推送确认窗口 | 用户填写的模型版本号；最长 64 个字符；参与业务 hash；后端可缺省兼容旧插件 |
+| `update_content` | 推送确认窗口 | 用户填写的更新内容；最长 2000 个字符；参与业务 hash；后端可缺省兼容旧插件 |
 | `source_version` | Payload Builder | 规范化业务内容的 SHA-256 |
 | `idempotency_key` | Payload Builder | 由协议、model_key、project.code 和内容 hash 生成 |
-| `components` | hierarchy + ScanItem | 按直接归属容器生成扁平组件列表 |
+| `components` | WorkbenchPresenter.component_rows | 复用按组件页面的最终行数据；模型根仅用于界面总计，不上传 |
+| `components[].quantity_tag` | WorkbenchPresenter.component_rows.tag | 组件当前选择的算量标签；复合标签作为一个字符串发送；未选择时不发送 |
+| `components[].project_product_id` | ComponentSkuMapping + hierarchy | 组件有项目产品关联时发送项目产品 ID；参与内容 hash |
 
 ### 7.3 稳定编码
 
@@ -372,16 +380,15 @@ Dialog 销毁后，异步结果应安全丢弃，不再调用已关闭的 HtmlDi
 平台编码使用：
 
 - 组件：从模型根到当前实例的 `persistent_id` 路径。
-- 面：实例 `persistent_id` 路径加面 `persistent_id`。
-- 部品：组件编码、材料标签、计量方式和规格组成的稳定摘要。
-- 模型根直属面：归入合成组件 `model-root`。
+- 面：只在插件本地用于洞口扣减和几何计算，不进入推送 Payload。
+- 部品：组件编码、材料名称、计量方式和单位组成的稳定摘要；面积面也聚合为部品。
+- 模型根直属面：只参与插件界面总计，不进入当前推送 Payload。
 
 建议编码格式：
 
 ```text
 component: c-<hash(instance_persistent_path)>
-face:      f-<hash(instance_persistent_path + face_persistent_id)>
-part:      p-<hash(component_code + material_tag + method + spec)>
+part:      p-<hash(component_code + material_name + method + unit)>
 ```
 
 对外编码使用短前缀加 SHA-256 摘要，避免路径过长和特殊字符问题。编码原始字段保留在内存调试信息中，不写普通日志。
@@ -397,15 +404,23 @@ component_path_persistent_ids
 
 ### 7.4 Component 映射
 
-每个有直接算量结果的容器生成一个 Component。嵌套容器分别生成组件；当前服务端协议没有父组件字段，因此首期以扁平列表上传。
+每个确认推送时页面可见的群组/组件树节点生成一个 Component，即使该行四个数量列都显示 `-` 也要生成，`parts` 为空数组。行数据由 `WorkbenchPresenter` 统一计算，标签变更后页面和推送使用同一份结果；模型根总计行不上传。嵌套容器只有在页面展开并显示为树节点时才上传，折叠状态下不可见的子级组件不上传；当前服务端协议没有父组件字段，因此仍以扁平列表上传。
 
 ```json
 {
   "code": "c-abc123",
   "name": "橱柜",
   "component_type": "cabinet",
-  "faces": [],
-  "parts": []
+  "quantity_tag": "按面积+个数",
+  "project_product_id": "project-product-uuid",
+  "parts": [
+    {
+      "code": "p-def456",
+      "name": "面积",
+      "quantity": 2.5,
+      "unit": "m2"
+    }
+  ]
 }
 ```
 
@@ -417,55 +432,56 @@ component_path_persistent_ids
 
 不得仅根据组件中文名称静默猜测业务类型。
 
-### 7.5 Face 映射
+### 7.5 面积结果映射
 
-只有最终决议为面积的面进入 `faces`：
+当前插件不上传具体面，也不发送 `faces[]` 明细。页面行的面积、长度、体积和件数会直接转换为 `parts[]` 中的计量列：
 
 ```json
 {
-  "code": "f-def456",
-  "material_tag": "wood",
-  "area_m2": 2.5
+  "code": "p-def456",
+  "name": "面积",
+  "quantity": 2.5,
+  "unit": "m2"
 }
 ```
 
 规则：
 
-- `area_m2` 使用最终面积策略结果。
-- 已关联洞口时，从宿主面扣除洞口面积，最小为 0。
-- 固定精度建议为 4 位小数。
-- 忽略材料不上传。
-- 未映射材料或缺少平台材料标签时，默认阻止整个推送。
-- 同一组件内的 face code 不得重复。
+- `quantity` 使用按组件页面显示行的最终结果，面积已扣除洞口。
+- 固定精度为 4 位小数。
+- 面的 `persistent_id`、`entityID` 和面编码不进入服务端。
+- 面积单位统一使用 ASCII `m2`，避免服务端按 `m²` 处理时产生差异。
+- `quantity_tag` 只在页面组件行有用户选择的算量标签时发送；标签名称原样保留，复合标签（如 `按面积+个数`）不拆分。
 
 ### 7.6 Part 映射
 
-长度、体积和件数结果进入 `parts`：
+页面四个数量列统一进入 `parts`。`parts` 只是当前服务端协议承载多计量列的兼容容器，不代表插件内部存在独立的部品对象：
 
 ```json
 {
   "code": "p-ghi789",
-  "name": "地柜",
-  "quantity": 1,
-  "unit": "套",
-  "material_tag": "wood"
+  "name": "长度",
+  "quantity": 10.64,
+  "unit": "m"
 }
 ```
 
-聚合键建议为：
+当前页面列到 `parts` 的映射为：
 
-```text
-component_code + material_tag + resolved_method + unit + spec
+| 页面列 | Part name | unit | 来源 |
+| --- | --- | --- | --- |
+| 面积 | 面积 | `m2` | 页面面积列 |
+| 长度 | 长度 | `m` | 页面长度列 `mm ÷ 1000` |
+| 体积 | 体积 | `m3` | 页面体积列 |
+| 件数 | 件数 | `个` | 页面件数列 |
 ```
 
 规则：
 
-- `quantity` 必须是 JSON number。
-- 长度内部使用米，默认单位 `m`。
-- 体积内部使用立方米，默认单位 `m³`，最终字符格式需服务端确认。
-- 件数使用映射中的业务单位，例如 `个`、`件`、`套`。
-- 复合标签产生的多个计量方式分别生成 Part。
-- 名称优先使用映射后的材料/部品名称。
+- 只发送页面显示值大于 0 的列；页面显示 `-` 的列不发送。
+- `quantity` 必须是 JSON number，固定保留 4 位小数。
+- 页面长度显示为 mm，推送统一转换为 m；体积统一使用 m3。
+- 算量标签通过 `components[].quantity_tag` 上传，同时数量仍以页面最终显示值为准。
 
 ### 7.7 材料标签扩展
 
@@ -495,9 +511,11 @@ platform_material_tag
 
 1. Hash 字段按固定顺序构造。
 2. components 按 `code` 排序。
-3. faces 和 parts 按 `code` 排序。
+3. parts 按 `code` 排序。
 4. 数值按固定精度舍入。
 5. hash 输入不包含 `idempotency_key`、`source_version` 和同步结果字段。
+
+`model_version_no` 和 `update_content` 是业务 hash 的输入字段，用户在确认窗口修改任一字段时必须生成新的版本 key；同一组版本信息和页面数据重试时保持 key 不变。
 
 建议：
 
@@ -510,6 +528,8 @@ idempotency_key = "su-v2-<model_key>-<content_hash_prefix>"
 幂等键计算必须包含 `project.code`，避免用户把同一模型重新绑定到另一个项目时错误复用历史结果。
 
 同一模型内容和映射结果重复推送时使用相同幂等键；几何、项目绑定、材料映射或算量策略结果变化时生成新版本。
+
+用户确认窗口填写的 `model_version_no`、`update_content` 变化也生成新版本。`designer_account` 变化同样会生成新的内容 hash 和版本 key。`source_version` 继续使用 `sha256:<content_hash_prefix>`，用户版本号和设计师账号单独作为 Payload 字段同步；平台内部自动递增的 `version_no` 与 `model_version_no` 不混用。
 
 ## 8. 推送流程
 
@@ -579,11 +599,11 @@ sequenceDiagram
 
 打开 HtmlDialog 后先进入独立登录页并校验登录状态：
 
-- 未登录：停留在登录页，锁定扫描、映射、设置、定位和标签写入等功能。
+- 未登录：停留在登录页，锁定扫描、映射、参数管理、定位和标签写入等功能。
 - 登录中：显示加载状态，禁用重复提交。
-- 已登录：解锁侧边栏功能页，并在云端同步页显示当前账号和租户名称。
+- 已登录：解锁侧边栏功能页，并在系统管理页显示软件版本、当前账号和租户名称。
 - 无推送权限：显示权限状态，推送按钮禁用。
-- 已登录菜单：在云端同步页提供“退出登录”。
+- 已登录菜单：在系统管理页提供“退出登录”。
 
 登录页字段：
 
@@ -596,10 +616,10 @@ sequenceDiagram
 
 ### 10.2 项目绑定
 
-首次推送前显示项目绑定表单：
+首次推送前显示项目绑定选择器：
 
-- 平台项目编号，必填。
-- 项目名称，必填。
+- 打开页面后自动调用项目列表接口，加载当前账号可访问的项目。
+- 从返回列表选择平台项目，保存项目 ID、项目编号和项目名称。
 - 模型标识只读展示。
 
 修改项目编号属于重新绑定操作，应明确提示下一次推送会创建或复用另一个平台算量单。
@@ -634,14 +654,15 @@ sequenceDiagram
 ```json
 {
   "environment": "production",
-  "base_url": "https://production.example.com"
+  "base_url": "https://production.example.com",
+  "development_base_url": "http://127.0.0.1:8001"
 }
 ```
 
 要求：
 
 - 发布包的生产 Base URL 固定或使用受控配置。
-- 联调环境可使用单独开发配置。
+- 开发 loader 启动时使用 `development_base_url`，当前为本地 `http://127.0.0.1:8001`。
 - 前端不能传入或覆盖任意 Base URL，避免把 token 发送到恶意地址。
 - Base URL 不得包含用户名、密码、query 或 fragment。
 - 日志中可记录 API host 和 path，不记录 Authorization。

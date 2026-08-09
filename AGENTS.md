@@ -27,7 +27,7 @@ CSV 字节序列错误属于 Ruby 2.6 系统环境问题，与项目代码无关
 ## 打包
 
 ```bash
-ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
+ruby tools/pack_rbz.rb    # 根据 VERSION 生成 su-takeoff-v<version>.rbz
 ```
 
 ## 架构
@@ -40,7 +40,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 - **`data_models.rb`** — `ScanItem`（keyword_init）含 `kind` 区分 `:face`/`:instance`/`:solid`/`:linear_solid`/`:count_solid`，`qty_area/qty_length/qty_volume/qty_count` 量纲字段统一以米（m）为单位；新增 `strategy_name`（Symbol，缓存决议出的策略名，前端调试用）。类方法 `ScanItem.face/instance/solid/linear_solid/count_solid` 是推荐的工厂入口。`Opening`（门窗洞口）保留不变。
 - **`calculator.rb`** — `compute_geometry_only`：纯几何决议 + 薄板去重。先 `dedup_thin_slabs`（水平楼板），再 `cache_resolve` 全量决议，再 `dedup_vertical_slabs`（竖直薄板，仅作用于 method==:length 的面），最后输出 `{item:, method:, source:, unit:, strategy_name:}` 数组。`unit_for` 走 `Strategies::Registry.default_for(method).default_unit`；无显式决议的面用 `geometry_unmapped_fallback`（长宽比 > 15 视线材）。
 - **`mapping.rb`** — SU 材质 → 真实材料映射（分类、单位、规格）。`default_waste_rate` 字段保留兼容旧数据，几何用量链路不读取。
-- **`component_mapping.rb`** — 组件定义名 → 材料映射。`counting_method`: `expand` 展开统计面材 / `aggregate` 整件统计个数。
+- **`component_sku_mapping.rb`** — 「产品信息」列的 SKU 关联（定义名 → 平台 SKU），仅用于选型展示，不参与算量。组件用用户定义名，群组用内部定义名（如 `Group#3`，模型内唯一、跨模型不稳定）。三字段全空的 `set_component_sku` 调用 = 清除关联。前端合并行对组内每个成员的定义名逐一持久化（与合并行标签下拉循环打标同一模式）。
 
 ### Strategy 架构（`src/strategies/`）
 
@@ -73,8 +73,8 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 ### SU 运行时层（依赖 SketchUp API）
 
 - **`scanner.rb`** — 递归遍历模型实体收集 `ScanItem` 与 `Opening`。`collect_faces` 入口按实体类型分派 `collect_face`（~95 行）与 `collect_container`（~110 行）。
-  - **`collect_container` 决议顺序**：(1) 复合标签 method 含 `+` → 拆开产出多条容器级 ScanItem；(2) 组件映射 `aggregate` → 整件 `:instance`；(3) `try_emit_solid`（3 档决议命中 `:length`/`:volume`/`:count`）→ 不下钻；(4) 纯边线分支（无面/无子容器但有边）→ `decide_pure_edges_method` 4 档判 method，length 走 PathSum 出 `:linear_solid`，其他出 `:instance` 按件；(5) 正常下钻子面。
-  - **`try_emit_solid` 3 档**：AttrDict method → 图层规则 → 组件映射 unit 推导。（原第 4 档"策略自动匹配 `find_container_strategy`"仍在代码中，但策略已无匹配规则，处于休眠。）
+  - **`collect_container` 决议顺序**：(1) 复合标签 method 含 `+` → 拆开产出多条容器级 ScanItem；(2) `try_emit_solid`（决议命中 `:length`/`:volume`/`:count`）→ 不下钻；(3) 纯边线分支（无面/无子容器但有边）→ `decide_pure_edges_method` 3 档判 method，length 走 PathSum 出 `:linear_solid`，其他出 `:instance` 按件；(4) 正常下钻子面。
+  - **`try_emit_solid` 决议**：AttrDict method → 图层规则 →（策略自动匹配 `find_container_strategy` 仍在代码中，但策略已无匹配规则，处于休眠。）
   - **`emit_solid_by_method`** 按 method 产出 `:linear_solid`/`:solid`/`:count_solid`。`:length` 优先调 `compute_length_via_strategy`（让暴露 `compute_length` 的专用策略接管），fallback 到 `compute_linear_length`（Chained）。
   - **`build_length_ctx`** 统一组装 entities/edges/edge_scale，`calibrate_inch_edges` 处理 e.length 单位混淆。
   - `Scanner::DEBUG = true` 开启详细调试日志（含 PATH_DEBUG 系列）。
@@ -86,12 +86,10 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 
 - `ui/js/model_view.js` — 按组件树形视图。每节点展开后显示材质汇总行 → 按规格（宽×高 mm）分组 → 面明细。启发式行橙色边框 +「待确认」徽标。支持搜索、空容器/隐藏项开关、合并相同组件、CSV 导出。
 - `ui/js/settings.js` — 设置页：组件分类单位配置、算量标签定义（支持多选复合如 `count+length`）、启发式开关与阈值。
-- `ui/js/comp_mapping.js` — 组件映射管理。
 
 ### 数据文件（`data/` 目录）
 
 - `config.json` — 标签定义、图层规则、启发式阈值
-- `default_component_mapping.json` — 组件定义 → 材料
 - `strategies.json` — 用户自定义 Strategy 变体（base_strategy + match_rules）。当前为空 `{}`（原名称匹配变体已随策略自动匹配机制移除）
 
 配置优先级：模型 AttributeDictionary（随 SKP 文件走）> `data/` JSON 文件 > 默认值。
@@ -112,9 +110,9 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 
 每档命中时返回的 strategy：1/2 走 `Registry.default_for(method)`，3 走 `face_linear`（启发线材）或 `face_area`。
 
-**容器决议（Scanner `try_emit_solid` 3 档）**：AttrDict method → 图层规则 → 组件映射 unit 推导。命中 `:length`/`:volume`/`:count` 时整体量取不下钻；`:area` 或全未命中则下钻子面。
+**容器决议（Scanner `try_emit_solid`）**：AttrDict method → 图层规则。命中 `:length`/`:volume`/`:count` 时整体量取不下钻；`:area` 或全未命中则下钻子面。
 
-**纯边线组件决议（Scanner `decide_pure_edges_method` 4 档）**：AttrDict → 图层 → 组件映射 unit → 几何启发（≥2 个不同方向的边 = 折线路径 → :length）。length 时调 `PathSum` 算路径总长产 `:linear_solid`；其他按件兼容旧行为。
+**纯边线组件决议（Scanner `decide_pure_edges_method` 3 档）**：AttrDict → 图层 → 几何启发（≥2 个不同方向的边 = 折线路径 → :length）。length 时调 `PathSum` 算路径总长产 `:linear_solid`；其他按件兼容旧行为。
 
 **复合标签**：设置页标签定义选择多个 method（如 `count+length`），Scanner 在 ComponentInstance/Group 分支顶部拆开，调用 `emit_solid_by_method` 产出多条不同 kind 的 ScanItem。
 
@@ -124,7 +122,7 @@ ruby tools/pack_rbz.rb    # 生成 su-takeoff-v1.0.0.rbz
 Scanner → WorkbenchPresenter → JSON → frontend _workbench → renderPositionView
                                           │
                                    send_workbench_state 在任何变更后重新触发
-                                   （扫描、映射增删改、设置保存、标签变更）
+                                   （扫描、设置保存、标签变更）
 ```
 
 ## 关键约束
@@ -144,7 +142,7 @@ Scanner → WorkbenchPresenter → JSON → frontend _workbench → renderPositi
 - **新增计量方式（如 weight/kg）**：写一个 `Strategy` 子类（实现 `aggregate`，可选 `emit_from_container`/`compute_length`），在 `Builtin.register_all!` 中 `register(..., default_for: :weight)` 注册；`TakeoffPolicy::METHODS` 加新枚举值；`unit_for` / `pick_primary` 等自动通过 `Registry.default_for(method).default_unit` 获取单位。前端 JS 仍需手工加显示列。
 - **新增命名约定策略（如 龙骨/防水）**：写一个继承 `SolidLinear` 或对应基类的 Strategy，`DEFAULT_MATCH_RULES` 配关键字，`Builtin.register_all!` 注册（不传 `default_for` 避免冲突）；或写进 `data/strategies.json` 复用现有 base。
 - **新增长度算法**：写一个 `LengthCalculators::Base` 子类实现 `compute`，在专用 Strategy 中持有实例 + 暴露 `compute_length(entity, ctx)`；Scanner `compute_length_via_strategy` 会自动接管。
-- **Scanner `collect_container`（~110 行）是容器决议的核心**。修改时注意 5 条分支（复合标签 / aggregate / try_emit_solid / 纯边线 / 下钻）的互斥与顺序。
+- **Scanner `collect_container`（~90 行）是容器决议的核心**。修改时注意 4 条分支（复合标签 / try_emit_solid / 纯边线 / 下钻）的互斥与顺序。
 
 ## 沟通语言
 

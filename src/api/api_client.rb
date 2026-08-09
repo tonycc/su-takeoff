@@ -17,6 +17,7 @@ module SuTakeoff
       IDENTITY_ME_PATH = '/api/v1/identity/me'
       QUANTITIES_PATH = '/api/v1/su/quantities'
       MATERIALS_PATH = '/api/v1/su/materials'
+      PROJECTS_PATH = '/api/v1/supply/projects'
 
       DEFAULT_OPEN_TIMEOUT = 10
       DEFAULT_READ_TIMEOUT = 30
@@ -76,6 +77,20 @@ module SuTakeoff
         get(MATERIALS_PATH, access_token: access_token, params: params)
       end
 
+      def projects(access_token:, keyword: nil)
+        get(PROJECTS_PATH, access_token: access_token, params: { 'keyword' => keyword })
+      end
+
+      def project_products(access_token:, project_id:, keyword: nil, page: 1, page_size: 100)
+        id = project_id.to_s.strip
+        raise ArgumentError, 'project_id 不能为空' if id.empty?
+        raise ArgumentError, 'project_id 格式无效' unless id.match?(/\A[A-Za-z0-9._-]+\z/)
+
+        get("#{PROJECTS_PATH}/#{id}/products",
+            access_token: access_token,
+            params: { 'keyword' => keyword, 'page' => page, 'page_size' => page_size })
+      end
+
       def get(path, access_token: nil, params: nil, read_timeout: @read_timeout)
         request('GET', path, access_token: access_token, params: params, read_timeout: read_timeout)
       end
@@ -107,7 +122,7 @@ module SuTakeoff
         raise ApiError.new('请求 JSON 序列化失败', code: 'JSON_ENCODE_ERROR', details: e.message, retryable: false)
       rescue ApiError
         raise
-      rescue Timeout::Error, Errno::ECONNREFUSED, Errno::ECONNRESET, SocketError, EOFError => e
+      rescue Timeout::Error, SocketError, EOFError, IOError, SystemCallError => e
         raise ApiError.new('网络连接失败，请稍后重试', code: 'NETWORK_ERROR', details: e.class.name, retryable: true)
       end
 
@@ -117,6 +132,9 @@ module SuTakeoff
         uri = URI.parse(base_url.to_s)
         unless %w[http https].include?(uri.scheme)
           raise ArgumentError, 'API Base URL 必须使用 http 或 https'
+        end
+        if uri.hostname.to_s.strip.empty?
+          raise ArgumentError, 'API Base URL 必须包含主机名'
         end
         if environment.to_s == 'production' && uri.scheme != 'https'
           raise ArgumentError, '生产 API Base URL 必须使用 HTTPS'

@@ -1,22 +1,21 @@
 # src/main.rb
 module SuTakeoff
   PLUGIN_DIR = File.dirname(__dir__) unless const_defined?(:PLUGIN_DIR)
+  VERSION = File.read(File.join(PLUGIN_DIR, 'VERSION'), encoding: 'UTF-8').strip.freeze unless const_defined?(:VERSION)
 
   # Singleton plugin state
   class PluginState
     include Singleton
 
-    attr_reader :component_mapping, :component_sku, :config
-
     DICT_NAME = 'su_takeoff_data'
 
     def initialize
-      @component_mapping = ComponentMapping.new
       @component_sku = ComponentSkuMapping.new
       @config = { 'component_category_units' => [],
                   'layer_rules' => {},
                   'tag_defs' => {},
                   'heuristics_enabled' => true }
+      @model_identity = current_model_identity
       load_data
       # 注册内置策略（幂等：Registry.register 同对象重复注册是 no-op）
       if Strategies::Registry.all.empty?
@@ -29,6 +28,7 @@ module SuTakeoff
     # 算量策略：基于当前 config 构造一个 TakeoffPolicy。
     # 每次调用都拿最新配置，避免缓存陈旧规则。
     def takeoff_policy
+      ensure_current_model!
       TakeoffPolicy.new(
         layer_rules: @config['layer_rules'] || {},
         tag_defs: @config['tag_defs'] || {},
@@ -37,8 +37,14 @@ module SuTakeoff
       )
     end
 
-    def self.component_mapping_path
-      File.join(PLUGIN_DIR, 'data', 'default_component_mapping.json')
+    def component_sku
+      ensure_current_model!
+      @component_sku
+    end
+
+    def config
+      ensure_current_model!
+      @config
     end
 
     def self.component_sku_path
@@ -51,18 +57,21 @@ module SuTakeoff
 
     def save_config(component_category_units:, layer_rules: nil, heuristics_enabled: nil,
                     heuristic_thresholds: nil, tag_defs: nil)
-      @config = {
+      ensure_current_model!
+      new_config = {
         'component_category_units' => component_category_units,
         'layer_rules' => layer_rules || @config['layer_rules'] || {},
         'tag_defs' => tag_defs || @config['tag_defs'] || {},
         'heuristics_enabled' => heuristics_enabled.nil? ? @config.fetch('heuristics_enabled', true) : heuristics_enabled,
         'heuristic_thresholds' => heuristic_thresholds || @config['heuristic_thresholds'] || {}
       }
-      File.write(self.class.config_path, JSON.pretty_generate(@config))
+      atomic_write(self.class.config_path, JSON.pretty_generate(new_config))
+      @config = new_config
       save_config_to_model_dict
     end
 
     def save_config_to_model_dict
+      ensure_current_model!
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
       dict['config'] = JSON.generate(@config)
@@ -70,15 +79,8 @@ module SuTakeoff
       puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
     end
 
-    def save_component_mapping_to_model_dict
-      model = Sketchup.active_model
-      dict = model.attribute_dictionary(DICT_NAME, true)
-      dict['component_mapping'] = @component_mapping.save_json_string
-    rescue => e
-      puts "[SuTakeoff] Warning: #{__method__} failed: #{e.message}"
-    end
-
     def save_component_sku_to_model_dict
+      ensure_current_model!
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME, true)
       dict['component_sku'] = @component_sku.save_json_string
@@ -88,26 +90,52 @@ module SuTakeoff
 
     private
 
+    def current_model_identity
+      model = Sketchup.active_model
+      model ? model.object_id : nil
+    rescue
+      nil
+    end
+
+    def ensure_current_model!
+      identity = current_model_identity
+      return if identity == @model_identity
+
+      @model_identity = identity
+      @component_sku = ComponentSkuMapping.new
+      @config = {
+        'component_category_units' => [],
+        'layer_rules' => {},
+        'tag_defs' => {},
+        'heuristics_enabled' => true
+      }
+      load_data
+    end
+
     def load_data
       # Priority: model attribute dict > local JSON files > empty defaults
       model_dict = load_from_model_dict
 
-      if model_dict[:component_mapping]
-        @component_mapping.load_json_string(model_dict[:component_mapping])
-      else
-        @component_mapping.load_json(self.class.component_mapping_path)
-      end
-
       if model_dict[:component_sku]
-        @component_sku.load_json_string(model_dict[:component_sku])
+        begin
+          @component_sku.load_json_string(model_dict[:component_sku])
+        rescue JSON::ParserError, TypeError => e
+          puts "[SuTakeoff] Warning: invalid model component_sku: #{e.message}"
+        end
       else
-        @component_sku.load_json(self.class.component_sku_path)
+        begin
+          @component_sku.load_json(self.class.component_sku_path)
+        rescue JSON::ParserError, TypeError => e
+          puts "[SuTakeoff] Warning: invalid component_sku file: #{e.message}"
+        end
       end
 
       if model_dict[:config]
-        @config = JSON.parse(model_dict[:config])
+        parsed = JSON.parse(model_dict[:config]) rescue nil
+        @config = parsed if parsed.is_a?(Hash)
       elsif File.exist?(self.class.config_path)
-        @config = JSON.parse(File.read(self.class.config_path))
+        parsed = JSON.parse(File.read(self.class.config_path)) rescue nil
+        @config = parsed if parsed.is_a?(Hash)
       end
       @config['component_category_units'] ||= []
       @config['layer_rules']         ||= {}
@@ -119,13 +147,24 @@ module SuTakeoff
       @config['heuristics_enabled']    = true if @config['heuristics_enabled'].nil?
     end
 
+    def atomic_write(path, content)
+      temp_path = "#{path}.tmp-#{Process.pid}-#{Thread.current.object_id}"
+      File.open(temp_path, 'wb') do |file|
+        file.write(content)
+        file.flush
+        file.fsync rescue nil
+      end
+      File.rename(temp_path, path)
+    ensure
+      File.delete(temp_path) if temp_path && File.exist?(temp_path)
+    end
+
     def load_from_model_dict
       model = Sketchup.active_model
       dict = model.attribute_dictionary(DICT_NAME)
       return {} unless dict
 
       result = {}
-      result[:component_mapping] = dict['component_mapping'] if dict['component_mapping']
       result[:component_sku] = dict['component_sku'] if dict['component_sku']
       result[:config] = dict['config'] if dict['config']
       result
@@ -133,8 +172,11 @@ module SuTakeoff
   end
 
   def self.reset_plugin_state!
+    Strategies::Registry.reset!
+    Strategies::Builtin.register_all!
+    strategies_path = File.join(PLUGIN_DIR, 'data', 'strategies.json')
+    Strategies::Loader.load_from_file!(strategies_path)
     state = PluginState.instance
-    state.instance_variable_set(:@component_mapping, ComponentMapping.new)
     state.instance_variable_set(:@component_sku, ComponentSkuMapping.new)
     state.instance_variable_set(:@config, {
       'component_category_units' => [],
@@ -156,13 +198,16 @@ module SuTakeoff
     ui_menu.add_item('材料统计') { Dialog.new.show }
     ui_menu.add_separator
     ui_menu.add_item('重新加载插件') {
-      if SuTakeoff.respond_to?(:reload_sources!)
-        SuTakeoff.reload_sources!
-      else
-        Dir.glob(File.join(PLUGIN_DIR, 'src/**/*.rb')).sort.each { |f| load f }
-        SuTakeoff.reset_plugin_state!
-      end
-      UI.messagebox("#{menu_name} 源码已重新加载\n#{PLUGIN_DIR}")
+      ok =
+        if SuTakeoff.respond_to?(:reload_sources!)
+          SuTakeoff.reload_sources!
+        else
+          Dir.glob(File.join(PLUGIN_DIR, 'src/**/*.rb')).sort.each { |f| load f }
+          SuTakeoff.reset_plugin_state!
+          true
+        end
+      UI.messagebox(ok ? "#{menu_name} 源码已重新加载\n#{PLUGIN_DIR}" :
+                         "#{menu_name} 重新加载失败，详见 Ruby 控制台")
     }
 
     # Toolbar

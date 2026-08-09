@@ -1,6 +1,5 @@
 require_relative 'test_helper'
 require 'src/calculator'
-require 'src/component_mapping'
 require 'src/takeoff_policy'
 
 module SuTakeoff
@@ -10,11 +9,8 @@ module SuTakeoff
   # 量纲累加、洞口扣减由 Presenter 负责，本测试只关心决议层面。
   class TestComputeGeometryOnly < Minitest::Test
     def setup
-      @cm = ComponentMapping.new
-      @cm.add('lamp_01', '台灯', '灯具', '个', '', 0.0, 'aggregate')
-
       @policy = TakeoffPolicy.new
-      @calc = Calculator.new(@cm, policy: @policy)
+      @calc = Calculator.new(policy: @policy)
     end
 
     def test_basic_area
@@ -26,9 +22,8 @@ module SuTakeoff
       geo = @calc.compute_geometry_only(items, [])
       assert_equal 1, geo.size
       assert_equal :area, geo[0][:method]
-      # mapping 档已移除：无标签/无图层规则的普通面积面落到启发兜底，
-      # source 由 :mapping 变为 :heuristic（计量方式仍是 :area，量不变）。
-      assert_equal :heuristic, geo[0][:source]
+      # 普通面是确定性的面积默认值，不应被标为待确认启发。
+      assert_equal :default, geo[0][:source]
       assert_equal 'm²', geo[0][:unit]
       assert_equal 'tile_302', geo[0][:item].su_material
     end
@@ -83,7 +78,7 @@ module SuTakeoff
     # ---- 决议结果不再依赖 policy 时的兼容路径 ----
 
     def test_no_policy_unmapped_uses_heuristic_fallback
-      calc = Calculator.new(@cm)  # 不传 policy，走启发兜底
+      calc = Calculator.new  # 不传 policy，走启发兜底
       # 长宽比 16，启发为线材
       items = [
         ScanItem.face(face_id: 1, su_material: 'unknown', area: 1.0,
@@ -93,6 +88,48 @@ module SuTakeoff
       geo = calc.compute_geometry_only(items, [])
       assert_equal :length, geo[0][:method]
       assert_equal 'm', geo[0][:unit]
+    end
+
+    def test_disabled_heuristics_never_classifies_horizontal_narrow_face_as_length
+      policy = TakeoffPolicy.new(heuristics_enabled: false)
+      calc = Calculator.new(policy: policy)
+      item = ScanItem.face(
+        face_id: 9, su_material: 'unknown', area: 0.4,
+        normal: [0, 0, 1], width: 0.05, height: 8.0,
+        layer_name: 'Layer0', component_path: ['楼板'], component_path_ids: [10]
+      )
+
+      result = calc.compute_geometry_only([item], [])
+
+      assert_equal :area, result.first[:method]
+      assert_equal :default, result.first[:source]
+    end
+
+    def test_horizontal_slab_dedup_requires_spatial_overlap
+      faces = [0.0, 20.0].map.with_index do |center_x, index|
+        ScanItem.face(
+          face_id: index + 1, su_material: '地砖', area: 4.0,
+          normal: index.zero? ? [0, 0, 1] : [0, 0, -1],
+          width: 2.0, height: 2.0, layer_name: 'Layer0',
+          component_path: ['空间'], component_path_ids: [10],
+          z_center: 0.05, center_x: center_x, center_y: 0.0
+        )
+      end
+
+      assert_equal 2, @calc.compute_geometry_only(faces, []).size
+    end
+
+    def test_horizontal_slab_dedup_removes_only_one_overlapping_side
+      faces = [1, -1].map.with_index do |normal_z, index|
+        ScanItem.face(
+          face_id: index + 1, su_material: '地砖', area: 4.0,
+          normal: [0, 0, normal_z], width: 2.0, height: 2.0,
+          layer_name: 'Layer0', component_path: ['空间'], component_path_ids: [10],
+          z_center: index * 0.05, center_x: 0.0, center_y: 0.0
+        )
+      end
+
+      assert_equal 1, @calc.compute_geometry_only(faces, []).size
     end
   end
 end

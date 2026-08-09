@@ -12,19 +12,36 @@ window._mv = {
   sortDir: 'asc'
 };
 
+function mvNodeKey(node) {
+  return nodeOccurrenceKey(node);
+}
+
+function mvNodeUsages(node, data) {
+  var byPath = data._usagesByPath || {};
+  var found = byPath[mvNodeKey(node)];
+  if (found) return found;
+  return (data._usagesByEntityId || {})[node.entity_id] || [];
+}
+
+function mvMergedKey(node) {
+  var parentPath = (node.component_path_ids || []).slice(0, -1);
+  return 'merged:' + occurrencePathKey(parentPath) + ':' + getMergeKey(node);
+}
+
 // ---------------- Node classification ----------------
 function classifyNodes(data) {
   if (data._classification) return;
   var cls = {};
-  var usagesByEid = data._usagesByEntityId || {};
+  var usagesByPath = data._usagesByPath || {};
 
   function walk(node) {
+    var nodeKey = mvNodeKey(node);
     if (node.hidden) {
-      cls[node.entity_id] = 'hidden_skipped';
+      cls[nodeKey] = 'hidden_skipped';
       node.children.forEach(walk);
       return;
     }
-    var usages = usagesByEid[node.entity_id] || [];
+    var usages = usagesByPath[nodeKey] || mvNodeUsages(node, data);
     var hasFace = false, hasInst = false;
     usages.forEach(function(u) {
       if (u.is_instance) hasInst = true;
@@ -33,7 +50,7 @@ function classifyNodes(data) {
     var childTags = [];
     node.children.forEach(function(c) {
       walk(c);
-      childTags.push(cls[c.entity_id]);
+      childTags.push(cls[mvNodeKey(c)]);
     });
     var childHasStats = childTags.some(function(t) {
       return t === 'has_face_items' || t === 'has_instance_items' ||
@@ -51,7 +68,7 @@ function classifyNodes(data) {
     } else {
       tag = 'pure_organizational';
     }
-    cls[node.entity_id] = tag;
+    cls[nodeKey] = tag;
   }
   walk(data.hierarchy);
   data._classification = cls;
@@ -87,16 +104,11 @@ function mergeStats(nodes, data) {
 
 // 合并多个节点的 selfUsages
 function mergeSelfUsages(nodes, data) {
-  var usagesByEid = data._usagesByEntityId || {};
   var result = [];
-  var seenMat = {};
   nodes.forEach(function(n) {
-    (usagesByEid[n.entity_id] || []).forEach(function(u) {
-      var key = u.su_material + '|' + (u.is_instance ? 'inst' : 'face') + '|' + (u.unit || '');
-      if (!seenMat[key]) {
-        seenMat[key] = true;
-        result.push(u);
-      }
+    mvNodeUsages(n, data).forEach(function(u) {
+      // 每个 occurrence 的 usage 都保留；共享定义的 entity_id 相同并不代表重复数据。
+      result.push(u);
     });
   });
   return result;
@@ -104,13 +116,30 @@ function mergeSelfUsages(nodes, data) {
 
 // ---------------- Rollup stats ----------------
 function rollupStats(node, data) {
-  var usagesByEid = data._usagesByEntityId || {};
   var cls = data._classification || {};
   var materials = {};
   var result = { area: 0, length: 0, volume: 0, count: 0, floor: 0, wall: 0, ceiling: 0, matCount: 0 };
 
+  // Ruby Presenter 已按页面规则完成组件树汇总；优先使用它，避免前端再次
+  // 聚合出与推送构建器不同的结果。旧状态没有 component_rows 时保留下方兼容逻辑。
+  var displayRow = (data._componentRowsByPath || {})[mvNodeKey(node)] ||
+    (data._componentRowsByEntityId || {})[node.entity_id];
+  if (displayRow) {
+    result.area = displayRow.area_m2 || 0;
+    result.length = displayRow.length_mm || 0;
+    result.volume = displayRow.volume_m3 || 0;
+    result.count = displayRow.count || 0;
+    result.floor = displayRow.floor || 0;
+    result.wall = displayRow.wall || 0;
+    result.ceiling = displayRow.ceiling || 0;
+    (displayRow.materials || []).forEach(function(material) { materials[material] = true; });
+    result._materials = materials;
+    result.matCount = Object.keys(materials).length;
+    return result;
+  }
+
   // Self usages
-  var selfUsages = usagesByEid[node.entity_id] || [];
+  var selfUsages = mvNodeUsages(node, data);
   selfUsages.forEach(function(u) {
     if (u.is_instance) {
       result.count += u.qty_count || u.qty || 0;
@@ -138,7 +167,7 @@ function rollupStats(node, data) {
   // Recursive children
   node.children.forEach(function(c) {
     if (c.hidden && !_mv.showHidden) return;
-    var tag = cls[c.entity_id];
+    var tag = cls[mvNodeKey(c)];
     if (tag === 'hidden_skipped') return;
     if (tag === 'pure_organizational' && !_mv.showEmpty) return;
     var child = rollupStats(c, data);
@@ -206,7 +235,15 @@ function renderToolbar(data, container) {
   searchInput.value = _mv.searchQuery;
   searchInput.oninput = function() {
     _mv.searchQuery = searchInput.value.trim();
-    renderPositionView(data);
+    clearTimeout(_mv.searchTimer);
+    _mv.searchTimer = setTimeout(function() {
+      renderPositionView(data);
+      var replacement = document.querySelector('.mv-search');
+      if (replacement) {
+        replacement.focus();
+        replacement.setSelectionRange(replacement.value.length, replacement.value.length);
+      }
+    }, 150);
   };
   searchWrap.appendChild(searchInput);
   row2.appendChild(searchWrap);
@@ -217,9 +254,89 @@ function renderToolbar(data, container) {
   exportBtn.textContent = '⤓ 导出';
   exportBtn.onclick = function() { exportModelCsv(data); };
   row2.appendChild(exportBtn);
+
+  // 推送入口放在按组件页面，推送状态仍由项目绑定与云端推送状态统一驱动。
+  var cloudState = window._cloudState || {};
+  var cloudAuth = cloudState.auth || {};
+  var bindingReady = cloudBindingReady(cloudState);
+  var pushBtn = document.createElement('button');
+  pushBtn.className = 'mv-push-btn primary-btn';
+  pushBtn.textContent = cloudState.busy ? '推送中…' : '推送算量';
+  pushBtn.disabled = !!cloudState.busy || !cloudState.has_scan || !cloudAuth.can_push || !bindingReady;
+  pushBtn.title = cloudPushDisabledReason(cloudState);
+  pushBtn.onclick = function() {
+    if (!pushBtn.disabled && typeof window.cloudPush === 'function') window.cloudPush();
+  };
+  var pushSpacer = document.createElement('span');
+  pushSpacer.className = 'mv-toolbar-spacer';
+  var pushFeedback = document.createElement('span');
+  pushFeedback.className = 'mv-push-feedback';
+  applyPositionCloudFeedback(pushFeedback, cloudState);
+  row2.appendChild(pushSpacer);
+  row2.appendChild(pushFeedback);
+  row2.appendChild(pushBtn);
   tb.appendChild(row2);
 
   container.appendChild(tb);
+}
+
+window.updatePositionCloudControls = function updatePositionCloudControls() {
+  var button = document.querySelector('.mv-push-btn');
+  if (!button) return;
+  var state = window._cloudState || {};
+  var auth = state.auth || {};
+  button.textContent = state.busy ? '推送中…' : '推送算量';
+  button.disabled = !!state.busy || !state.has_scan || !auth.can_push || !cloudBindingReady(state);
+  button.title = cloudPushDisabledReason(state);
+  var feedback = document.querySelector('.mv-push-feedback');
+  if (feedback) applyPositionCloudFeedback(feedback, state);
+};
+
+function cloudBindingReady(state) {
+  var binding = (state && state.binding) || {};
+  return !!String(binding.project_code || '').trim() && !!String(binding.project_name || '').trim();
+}
+
+function cloudPushDisabledReason(state) {
+  state = state || {};
+  var auth = state.auth || {};
+  if (state.busy) return '已有推送任务正在执行';
+  if (!state.has_scan) return '请先扫描当前模型';
+  if (!auth.can_push) return '当前账号未登录或缺少算量推送权限';
+  if (!cloudBindingReady(state)) return '请先在项目绑定页选择并保存项目';
+  return '';
+}
+
+function positionCloudFeedback(state) {
+  state = state || {};
+  if (state.error) {
+    return { kind: 'error', text: String(state.error.message || state.error) };
+  }
+
+  var result = state.sync_result;
+  if (result) {
+    if (result.success) return { kind: 'success', text: '推送成功' };
+    if (result.issues && result.issues.length) {
+      return {
+        kind: 'error',
+        text: result.issues.map(function(issue) { return issue.message || issue.code; }).join('；')
+      };
+    }
+    if (result.error) {
+      return { kind: 'error', text: String(result.error.message || result.error.code || '推送失败') };
+    }
+  }
+
+  if (state.busy) return { kind: 'pending', text: state.status_message || '正在推送…' };
+  if (!cloudBindingReady(state)) return { kind: 'warning', text: '请先绑定平台项目' };
+  return { kind: '', text: '' };
+}
+
+function applyPositionCloudFeedback(element, state) {
+  var feedback = positionCloudFeedback(state);
+  element.className = 'mv-push-feedback' + (feedback.kind ? ' mv-push-feedback-' + feedback.kind : '');
+  element.textContent = feedback.text;
+  element.title = feedback.text;
 }
 
 // ---------------- Position mode: tree table ----------------
@@ -228,7 +345,7 @@ var POS_SORT_COLS = { 1: 'name', 3: 'tag', 4: 'area', 5: 'length', 6: 'volume', 
 
 function renderPositionTable(data, container) {
   var cls = data._classification;
-  var usagesByEid = data._usagesByEntityId;
+  var usagesByEid = data._usagesByPath;
   var hierarchy = data.hierarchy;
 
   if (!hierarchy) {
@@ -301,6 +418,9 @@ function sortHierarchySiblings(node, data, cls) {
   if (!_mv.sortCol) return node;
   var sorted = { name: node.name, entity_id: node.entity_id, kind: node.kind,
     definition_name: node.definition_name, depth: node.depth, hidden: node.hidden,
+    tag: node.tag, occurrence_key: node.occurrence_key,
+    component_path_ids: (node.component_path_ids || []).slice(),
+    component_path_persistent_ids: (node.component_path_persistent_ids || []).slice(),
     children: node.children.map(function(c) { return sortHierarchySiblings(c, data, cls); }) };
 
   if (sorted.children.length > 1) {
@@ -325,7 +445,7 @@ function sortHierarchySiblings(node, data, cls) {
 
 function isNodeVisibleForSort(node, cls) {
   if (node.hidden && !_mv.showHidden) return false;
-  var tag = cls[node.entity_id];
+  var tag = cls[mvNodeKey(node)];
   if (tag === 'hidden_skipped') return false;
   if (tag === 'pure_organizational' && !_mv.showEmpty) return false;
   return true;
@@ -333,24 +453,24 @@ function isNodeVisibleForSort(node, cls) {
 
 function getSortValue(node, data, cls, col) {
   if (col === 'name') return node.name;
+  if (col === 'tag') return node.tag || '';
   var stats = rollupStats(node, data);
   return stats[col] || 0;
 }
 
 function findSearchMatches(node, query, data, matches) {
-  var usagesByEid = data._usagesByEntityId || {};
   var nameMatch = node.name.toLowerCase().indexOf(query.toLowerCase()) >= 0;
   var matMatch = false;
-  var usages = usagesByEid[node.entity_id] || [];
+  var usages = mvNodeUsages(node, data);
   usages.forEach(function(u) {
     if (u.su_material && u.su_material.toLowerCase().indexOf(query.toLowerCase()) >= 0) matMatch = true;
   });
   if (nameMatch || matMatch) {
-    matches[node.entity_id] = true;
+    matches[mvNodeKey(node)] = true;
   }
   node.children.forEach(function(c) {
     findSearchMatches(c, query, data, matches);
-    if (matches[c.entity_id]) matches[node.entity_id] = true;
+    if (matches[mvNodeKey(c)]) matches[mvNodeKey(node)] = true;
   });
 }
 
@@ -539,12 +659,14 @@ function renderFaceDetailRow(face, usage, depth, tbody) {
 }
 
 function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
-  var matKey = parentEntityId + ':' + usage.su_material;
+  var occurrenceKey = usage.occurrence_key || occurrencePathKey(usage.component_path_ids || [parentEntityId]);
+  var matKey = occurrenceKey + ':' + usage.su_material;
   var isMatExpanded = _mv.expandedMaterials && _mv.expandedMaterials[matKey];
   var isLinear = usage.unit === 'm';
 
   var row = document.createElement('tr');
-  row.className = 'mv-mat-summary-row mv-mat-summary-mapped';
+  row.className = 'mv-mat-summary-row ' +
+    (usage.confidence === 'heuristic' ? 'mv-mat-heuristic' : 'mv-mat-summary-mapped');
   row.dataset.matKey = matKey;
 
   var tdSeq = document.createElement('td');
@@ -588,6 +710,14 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   faceCountSpan.textContent = ' ' + usage.face_count + '面';
   tdName.appendChild(faceCountSpan);
 
+  if (usage.confidence === 'heuristic') {
+    var confidenceBadge = document.createElement('span');
+    confidenceBadge.className = 'tag-heuristic';
+    confidenceBadge.textContent = '待确认';
+    confidenceBadge.title = '该计量方式来自几何启发，请通过算量标签确认';
+    tdName.appendChild(confidenceBadge);
+  }
+
   row.appendChild(tdName);
 
   // 产品信息（材料汇总行不展示 SKU；SKU 关联在组件行维度）
@@ -630,7 +760,7 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
   tbody.appendChild(row);
 
   if (isMatExpanded && hasFaces) {
-    var cacheKey = usage.entity_id + ':' + usage.su_material;
+    var cacheKey = occurrenceKey + ':' + usage.su_material;
     var facesCache = window._workbench && window._workbench._facesCache;
     var faces = facesCache && facesCache[cacheKey];
     if (faces) {
@@ -659,44 +789,125 @@ function renderMaterialSummaryRow(usage, depth, parentEntityId, tbody, data) {
       window._facesRequested = window._facesRequested || {};
       if (!window._facesRequested[cacheKey]) {
         window._facesRequested[cacheKey] = true;
-        callSketchUp('get_faces', JSON.stringify({ entity_id: usage.entity_id, su_material: usage.su_material }));
+        callSketchUp('get_faces', JSON.stringify({
+          entity_id: usage.entity_id,
+          component_path_ids: usage.component_path_ids || [],
+          su_material: usage.su_material
+        }));
       }
     }
   }
 }
 
-// 构建组件行「产品信息」单元格：内联 SKU 自动补全，选中即存到组件级关联（按定义名）
-function buildSkuCell(definitionName, data) {
+// 构建组件行「产品信息」单元格：从当前项目产品库选择实际产品，选中即存到组件级关联。
+// definitionKeys 为单个定义名或定义名数组（合并行传入组内全部成员的定义名，
+// 选择/清除时逐一关联，与合并行标签下拉循环打标同一模式）。
+function componentProductCode(record) {
+  record = record || {};
+  // 产品信息列显示项目自定义编号；旧数据没有项目编号时才回退目录编号。
+  return record.project_product_code || record.catalog_code || record.sku_code || '';
+}
+
+function componentProductName(record) {
+  record = record || {};
+  return record.product_name || record.sku_name || '';
+}
+
+function buildSkuCell(definitionKeys, data) {
+  var keys = Array.isArray(definitionKeys) ? definitionKeys : [definitionKeys];
+  var primaryKey = keys[0];
   var td = document.createElement('td');
   td.className = 'col-sku';
   var skus = (data && data.component_skus) || {};
-  var cur = skus[definitionName] || {};
+  var cur = skus[primaryKey] || {};
+
+  var wrap = document.createElement('div');
+  wrap.className = 'sku-input-wrap';
+
   var input = document.createElement('input');
   input.type = 'text';
   input.className = 'u-sku';
   input.autocomplete = 'off';
-  input.placeholder = '搜索SKU';
-  input.value = cur.sku_code ? (cur.sku_code + ' ' + (cur.sku_name || '')) : '';
-  td.appendChild(input);
+  input.placeholder = '模糊搜索项目产品';
+  input.value = componentProductCode(cur)
+    ? (componentProductCode(cur) + ' ' + componentProductName(cur)) : '';
+
+  var clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'sku-clear';
+  clearBtn.title = '清除关联';
+  clearBtn.textContent = '×';
+
+  function refreshState() {
+    var hasText = !!input.value;
+    clearBtn.style.display = hasText ? 'block' : 'none';
+    var code = componentProductCode(cur);
+    var name = componentProductName(cur);
+    input.classList.toggle('has-value', !!code && input.value === (code + ' ' + name));
+  }
+
+  wrap.appendChild(input);
+  wrap.appendChild(clearBtn);
+  td.appendChild(wrap);
+
   var dd = document.createElement('div');
   dd.className = 'sku-dropdown';
   dd.style.display = 'none';
   td.appendChild(dd);
+
+  input.addEventListener('input', refreshState);
+  // 选择/清除时对组内每个定义名逐一持久化
+  function persistSku(fields) {
+    var items = keys.map(function(k) {
+      var payload = { definition_name: k };
+      for (var prop in fields) {
+        if (Object.prototype.hasOwnProperty.call(fields, prop)) payload[prop] = fields[prop];
+      }
+      return payload;
+    });
+    if (items.length === 1) callSketchUp('set_component_sku', JSON.stringify(items[0]));
+    else callSketchUp('set_component_skus', JSON.stringify({ items: items }));
+  }
+  clearBtn.addEventListener('click', function() {
+    input.value = '';
+    cur = {};
+    td.dataset.skuId = '';
+    td.dataset.skuCode = '';
+    td.dataset.skuName = '';
+    refreshState();
+    dd.style.display = 'none';
+    persistSku({
+      project_product_id: '', product_id: '', catalog_code: '',
+      product_name: '', project_product_code: ''
+    });
+  });
+
   if (typeof bindSkuAutocomplete === 'function') {
     bindSkuAutocomplete(td, function(item) {
-      callSketchUp('set_component_sku', JSON.stringify({
-        definition_name: definitionName,
-        platform_sku_id: item.sku_id || '',
-        platform_sku_code: item.code || '',
-        platform_sku_name: item.name || ''
-      }));
+      cur = {
+        project_product_id: item.project_product_id || '',
+        product_id: item.product_id || '',
+        catalog_code: item.catalog_code || item.code || '',
+        product_name: item.product_name || item.name || '',
+        project_product_code: item.project_product_code || ''
+      };
+      refreshState();
+      persistSku({
+        project_product_id: cur.project_product_id,
+        product_id: cur.product_id,
+        catalog_code: cur.catalog_code,
+        product_name: cur.product_name,
+        project_product_code: cur.project_product_code
+      });
     });
   }
+  refreshState();
   return td;
 }
 
 function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches, depthOverride, skipSearch, ancestorHasTag) {
-  var tag = cls[node.entity_id];  if (!tag) return seq;
+  var nodeKey = mvNodeKey(node);
+  var tag = cls[nodeKey];  if (!tag) return seq;
 
   // Skip hidden
   if (node.hidden && !_mv.showHidden) return seq;
@@ -706,7 +917,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   if (tag === 'pure_organizational' && !_mv.showEmpty) return seq;
 
   // Search: skip nodes not in match path (skipSearch bypasses for promoted children)
-  if (_mv.searchQuery && !skipSearch && !searchMatches[node.entity_id]) return seq;
+  if (_mv.searchQuery && !skipSearch && !searchMatches[nodeKey]) return seq;
 
   var effectiveDepth = depthOverride !== undefined ? depthOverride : node.depth;
   var hasChildren = node.children.length > 0;
@@ -715,7 +926,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   // Component instance with children: always show row, children indented when expanded
 
   var stats = rollupStats(node, data);
-  var selfUsages = usagesByEid[node.entity_id] || [];
+  var selfUsages = usagesByEid[nodeKey] || mvNodeUsages(node, data);
 
   // Determine display values based on tag
   var area = '-', length = '-', volume = '-', count = '-', floor = '-', wall = '-', ceiling = '-';
@@ -740,6 +951,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   var row = document.createElement('tr');
   row.className = 'mv-row mv-row-' + tag;
   row.dataset.entityId = node.entity_id;
+  row.dataset.occurrenceKey = nodeKey;
 
   // Seq
   var tdSeq = document.createElement('td');
@@ -764,7 +976,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
     toggle.textContent = isExpanded ? '▾' : '▸';
     toggle.onclick = function(e) {
       e.stopPropagation();
-      _mv.expandedNodes[node.entity_id] = !isExpanded;
+      _mv.expandedNodes[nodeKey] = !isExpanded;
       renderModelView(data || window._workbench);
     };
     tdName.appendChild(toggle);
@@ -842,7 +1054,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
 
   row.appendChild(tdName);
 
-  // 产品信息（组件级 SKU 选择：有定义名的组件可选产品）
+  // 产品信息（组件/群组项目产品选择：有定义名即可选产品，群组用内部定义名）
   var tdInfo = node.definition_name
     ? buildSkuCell(node.definition_name, data)
     : document.createElement('td');
@@ -873,6 +1085,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
       tagSelect.onchange = function() {
         callSketchUp('set_entity_tag', JSON.stringify({
           entity_id: node.entity_id,
+          component_path_ids: node.component_path_ids || [],
           tag_name: tagSelect.value
         }));
       };
@@ -899,7 +1112,10 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
     locateBtn.textContent = '⌖';
     locateBtn.title = '定位到模型';
     locateBtn.onclick = function() {
-      callSketchUp('locate_entity', String(node.entity_id));
+      callSketchUp('locate_entity', JSON.stringify({
+        entity_id: node.entity_id,
+        component_path_ids: node.component_path_ids || []
+      }));
     };
     tdAct.appendChild(locateBtn);
   }
@@ -930,7 +1146,7 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
             groups[mk].push(c);
           } else {
             // 不可合并的节点直接用自身标识作为 key
-            var soloKey = 'solo:' + c.entity_id;
+            var soloKey = 'solo:' + mvNodeKey(c);
             groups[soloKey] = [c];
             groupOrder.push(soloKey);
           }
@@ -954,6 +1170,96 @@ function renderNodeRows(node, data, cls, usagesByEid, tbody, seq, searchMatches,
   return seq;
 }
 
+// 返回当前按组件页面真正显示的“组件树节点”路径。
+// 只记录组件/群组行，不记录材料汇总行、规格行和具体面；父节点折叠时，
+// 子节点不会被记录。路径使用 entity_id 数组，避免重复组件定义的子节点串线。
+window.getVisibleComponentPathsForPush = function getVisibleComponentPathsForPush(data) {
+  data = data || window._workbench;
+  if (!data || !data.hierarchy) return [];
+
+  classifyNodes(data);
+  var cls = data._classification || {};
+  var searchMatches = {};
+  if (_mv.searchQuery) findSearchMatches(data.hierarchy, _mv.searchQuery, data, searchMatches);
+  var result = [];
+
+  function isVisible(node) {
+    var key = mvNodeKey(node);
+    var tag = cls[key];
+    if (!tag) return false;
+    if (node.hidden && !_mv.showHidden) return false;
+    if (tag === 'hidden_skipped' && !_mv.showHidden) return false;
+    if (tag === 'pure_organizational' && !_mv.showEmpty) return false;
+    if (_mv.searchQuery && !searchMatches[key]) return false;
+    return true;
+  }
+
+  function addPath(path) {
+    if (path.length === 0) return;
+    var key = path.join('/');
+    for (var i = 0; i < result.length; i++) {
+      if (result[i].join('/') === key) return;
+    }
+    result.push(path.slice());
+  }
+
+  function walk(node, parentPath, forceVisible) {
+    if (!forceVisible && !isVisible(node)) return;
+
+    var path = Array.isArray(node.component_path_ids)
+      ? node.component_path_ids.slice()
+      : (node.entity_id === 0 ? parentPath.slice() : parentPath.concat([node.entity_id]));
+    if (node.entity_id !== 0) addPath(path);
+
+    if (!isNodeExpanded(node, searchMatches)) return;
+    if (!node.children || node.children.length === 0) return;
+
+    if (_mv.mergeSame) {
+      var groups = {};
+      var order = [];
+      node.children.forEach(function(child) {
+        var mergeKey = getMergeKey(child);
+        var key = mergeKey || ('solo:' + mvNodeKey(child));
+        if (!groups[key]) {
+          groups[key] = [];
+          order.push(key);
+        }
+        groups[key].push(child);
+      });
+
+      order.forEach(function(key) {
+        var group = groups[key];
+        if (group.length > 1) {
+          // 合并行仍代表组内每个真实树节点，但成员不会各自触发展开逻辑。
+          group.forEach(function(child) {
+            addPath((child.component_path_ids || path.concat([child.entity_id])).slice());
+          });
+          var mergedExpandKey = mvMergedKey(group[0]);
+          if (_mv.expandedNodes[mergedExpandKey]) {
+            var allChildren = [];
+            group.forEach(function(member) {
+              (member.children || []).forEach(function(child) { allChildren.push(child); });
+            });
+            allChildren.forEach(function(child) {
+              var childParent = (child.component_path_ids || []).slice(0, -1);
+              walk(child, childParent, false);
+            });
+          }
+        } else {
+          walk(group[0], path, false);
+        }
+      });
+      return;
+    }
+
+    node.children.forEach(function(child) { walk(child, path, false); });
+  }
+
+  // 根节点只负责提供展开上下文，本身不进入返回值。
+  walk(data.hierarchy, [], false);
+  return result;
+};
+
 // 合并行渲染：将同定义名的多个组件实例合并为一行
 function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatches, depth, ancestorHasTag) {
   var first = nodes[0];
@@ -962,7 +1268,7 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
   var allChildren = [];
   nodes.forEach(function(n) { n.children.forEach(function(c) { allChildren.push(c); }); });
 
-  var expandKey = 'merged:' + getMergeKey(first);
+  var expandKey = mvMergedKey(first);
   _mv.expandedNodes = _mv.expandedNodes || {};
   var isExpanded = _mv.expandedNodes[expandKey] !== undefined ? _mv.expandedNodes[expandKey] : false;
 
@@ -1005,14 +1311,16 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
 
   var nameSpan = document.createElement('span');
   nameSpan.className = 'mv-node-name';
-  nameSpan.textContent = first.definition_name || first.name;
+  // 群组的 definition_name 是内部名（Group#3），不做展示，只用节点名
+  var mergedDefName = first.kind === 'component_instance' ? first.definition_name : null;
+  nameSpan.textContent = mergedDefName || first.name;
   tdName.appendChild(nameSpan);
 
   // Definition name label
-  if (first.definition_name) {
+  if (mergedDefName) {
     var defLabel = document.createElement('span');
     defLabel.className = 'mv-def-label';
-    defLabel.textContent = first.definition_name;
+    defLabel.textContent = mergedDefName;
     tdName.appendChild(defLabel);
   }
 
@@ -1044,9 +1352,13 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
 
   row.appendChild(tdName);
 
-  // 产品信息（组件级 SKU 选择：合并行按定义名可选产品）
-  var tdInfo = first.definition_name
-    ? buildSkuCell(first.definition_name, data)
+  // 产品信息（合并行：项目产品选择应用到组内每个成员的定义名，组件/群组均可选）
+  var skuKeys = [];
+  nodes.forEach(function(n) {
+    if (n.definition_name && skuKeys.indexOf(n.definition_name) < 0) skuKeys.push(n.definition_name);
+  });
+  var tdInfo = skuKeys.length > 0
+    ? buildSkuCell(skuKeys, data)
     : document.createElement('td');
   row.appendChild(tdInfo);
 
@@ -1072,13 +1384,13 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
         tagSelect.appendChild(opt);
       });
       tagSelect.onchange = function() {
-        // 为合并组内所有实例打标签
-        nodes.forEach(function(n) {
-          callSketchUp('set_entity_tag', JSON.stringify({
+        callSketchUp('set_entity_tags', JSON.stringify({
+          entities: nodes.map(function(n) { return {
             entity_id: n.entity_id,
-            tag_name: tagSelect.value
-          }));
-        });
+            component_path_ids: n.component_path_ids || []
+          }; }),
+          tag_name: tagSelect.value
+        }));
       };
       tdTag.appendChild(tagSelect);
     }
@@ -1109,7 +1421,10 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
   locateBtn.textContent = '⌖';
   locateBtn.title = '定位到模型（第一个实例）';
   locateBtn.onclick = function() {
-    callSketchUp('locate_entity', String(first.entity_id));
+    callSketchUp('locate_entity', JSON.stringify({
+      entity_id: first.entity_id,
+      component_path_ids: first.component_path_ids || []
+    }));
   };
   tdAct.appendChild(locateBtn);
   row.appendChild(tdAct);
@@ -1138,10 +1453,11 @@ function renderMergedRow(nodes, data, cls, usagesByEid, tbody, seq, searchMatche
 }
 
 function isNodeExpanded(node, searchMatches) {
-  if (_mv.expandedNodes[node.entity_id] !== undefined) {
-    return _mv.expandedNodes[node.entity_id];
+  var key = mvNodeKey(node);
+  if (_mv.expandedNodes[key] !== undefined) {
+    return _mv.expandedNodes[key];
   }
-  if (_mv.searchQuery && searchMatches[node.entity_id]) {
+  if (_mv.searchQuery && searchMatches[key]) {
     return true;
   }
   // 默认展开根节点，显示第一层子节点
@@ -1203,7 +1519,11 @@ function renderModelView(data) {
   } catch(e) {
     console.error('renderModelView error:', e);
     var container = document.getElementById('page-position');
-    container.innerHTML = '<div class="mv-error">渲染错误: ' + e.message + '</div>';
+    container.innerHTML = '';
+    var errorBox = document.createElement('div');
+    errorBox.className = 'mv-error';
+    errorBox.textContent = '渲染错误: ' + e.message;
+    container.appendChild(errorBox);
   }
 }
 
@@ -1211,8 +1531,18 @@ function renderModelView(data) {
 function exportModelCsv(data) {
   var rows = [];
   rows.push(['#', '名称 / 材质', '产品信息', '算量标签', '面积(m²)', '长度(mm)', '体积(m³)', '件数', '地面', '墙面', '天花']);
-  var seq = 0;
-  collectPositionCsvRows(data.hierarchy, data, rows, seq);
+  // 直接导出当前可见组件行，天然遵循搜索、排序、合并和展开状态。
+  var table = document.querySelector('#page-position .mv-table');
+  if (table) {
+    table.querySelectorAll('tbody tr.mv-row').forEach(function(row) {
+      var cells = row.querySelectorAll('td');
+      var values = [];
+      for (var i = 0; i < 11 && i < cells.length; i++) {
+        values.push(cells[i].textContent.trim());
+      }
+      rows.push(values);
+    });
+  }
 
   var csv = '﻿'; // BOM
   rows.forEach(function(r) {
@@ -1225,49 +1555,6 @@ function exportModelCsv(data) {
   a.click();
 }
 
-function collectPositionCsvRows(node, data, rows, seq) {
-  var cls = data._classification || {};
-  var tag = cls[node.entity_id];
-  if (!tag) return seq;
-  if (node.hidden && !_mv.showHidden) return seq;
-  if (tag === 'hidden_skipped') return seq;
-  if (tag === 'pure_organizational' && !_mv.showEmpty) return seq;
-
-  // Skip component_instance summary rows — include children directly
-  if (node.kind === 'component_instance' && node.children.length > 0) {
-    if (isNodeExpanded(node, {})) {
-      node.children.forEach(function(c) {
-        seq = collectPositionCsvRows(c, data, rows, seq);
-      });
-    }
-    return seq;
-  }
-
-  var stats = rollupStats(node, data);
-  var selfUsages = (data._usagesByEntityId || {})[node.entity_id] || [];
-  seq++;
-  rows.push([
-    seq,
-    node.name,
-    '',
-    node.tag || '',
-    fmtNum(stats.area),
-    fmtNum(stats.length),
-    fmtNum(stats.volume),
-    fmtNum(stats.count),
-    fmtNum(stats.floor),
-    fmtNum(stats.wall),
-    fmtNum(stats.ceiling)
-  ]);
-
-  if (isNodeExpanded(node, {})) {
-    node.children.forEach(function(c) {
-      seq = collectPositionCsvRows(c, data, rows, seq);
-    });
-  }
-  return seq;
-}
-
 // ---------------- Helpers ----------------
 function fmtNum(n) {
   if (n === '-' || n === undefined || n === null) return '-';
@@ -1276,7 +1563,7 @@ function fmtNum(n) {
   return n.toFixed(2);
 }
 
-// ---------------- SKU 自动补全（供模型视图组件行 buildSkuCell 复用）----------------
+// ---------------- 项目产品下拉选择（组合框：点击展开列表，支持模糊搜索）----------------
 window._skuReqId = 0;
 window._skuActiveRow = null;
 
@@ -1298,24 +1585,165 @@ function bindSkuAutocomplete(tr, onSelect) {
   var input = tr.querySelector('.u-sku');
   var dd = tr.querySelector('.sku-dropdown');
   if (!input || !dd) return;
-  tr._skuOnSelect = onSelect; // 可选：选中 SKU 后的回调（buildSkuCell 用它直接持久化组件级关联）
+  tr._skuOnSelect = onSelect; // 选中项目产品后的回调（buildSkuCell 用它直接持久化组件级关联）
   window._ensureSkuCloser();
+
+  // 状态：_skuItems = 当前候选列表（null = 未加载）；_skuError = 最近一次错误
+  tr._skuItems = null;
+  tr._skuError = null;
+  tr._skuTotal = 0;
+  tr._skuActiveIdx = -1;
+  tr._skuCategory = '';
   var timer = null;
+
+  function isOpen() { return dd.style.display !== 'none'; }
+  function openDropdown() { dd.style.display = ''; }
+  function closeDropdown() { dd.style.display = 'none'; tr._skuActiveIdx = -1; }
+
+  // 已选中状态下输入框显示的是标签而非过滤词，此时按空过滤词展示全量候选
+  function currentFilter() {
+    return input.classList.contains('has-value') ? '' : input.value.trim();
+  }
+
+  function categoryNames(items) {
+    var names = {};
+    (items || []).forEach(function(item) {
+      var name = String(item.category_name || '').trim();
+      if (name) names[name] = true;
+    });
+    return Object.keys(names).sort(function(a, b) { return a.localeCompare(b, 'zh-CN'); });
+  }
+
+  function renderFilterBar() {
+    var bar = document.createElement('div');
+    bar.className = 'sku-filter-bar';
+
+    var label = document.createElement('span');
+    label.className = 'sku-filter-label';
+    label.textContent = '类目';
+    bar.appendChild(label);
+
+    var select = document.createElement('select');
+    select.className = 'sku-category-filter';
+    var all = document.createElement('option');
+    all.value = '';
+    all.textContent = '全部类目';
+    select.appendChild(all);
+
+    var categories = categoryNames(tr._skuItems || []);
+    if (tr._skuCategory && categories.indexOf(tr._skuCategory) < 0) {
+      categories.unshift(tr._skuCategory);
+    }
+    categories.forEach(function(category) {
+      var option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      select.appendChild(option);
+    });
+    select.value = tr._skuCategory;
+    select.disabled = !tr._skuItems || tr._skuItems.length === 0;
+    select.addEventListener('change', function() {
+      tr._skuCategory = select.value;
+      tr._skuActiveIdx = -1;
+      render();
+    });
+    bar.appendChild(select);
+    return bar;
+  }
+
+  function filterItems(items, keyword) {
+    var category = tr._skuCategory;
+    var categoryItems = (items || []).filter(function(item) {
+      return !category || String(item.category_name || '').trim() === category;
+    });
+    return keyword ? fuzzyFilterSkus(categoryItems, keyword) : categoryItems;
+  }
+
+  function render() {
+    dd.innerHTML = '';
+    dd.appendChild(renderFilterBar());
+    if (tr._skuItems === null) {
+      dd.appendChild(skuInfoOption('加载中…'));
+      return;
+    }
+    if (tr._skuError) {
+      dd.appendChild(skuInfoOption('查询失败：' + tr._skuError));
+      return;
+    }
+    var kw = currentFilter();
+    var filtered = filterItems(tr._skuItems, kw);
+    if (filtered.length === 0) {
+      dd.appendChild(skuInfoOption(tr._skuCategory ? '当前类目下无匹配产品' : '无匹配产品'));
+      return;
+    }
+    filtered.forEach(function(it, idx) {
+      var opt = skuOption(it, tr);
+      if (idx === tr._skuActiveIdx) opt.classList.add('active');
+      dd.appendChild(opt);
+    });
+    var foot = document.createElement('div');
+    foot.className = 'sku-opt sku-foot';
+    foot.textContent = (kw || tr._skuCategory)
+      ? '匹配 ' + filtered.length + ' / ' + tr._skuItems.length + ' 条'
+      : '共 ' + (tr._skuTotal || tr._skuItems.length) + ' 条';
+    dd.appendChild(foot);
+  }
+  tr._skuRender = render;
+
+  function fetchSkus(keyword) {
+    window._skuReqId += 1;
+    window._skuActiveRow = tr;
+    callSketchUp('search_skus', JSON.stringify({
+      keyword: keyword, req_id: window._skuReqId, page_size: 100
+    }));
+  }
+
+  // 点击/聚焦：展开下拉；首次打开时拉取默认列表
+  function activate() {
+    openDropdown();
+    render();
+    if (tr._skuItems === null) fetchSkus('');
+  }
+  input.addEventListener('focus', activate);
+  input.addEventListener('click', activate);
+
+  // 输入：即时本地模糊过滤 + 防抖请求平台更新候选
   input.addEventListener('input', function() {
     clearTimeout(timer);
     // 手动编辑即视为撤销已选，需重新从下拉选择才会写回 sku 字段
+    input.classList.remove('has-value');
     tr.dataset.skuId = '';
     tr.dataset.skuCode = '';
     tr.dataset.skuName = '';
+    tr._skuActiveIdx = -1;
+    openDropdown();
+    render(); // 先用现有候选即时过滤，不等网络
     var kw = input.value.trim();
-    timer = setTimeout(function() {
-      window._skuReqId += 1;
-      window._skuActiveRow = tr;
-      callSketchUp('search_skus', JSON.stringify({ keyword: kw, req_id: window._skuReqId }));
-    }, 300);
+    timer = setTimeout(function() { fetchSkus(kw); }, 300);
   });
-  input.addEventListener('focus', function() {
-    if (dd.children.length > 0) dd.style.display = '';
+
+  // 键盘导航：↑/↓ 移动高亮，Enter 选中，Esc 关闭
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closeDropdown(); return; }
+    if (!isOpen()) {
+      if (e.key === 'ArrowDown') { activate(); e.preventDefault(); }
+      return;
+    }
+    var opts = dd.querySelectorAll('.sku-opt:not(.sku-opt-info):not(.sku-foot)');
+    if (opts.length === 0) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      var delta = e.key === 'ArrowDown' ? 1 : -1;
+      tr._skuActiveIdx = (tr._skuActiveIdx + delta + opts.length) % opts.length;
+      render();
+      var active = dd.querySelectorAll('.sku-opt:not(.sku-opt-info):not(.sku-foot)')[tr._skuActiveIdx];
+      if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      if (tr._skuActiveIdx >= 0 && opts[tr._skuActiveIdx]) {
+        e.preventDefault();
+        opts[tr._skuActiveIdx].click();
+      }
+    }
   });
 }
 
@@ -1323,47 +1751,87 @@ window.receiveSkuResults = function(data) {
   if (Number(data.req_id) !== window._skuReqId) return; // 丢弃过期响应
   var tr = window._skuActiveRow;
   if (!tr || !tr.isConnected) return; // 行已重建/分离则忽略
-  var dd = tr.querySelector('.sku-dropdown');
-  if (!dd) return;
-  dd.innerHTML = '';
   if (data.error) {
-    dd.appendChild(skuOption('查询失败：' + data.error, null, tr));
-    dd.style.display = '';
-    return;
+    tr._skuError = data.error;
+    tr._skuItems = tr._skuItems || [];
+  } else {
+    tr._skuError = null;
+    tr._skuItems = data.items || [];
+    tr._skuTotal = data.total || tr._skuItems.length;
   }
-  var items = data.items || [];
-  if (items.length === 0) {
-    dd.appendChild(skuOption('无匹配产品', null, tr));
-    dd.style.display = '';
-    return;
-  }
-  items.forEach(function(it) {
-    var label = (it.code || '') + ' · ' + (it.name || '');
-    if (it.spec) label += ' · ' + it.spec;
-    if (it.brand && it.brand.name) label += ' · ' + it.brand.name;
-    dd.appendChild(skuOption(label, it, tr));
-  });
-  var foot = document.createElement('div');
-  foot.className = 'sku-opt sku-foot';
-  foot.textContent = '共 ' + (data.total || items.length) + ' 条';
-  dd.appendChild(foot);
-  dd.style.display = '';
+  tr._skuActiveIdx = -1;
+  if (tr._skuRender) tr._skuRender();
 };
 
-function skuOption(label, item, tr) {
+// 模糊过滤：优先子串命中，其次子序列（逐字乱序跳跃）命中；大小写不敏感
+function fuzzyFilterSkus(items, kw) {
+  var q = kw.toLowerCase();
+  var sub = [], fuzzy = [];
+  items.forEach(function(it) {
+    var displayCode = it.project_product_code || it.code || it.catalog_code || '';
+    var t = (displayCode + ' ' + (it.name || '') + ' ' + (it.spec || '') + ' ' +
+             ((it.brand && it.brand.name) || '') + ' ' + (it.category_name || '')).toLowerCase();
+    if (t.indexOf(q) >= 0) sub.push(it);
+    else if (skuSubsequenceMatch(t, q)) fuzzy.push(it);
+  });
+  return sub.concat(fuzzy);
+}
+
+function skuSubsequenceMatch(text, query) {
+  var i = 0;
+  for (var j = 0; j < text.length && i < query.length; j++) {
+    if (text[j] === query[i]) i++;
+  }
+  return i === query.length;
+}
+
+// 提示性占位项（加载中 / 无结果 / 失败），不可点击
+function skuInfoOption(text) {
+  var div = document.createElement('div');
+  div.className = 'sku-opt sku-opt-info';
+  div.textContent = text;
+  return div;
+}
+
+// 项目产品选项：主行 = 项目产品自定义编号 + 名称，副行 = 规格 / 品牌 / 分类
+function skuOption(item, tr) {
   var div = document.createElement('div');
   div.className = 'sku-opt';
-  div.textContent = label;
-  if (item) {
-    div.onclick = function() {
-      var input = tr.querySelector('.u-sku');
-      input.value = (item.code || '') + ' ' + (item.name || '');
-      tr.dataset.skuId = item.sku_id || '';
-      tr.dataset.skuCode = item.code || '';
-      tr.dataset.skuName = item.name || '';
-      tr.querySelector('.sku-dropdown').style.display = 'none';
-      if (tr._skuOnSelect) tr._skuOnSelect(item);
-    };
+
+  var main = document.createElement('div');
+  main.className = 'sku-opt-main';
+  var code = document.createElement('span');
+  code.className = 'sku-opt-code';
+  code.textContent = item.project_product_code || item.code || item.catalog_code || '(无编号)';
+  main.appendChild(code);
+  if (item.name) {
+    var name = document.createElement('span');
+    name.className = 'sku-opt-name';
+    name.textContent = item.name;
+    main.appendChild(name);
   }
+  div.appendChild(main);
+
+  var subParts = [];
+  if (item.spec) subParts.push(item.spec);
+  if (item.brand && item.brand.name) subParts.push(item.brand.name);
+  if (item.category_name) subParts.push(item.category_name);
+  if (subParts.length > 0) {
+    var sub = document.createElement('div');
+    sub.className = 'sku-opt-sub';
+    sub.textContent = subParts.join(' · ');
+    div.appendChild(sub);
+  }
+
+  div.onclick = function() {
+    var input = tr.querySelector('.u-sku');
+    var displayCode = item.project_product_code || item.code || item.catalog_code || '';
+    input.value = displayCode + ' ' + (item.name || '');
+    tr.dataset.skuId = item.project_product_id || item.product_id || item.sku_id || '';
+    tr.dataset.skuCode = displayCode;
+    tr.dataset.skuName = item.name || '';
+    tr.querySelector('.sku-dropdown').style.display = 'none';
+    if (tr._skuOnSelect) tr._skuOnSelect(item);
+  };
   return div;
 }

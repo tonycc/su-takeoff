@@ -209,4 +209,52 @@ class TestApiClient < Minitest::Test
     assert_equal 'active', query['status']
     refute query.key?('keyword')
   end
+
+  def test_projects_builds_keyword_query
+    transport = Transport.new(FakeResponse.new(
+      '200', '[{"id":"project-1","code":"XM-001","name":"样板房"}]'
+    ))
+    client = SuTakeoff::Api::ApiClient.new(base_url: 'https://api.example.com', transport: transport)
+
+    result = client.projects(access_token: 'tok', keyword: 'XM-001')
+
+    assert_equal 'project-1', result.first['id']
+    call = transport.calls.first
+    assert_equal '/api/v1/supply/projects', call[:uri].path
+    assert_equal 'Bearer tok', call[:request]['Authorization']
+    query = URI.decode_www_form(call[:uri].query).to_h
+    assert_equal 'XM-001', query['keyword']
+  end
+
+  def test_project_products_uses_project_library_path
+    transport = Transport.new(FakeResponse.new(
+      '200', '[{"id":"project-product-1","project_id":"project-1","product_id":"product-1","catalog_code":"P-001","product_name":"白橡木柜体"}]'
+    ))
+    client = SuTakeoff::Api::ApiClient.new(base_url: 'https://api.example.com', transport: transport)
+
+    result = client.project_products(access_token: 'tok', project_id: 'project-1', keyword: '橡木')
+
+    assert_equal 'project-product-1', result.first['id']
+    call = transport.calls.first
+    assert_equal '/api/v1/supply/projects/project-1/products', call[:uri].path
+    assert_equal 'Bearer tok', call[:request]['Authorization']
+    query = URI.decode_www_form(call[:uri].query).to_h
+    assert_equal '橡木', query['keyword']
+    assert_equal '1', query['page']
+    assert_equal '100', query['page_size']
+  end
+
+  def test_project_products_requires_project_id
+    client = SuTakeoff::Api::ApiClient.new(base_url: 'https://api.example.com', transport: Transport.new)
+
+    assert_raises(ArgumentError) do
+      client.project_products(access_token: 'tok', project_id: ' ')
+    end
+  end
+
+  def test_base_url_requires_hostname
+    assert_raises(ArgumentError) do
+      SuTakeoff::Api::ApiClient.new(base_url: 'https:///api')
+    end
+  end
 end

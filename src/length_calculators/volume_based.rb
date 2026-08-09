@@ -23,7 +23,7 @@ module SuTakeoff
       private
 
       # 体积换算：测试通过 ctx[:volume_m3] 直接给体积绕过 SU API；
-      # 生产用 entity.volume × in³→m³ × scale³。
+      # 生产由 Scanner 传入已应用完整变换行列式的 volume_m3。
       def resolve_volume(entity, ctx)
         return ctx[:volume_m3] if ctx[:volume_m3]
         return nil unless entity.respond_to?(:volume) &&

@@ -15,7 +15,6 @@ module SuTakeoff
       @model = Sketchup.active_model
       @material_colors = {}
       @entity_contexts = {}
-      @component_mapping = PluginState.instance.component_mapping
       begin
         @policy = PluginState.instance.takeoff_policy
       rescue => e
@@ -41,8 +40,9 @@ module SuTakeoff
       opening_face_ids = Set.new
       @pending_opening_info = []
 
+      selection_context = selection_only && !@model.selection.empty?
       entities =
-        if selection_only && !@model.selection.empty?
+        if selection_context
           @model.selection.to_a
         else
           @model.entities.to_a
@@ -59,8 +59,11 @@ module SuTakeoff
         end
       end
 
+      base_path = selection_context ? Array(@model.active_path) : []
+      base_transform = selection_context ? (@model.edit_transform rescue IDENTITY) : IDENTITY
+
       entities.each do |entity|
-        collect_faces(entity, [], IDENTITY, face_set, items, openings, opening_face_ids)
+        collect_faces(entity, base_path, base_transform, face_set, items, openings, opening_face_ids)
       end
 
       if DEBUG
@@ -71,13 +74,13 @@ module SuTakeoff
       # ---- 洞口-母面关联 ----
       associate_openings_to_hosts(items, openings, @pending_opening_info)
 
-      hierarchy = collect_hierarchy(entities)
+      hierarchy = collect_hierarchy(entities, base_path)
 
       { items: items, openings: openings, hierarchy: hierarchy }
     end
 
     # 局部重扫：只重扫 entity_id 对应的容器子树，返回 { items:, openings: }。
-    # ctx 来自主扫描时存入的 entity_contexts[entity_id]。
+    # ctx 来自主扫描时按完整实例路径存入的 entity_contexts[path_key]。
     def scan_entity(entity_id, ctx)
       entity = @model.find_entity_by_id(entity_id)
       return nil unless entity
@@ -122,8 +125,10 @@ module SuTakeoff
 
     def collect_face(entity, path, transform, face_set, items, openings, opening_face_ids,
                      effective_layer, effective_tag, effective_method)
-      return if face_set.include?(entity.entityID)
-      face_set.add(entity.entityID)
+      comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 }
+      occurrence_key = ScanItem.path_key(comp_path_ids + [entity.entityID])
+      return if face_set.include?(occurrence_key)
+      face_set.add(occurrence_key)
       return if entity.hidden? || !entity.visible?
 
       mat = entity.material || entity.back_material
@@ -137,22 +142,9 @@ module SuTakeoff
         if DEBUG && mat_name
           puts "[Scanner] Face ##{entity.entityID} 材质继承自容器: \"#{mat_name}\""
         end
-        if pmat && mat_name && !@material_colors.key?(mat_name)
-          @material_colors[mat_name] = {
-            r: pmat.color.red, g: pmat.color.green, b: pmat.color.blue, a: pmat.alpha
-          }
-        end
       end
 
-      if mat && mat_name && !@material_colors.key?(mat_name)
-        color = mat.color
-        @material_colors[mat_name] = {
-          r: color.red, g: color.green, b: color.blue, a: mat.alpha
-        }
-      end
-
-      comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
-      comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 }
+      comp_path     = path.map { |c| container_display_name(c) }
       comp_path_persistent_ids = path.map { |c| persistent_id(c) }
 
       area_m2 = compute_area(entity, transform)
@@ -161,34 +153,37 @@ module SuTakeoff
              "layer=\"#{effective_layer || entity.layer.name}\" area=#{area_m2.round(4)}"
       end
 
-      world_normal = entity.normal.transform(transform)
-      world_normal.normalize! if world_normal.length > 0
-
-      bb_center_world = entity.bounds.center.transform(transform)
+      world_points = transformed_face_points(entity, transform)
+      world_normal = transformed_face_normal(entity, transform, world_points)
+      bb_center_world = points_center(world_points) || entity.bounds.center.transform(transform)
       z_center_m = bb_center_world.z * 0.0254
 
       return if area_m2 < MIN_FACE_AREA_M2
 
       if mat&.alpha && mat.alpha < 0.5
-        unless opening_face_ids.include?(entity.entityID)
-          openings << Opening.new(entity.entityID, area_m2, [])
+        unless opening_face_ids.include?(occurrence_key)
+          openings << Opening.new(
+            entity.entityID, area_m2, [], comp_path_ids, persistent_id(entity), [],
+            (bb_center_world.x * 0.0254).round(4),
+            (bb_center_world.y * 0.0254).round(4),
+            z_center_m.round(4),
+            [world_normal.x, world_normal.y, world_normal.z]
+          )
           @pending_opening_info << {
             index: openings.size - 1,
             normal: [world_normal.x, world_normal.y, world_normal.z],
-            component_path: comp_path,
+            component_path_ids: comp_path_ids,
+            center_x: bb_center_world.x * 0.0254,
+            center_y: bb_center_world.y * 0.0254,
             z_center: z_center_m.round(4),
             area: area_m2
           }
-          opening_face_ids.add(entity.entityID)
+          opening_face_ids.add(occurrence_key)
         end
         return
       end
 
-      bb    = entity.bounds
-      scale = [transform.xscale.abs, transform.yscale.abs, transform.zscale.abs].max
-      dims  = [bb.width * scale, bb.height * scale, bb.depth * scale].sort
-      w = (dims[-2] || 0) * 0.0254
-      h = (dims[-1] || 0) * 0.0254
+      w, h = face_dimensions_m(world_points, world_normal)
 
       face_tags = read_takeoff_tags(entity)
       if effective_method && (face_tags.nil? || !face_tags[:method])
@@ -228,7 +223,10 @@ module SuTakeoff
       return if entity.hidden? || !entity.visible? || (entity.layer && !entity.layer.visible?)
 
       # 记录本容器的扫描上下文，供 set_entity_tag 局部重扫使用
-      @entity_contexts[entity.entityID] = {
+      entity_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
+      @entity_contexts[ScanItem.path_key(entity_path_ids)] = {
+        entity_id:        entity.entityID,
+        entity_path_ids:  entity_path_ids,
         path_ids:         path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 },
         transform:        transform.to_a,
         effective_layer:  effective_layer,
@@ -239,34 +237,20 @@ module SuTakeoff
       # 复合标签：method 含 '+' 时拆开，产出多条容器级 ScanItem，不再下钻
       tags = read_takeoff_tags(entity)
       if tags && tags[:method] && tags[:method].to_s.include?('+')
-        tags[:method].to_s.split('+').map(&:strip).each do |m|
-          sym = m.to_sym
+        compound_methods = tags[:method].to_s.split('+').map(&:strip).map(&:to_sym)
+        compound_methods.each do |sym|
           next unless %i[count length volume].include?(sym)
           result = emit_solid_by_method(entity, path, transform, sym, tags, effective_tag)
           items << result if result
         end
-        return
+        return unless compound_methods.include?(:area)
+
+        # 复合标签包含 area 时，其余量纲已按容器产出，面积继续下钻到面并显式传播。
+        effective_tag = tags[:tag] || effective_tag
+        effective_method = :area
       end
 
-      # 组件映射 aggregate → 整件统计，不下钻
-      def_name  = container_definition_name(entity)
-      cm_record = @component_mapping.get(def_name)
-      if cm_record && cm_record.counting_method == 'aggregate' && def_name && !def_name.empty?
-        comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
-        comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
-        comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
-        items << ScanItem.instance(
-          face_id: entity.entityID,
-          su_material: def_name,
-          unit: cm_record.unit || '个',
-          layer_name: entity.layer.name,
-          component_path: comp_path,
-          component_path_ids: comp_path_ids,
-          face_persistent_id: persistent_id(entity),
-          component_path_persistent_ids: comp_path_persistent_ids
-        )
-        return
-      end
+      def_name = container_definition_name(entity)
 
       # 容器级整体量取（标签/图层规则命中 length/volume/count → 不下钻）
       if (solid_item = try_emit_solid(entity, path, transform, effective_tag))
@@ -276,7 +260,7 @@ module SuTakeoff
       end
 
       # 纯边线容器（无面/子组件/子群组）：
-      #   - 决议判定 method：AttrDict / 图层 / 组件映射 / 几何启发
+      #   - 决议判定 method：AttrDict / 图层 / 几何启发
       #   - :length → 用 PathSum 累加所有 Edge 长度，emit :linear_solid
       #   - 其他 → 兼容旧行为 emit_edge_only_item（按件数）
       unless has_collectable_geometry?(entity)
@@ -304,8 +288,7 @@ module SuTakeoff
       local_face_set = Set.new
       child_layer   = container_effective_layer(entity, effective_layer)
       child_tag     = container_effective_tag(entity, effective_tag)
-      child_method  = container_effective_method(entity, effective_method) ||
-                      component_mapping_method(entity, effective_method)
+      child_method  = container_effective_method(entity, effective_method)
 
       if DEBUG
         puts "[Scanner]   effective_layer=#{effective_layer.inspect} → child_layer=#{child_layer.inspect}"
@@ -323,29 +306,107 @@ module SuTakeoff
       # 命名洞口组件：把内部面注册为洞口
       return unless opening_name?(def_name)
 
-      parent_comp_path = new_path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
-      child_ents.each do |child|
-        next unless child.is_a?(Sketchup::Face) && !opening_face_ids.include?(child.entityID)
-        a            = compute_area(child, new_transform)
-        child_normal = child.normal.transform(new_transform)
-        child_normal.normalize! if child_normal.length > 0
-        child_z_center = child.bounds.center.transform(new_transform).z * 0.0254
-        openings << Opening.new(child.entityID, a, [])
-        @pending_opening_info << {
-          index: openings.size - 1,
-          normal: [child_normal.x, child_normal.y, child_normal.z],
-          component_path: parent_comp_path,
-          z_center: child_z_center.round(4),
-          area: a
-        }
-        opening_face_ids.add(child.entityID)
-      end
+      # 门窗实体通常有前后两个等面积面；只用最大直接子面代表净洞口，避免双扣。
+      opening_face = child_ents.select { |child| child.is_a?(Sketchup::Face) }
+                               .max_by { |child| compute_area(child, new_transform) }
+      return unless opening_face
+
+      opening_path_ids = new_path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 }
+      opening_key = ScanItem.path_key(opening_path_ids + [opening_face.entityID])
+      return if opening_face_ids.include?(opening_key)
+
+      a = compute_area(opening_face, new_transform)
+      opening_points = transformed_face_points(opening_face, new_transform)
+      child_normal = transformed_face_normal(opening_face, new_transform, opening_points)
+      child_center = points_center(opening_points) || opening_face.bounds.center.transform(new_transform)
+      child_z_center = child_center.z * 0.0254
+      openings << Opening.new(
+        opening_face.entityID, a, [], opening_path_ids, persistent_id(opening_face), [],
+        (child_center.x * 0.0254).round(4), (child_center.y * 0.0254).round(4),
+        child_z_center.round(4), [child_normal.x, child_normal.y, child_normal.z]
+      )
+      @pending_opening_info << {
+        index: openings.size - 1,
+        normal: [child_normal.x, child_normal.y, child_normal.z],
+        component_path_ids: opening_path_ids,
+        center_x: child_center.x * 0.0254,
+        center_y: child_center.y * 0.0254,
+        z_center: child_z_center.round(4),
+        area: a
+      }
+      opening_face_ids.add(opening_key)
     end
 
     # ---- 以下方法保持不变 ----
 
     def compute_area(face, transform)
       face.area(transform) * 0.00064516
+    end
+
+    def transformed_face_points(face, transform)
+      vertices = face.respond_to?(:outer_loop) ? face.outer_loop.vertices : face.vertices
+      vertices.map { |vertex| vertex.position.transform(transform) }
+    rescue
+      []
+    end
+
+    def transformed_face_normal(face, transform, points)
+      vectors = []
+      if points.length >= 3
+        origin = points.first
+        points[1..].each { |point| vectors << (point - origin) }
+      end
+      normal = nil
+      vectors.each_with_index do |a, index|
+        vectors[(index + 1)..].to_a.each do |b|
+          candidate = vector_cross(a, b)
+          if candidate.length > 1.0e-9
+            normal = candidate
+            break
+          end
+        end
+        break if normal
+      end
+      fallback = face.normal.transform(transform)
+      normal ||= fallback
+      normal.normalize! if normal.length > 0
+      normal
+    end
+
+    def points_center(points)
+      return nil if points.empty?
+      Geom::Point3d.new(
+        points.sum(&:x) / points.length.to_f,
+        points.sum(&:y) / points.length.to_f,
+        points.sum(&:z) / points.length.to_f
+      )
+    end
+
+    def face_dimensions_m(points, normal)
+      return [0.0, 0.0] if points.length < 2
+      edge_vectors = points.each_with_index.map { |point, index| points[(index + 1) % points.length] - point }
+      u_axis = edge_vectors.max_by(&:length)
+      return [0.0, 0.0] unless u_axis && u_axis.length > 0
+      u_axis = u_axis.normalize
+      v_axis = vector_cross(normal, u_axis)
+      v_axis.normalize! if v_axis.length > 0
+      origin = points.first
+      u_values = points.map { |point| vector_dot(point - origin, u_axis) }
+      v_values = points.map { |point| vector_dot(point - origin, v_axis) }
+      dims = [(u_values.max - u_values.min).abs, (v_values.max - v_values.min).abs].sort
+      [dims[0].to_f * 0.0254, dims[1].to_f * 0.0254]
+    end
+
+    def vector_dot(a, b)
+      a.x * b.x + a.y * b.y + a.z * b.z
+    end
+
+    def vector_cross(a, b)
+      Geom::Vector3d.new(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+      )
     end
 
     def read_takeoff_tags(entity)
@@ -356,7 +417,8 @@ module SuTakeoff
       out[:method]      = dict['method']      if dict['method']
       out[:material]    = dict['material']    if dict['material']
       out[:tag]         = dict['tag']         if dict['tag']
-      out[:baseline_id] = dict['baseline_id'] if dict['baseline_id']
+      # 新模型优先保存 persistent_id；baseline_id 仅兼容旧数据/当前会话。
+      out[:baseline_id] = dict['baseline_persistent_id'] || dict['baseline_id'] if dict['baseline_persistent_id'] || dict['baseline_id']
       out.empty? ? nil : out
     end
 
@@ -369,18 +431,7 @@ module SuTakeoff
       # 档 1+2：AttrDict / 图层规则（原有）
       method = @policy.resolve_container(layer_name: layer, attr_method: attr_method)
 
-      # 档 3：组件映射 unit 推导（新增）
-      if method.nil?
-        def_name = container_definition_name(entity)
-        if def_name && !def_name.empty? && @component_mapping && (cm = @component_mapping.get(def_name))
-          if cm.unit
-            m = @policy.method_for_unit(cm.unit)
-            method = m if %i[length count volume].include?(m)
-          end
-        end
-      end
-
-      # 档 4：策略自动匹配（命名约定；当前无策略带匹配规则，处于休眠）
+      # 档 3：策略自动匹配（命名约定；当前无策略带匹配规则，处于休眠）
       if method.nil?
         matched_strategy = find_container_strategy(entity)
         if matched_strategy && %i[length count volume].include?(matched_strategy.method)
@@ -408,13 +459,13 @@ module SuTakeoff
     end
 
     def emit_solid_by_method(entity, path, transform, method, tags, effective_tag = nil)
-      comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+      comp_path     = path.map { |c| container_display_name(c) } + [container_display_name(entity)]
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
       comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
 
-      bb       = entity.bounds
-      scale    = [transform.xscale.abs, transform.yscale.abs, transform.zscale.abs].max
-      dims_in  = [bb.width * scale, bb.height * scale, bb.depth * scale].sort
+      content_transform = transform * entity.transformation
+      local_bounds = entity.respond_to?(:definition) ? entity.definition.bounds : entity.bounds
+      dims_in = transformed_local_bounds_dimensions(local_bounds, content_transform).sort
       w = (dims_in[0] || 0) * 0.0254
       h = (dims_in[1] || 0) * 0.0254
       d = (dims_in[2] || 0) * 0.0254
@@ -425,18 +476,18 @@ module SuTakeoff
         first_child_face_material(entity) ||
         container_definition_name(entity)
 
-      bb_center_world = bb.center.transform(transform)
+      bb_center_world = local_bounds.center.transform(content_transform)
       z_center_m      = bb_center_world.z * 0.0254
       layer           = entity.layer && entity.layer.name
       item_tag        = (tags && tags[:tag]) || effective_tag
 
       case method
       when :length
-        length_m = compute_length_via_strategy(entity, scale) ||
-                   compute_linear_length(entity, scale) || d
+        length_m = compute_length_via_strategy(entity, transform) ||
+                   compute_linear_length(entity, transform) || d
         item = ScanItem.linear_solid(
           face_id: entity.entityID, su_material: mat_name,
-          length: length_m.round(4), width: w.round(4), height: h.round(4), depth: h.round(4),
+          length: length_m.round(4), width: w.round(4), height: h.round(4), depth: d.round(4),
           layer_name: layer, component_path: comp_path, component_path_ids: comp_path_ids,
           z_center: z_center_m.round(4), tags: tags, tag: item_tag,
           face_persistent_id: persistent_id(entity),
@@ -450,7 +501,7 @@ module SuTakeoff
       when :volume
         vol_in3 = entity.respond_to?(:volume) ? entity.volume : 0
         vol_m3  = if vol_in3.is_a?(Numeric) && vol_in3 > 0
-                    vol_in3 * 1.6387e-5 * (scale**3)
+                    vol_in3 * 1.6387e-5 * transformation_volume_scale(transform)
                   else
                     w * h * d
                   end
@@ -477,7 +528,7 @@ module SuTakeoff
     # （如某些专用策略可强制使用 EdgeBased 等算法）。
     # 找不到匹配策略或策略没有 compute_length 时返回 nil，
     # 调用方走默认 compute_linear_length（Chained）。
-    def compute_length_via_strategy(entity, scale)
+    def compute_length_via_strategy(entity, transform)
       return nil unless @policy
       def_name = container_definition_name(entity)
       return nil if def_name.nil? || def_name.empty?
@@ -492,7 +543,7 @@ module SuTakeoff
       end
       return nil unless strategy && strategy.respond_to?(:compute_length)
 
-      ctx = build_length_ctx(entity, scale)
+      ctx = build_length_ctx(entity, transform)
       return nil unless ctx
       strategy.compute_length(entity, ctx)
     end
@@ -520,21 +571,11 @@ module SuTakeoff
       m if TakeoffPolicy::METHODS.include?(m)
     end
 
-    def component_mapping_method(entity, parent_method)
-      return parent_method if parent_method
-      return nil unless @policy
-      def_name = container_definition_name(entity)
-      return nil if def_name.nil? || def_name.empty?
-      cm = @component_mapping.get(def_name)
-      return nil unless cm && cm.counting_method == 'expand' && cm.unit
-      @policy.method_for_unit(cm.unit)
-    end
-
-    def compute_linear_length(entity, scale)
+    def compute_linear_length(entity, transform)
       def_name = container_definition_name(entity)
       puts "[linear_length] ====== 实体: \"#{def_name}\" entityID=#{entity.entityID} ======" if DEBUG
 
-      ctx = build_length_ctx(entity, scale)
+      ctx = build_length_ctx(entity, transform)
       return nil unless ctx
 
       chained = LengthCalculators::Chained.new(
@@ -545,67 +586,74 @@ module SuTakeoff
       chained.compute(entity, ctx)
     end
 
-    def build_length_ctx(entity, scale)
+    def build_length_ctx(entity, parent_transform)
       ents = definition_entities(entity)
       return nil unless ents
 
-      entity_scale = if entity.respond_to?(:transformation)
-        t = entity.transformation
-        [t.xscale.abs, t.yscale.abs, t.zscale.abs].max
-      else
-        1.0
-      end
-      edge_scale = scale * entity_scale
-
-      edges = collect_edges(ents, edge_scale)
+      content_transform = parent_transform * entity.transformation
+      edges = collect_edges(ents, content_transform)
+      # Baseline 也可能位于嵌套容器中，不能因直接子级没有边就提前返回。
       return nil if edges.empty?
-
-      calibrate_inch_edges(edges, entity)
 
       tags = read_takeoff_tags(entity)
       {
         entities:        ents,
         edges:           edges,
-        edge_scale:      edge_scale,
-        scale:           scale,
+        edge_scale:      1.0,
+        scale:           1.0,
         model_unit_to_m: @model_unit_to_m,
         baseline_id:     tags && tags[:baseline_id],
+        volume_m3:       volume_m3_for(entity, parent_transform),
         debug:           DEBUG
       }
     end
 
-    def collect_edges(ents, edge_scale)
+    def collect_edges(ents, transform)
       edges = []
       ents.each do |e|
-        next unless e.is_a?(Sketchup::Edge)
-        len_raw = e.length * edge_scale
-        next if len_raw <= 0
-        dir = e.line[1].normalize! rescue next
-        len_m = if defined?(Length) && len_raw.is_a?(Length)
-                  len_raw.to_m
-                else
-                  len_raw.to_f * @model_unit_to_m
-                end
-        dkey = [dir.x.round(3).abs, dir.y.round(3).abs, dir.z.round(3).abs]
-        edges << { dkey: dkey, len: len_m, len_raw: len_raw }
+        if e.is_a?(Sketchup::Edge)
+          start_point = e.start.position.transform(transform)
+          end_point = e.end.position.transform(transform)
+          vector = end_point - start_point
+          next if vector.length <= 0
+          dir = vector.normalize
+          len_m = vector.length.to_f * 0.0254
+          dkey = [dir.x.round(3).abs, dir.y.round(3).abs, dir.z.round(3).abs]
+          edges << {
+            dkey: dkey, len: len_m, len_raw: vector.length,
+            entity_id: e.entityID, persistent_id: persistent_id(e)
+          }
+        elsif e.is_a?(Sketchup::ComponentInstance) || e.is_a?(Sketchup::Group)
+          child_entities = definition_entities(e)
+          edges.concat(collect_edges(child_entities, transform * e.transformation)) if child_entities
+        end
       end
       edges
     end
 
-    # 校准：当 e.length 返回原始 Float（非 Length 对象）且值与 bbox 不匹配时，
-    # bbox/edge > 10 → 视为单位混淆，强制按英寸换算。
-    def calibrate_inch_edges(edges, entity)
-      return if edges.empty?
-      is_len_obj = defined?(Length) && edges.first[:len_raw].is_a?(Length)
-      return if is_len_obj
+    def transformed_local_bounds_dimensions(bounds, transform)
+      origin = bounds.min
+      x_point = Geom::Point3d.new(bounds.max.x, origin.y, origin.z).transform(transform)
+      y_point = Geom::Point3d.new(origin.x, bounds.max.y, origin.z).transform(transform)
+      z_point = Geom::Point3d.new(origin.x, origin.y, bounds.max.z).transform(transform)
+      world_origin = origin.transform(transform)
+      [x_point.distance(world_origin), y_point.distance(world_origin), z_point.distance(world_origin)]
+    end
 
-      bb = entity.bounds
-      bb_max_m = [bb.width, bb.height, bb.depth].max * 0.0254
-      edge_max = edges.map { |e| e[:len] }.max
-      return unless edge_max > 0 && bb_max_m / edge_max > 10
+    def transformation_volume_scale(transform)
+      x = transform.xaxis
+      y = transform.yaxis
+      z = transform.zaxis
+      vector_dot(x, vector_cross(y, z)).abs
+    rescue
+      transform.xscale.abs * transform.yscale.abs * transform.zscale.abs
+    end
 
-      puts "[linear_length] 校准: 边值=#{edge_max.round(4)}m, bbox=#{bb_max_m.round(4)}m → 改英寸换算" if DEBUG
-      edges.each { |e| e[:len] = e[:len_raw].to_f * 0.0254 }
+    def volume_m3_for(entity, parent_transform)
+      return nil unless entity.respond_to?(:volume)
+      volume = entity.volume
+      return nil unless volume.is_a?(Numeric) && volume > 0
+      volume * 1.6387e-5 * transformation_volume_scale(parent_transform)
     end
 
     def first_child_face_material(entity)
@@ -626,6 +674,11 @@ module SuTakeoff
       elsif entity.respond_to?(:name)
         entity.name
       end
+    end
+
+    def container_display_name(entity)
+      explicit = entity.respond_to?(:name) ? entity.name.to_s.strip : ''
+      explicit.empty? ? container_definition_name(entity).to_s : explicit
     end
 
     def persistent_id(entity)
@@ -662,7 +715,7 @@ module SuTakeoff
                  (entity.respond_to?(:material) && entity.material&.name) ||
                  container_definition_name(entity)
 
-      comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+      comp_path     = path.map { |c| container_display_name(c) } + [container_display_name(entity)]
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
       comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
 
@@ -678,11 +731,10 @@ module SuTakeoff
       )
     end
 
-    # 纯边线容器的 method 决议（4 档优先级）：
+    # 纯边线容器的 method 决议（3 档优先级）：
     #   1. AttrDict 显式 method
     #   2. 图层规则
-    #   3. 组件映射 unit 推导
-    #   4. 几何启发：≥2 个不同方向的边 = 路径线 → :length
+    #   3. 几何启发：≥2 个不同方向的边 = 路径线 → :length
     # 都未命中 → :count（兼容旧行为）
     def decide_pure_edges_method(entity)
       # 1. AttrDict
@@ -701,17 +753,8 @@ module SuTakeoff
         end
       end
 
-      # 3. 组件映射 unit
-      def_name = container_definition_name(entity)
-      if def_name && @component_mapping && (cm = @component_mapping.get(def_name))
-        if @policy && cm.unit
-          m = @policy.method_for_unit(cm.unit)
-          return m if %i[length count].include?(m)
-        end
-      end
-
-      # 4. 几何启发
-      return :length if path_like_geometry?(entity)
+      # 3. 几何启发
+      return :length if @policy&.heuristics_enabled? && path_like_geometry?(entity)
 
       :count
     end
@@ -733,8 +776,7 @@ module SuTakeoff
 
     # 纯边线容器的路径总长（PathSum）。
     def compute_path_length(entity, transform)
-      scale = [transform.xscale.abs, transform.yscale.abs, transform.zscale.abs].max
-      ctx = build_length_ctx(entity, scale)
+      ctx = build_length_ctx(entity, transform)
       return nil unless ctx
       LengthCalculators::PathSum.new.compute(entity, ctx)
     end
@@ -742,7 +784,7 @@ module SuTakeoff
     # 产出路径长度 ScanItem（kind=:linear_solid）。
     def emit_path_linear_solid(entity, path, transform, length_m, effective_tag)
       tags = read_takeoff_tags(entity)
-      comp_path     = path.map { |c| c.respond_to?(:name) ? c.name : c.to_s }
+      comp_path     = path.map { |c| container_display_name(c) } + [container_display_name(entity)]
       comp_path_ids = path.map { |c| c.respond_to?(:entityID) ? c.entityID : 0 } + [entity.entityID]
       comp_path_persistent_ids = path.map { |c| persistent_id(c) } + [persistent_id(entity)]
       mat_name = (tags && tags[:material]) ||
@@ -778,70 +820,132 @@ module SuTakeoff
     def associate_openings_to_hosts(items, openings, pending_info)
       return if pending_info.empty?
 
-      # 按 component_path 建索引，避免对每个洞口线性扫描全量 items
+      # 按完整实例路径建索引，避免同名/共享定义实例串联。
       path_index = {}
       items.each do |item|
         next if item.normal.nil?
-        (path_index[item.component_path] ||= []) << item
+        (path_index[ScanItem.path_key(item.component_path_ids)] ||= []) << item
       end
 
       pending_info.each do |info|
         op_idx      = info[:index]
         op_normal   = info[:normal]
         op_area     = info[:area]
-        op_path     = info[:component_path]
+        op_path     = Array(info[:component_path_ids])
         parent_path = op_path[0..-2]
 
         candidate_paths = [op_path, parent_path].uniq
-        candidates = candidate_paths.flat_map { |p| path_index[p] || [] }.select do |item|
+        candidates = candidate_paths.flat_map { |p| path_index[ScanItem.path_key(p)] || [] }.select do |item|
           dot = (op_normal[0] * item.normal[0] +
                  op_normal[1] * item.normal[1] +
                  op_normal[2] * item.normal[2]).abs
-          dot > 0.99 && item.qty > op_area
+          dot > 0.99 && item.qty > op_area && opening_center_on_face?(info, item)
         end
 
         next unless candidates.any?
-        openings[op_idx].host_face_ids = [candidates.min_by(&:qty).face_id]
+        host = candidates.min_by(&:qty)
+        openings[op_idx].host_face_ids = [host.face_id]
+        openings[op_idx].host_face_keys = [host.face_occurrence_key]
       end
     end
 
-    def collect_hierarchy(entities)
+    def opening_center_on_face?(info, item)
+      return false if item.center_x.nil? || item.center_y.nil? || item.z_center.nil?
+      return false if info[:center_x].nil? || info[:center_y].nil? || info[:z_center].nil?
+
+      dx = info[:center_x].to_f - item.center_x.to_f
+      dy = info[:center_y].to_f - item.center_y.to_f
+      dz = info[:z_center].to_f - item.z_center.to_f
+      n = item.normal
+      plane_distance = (dx * n[0] + dy * n[1] + dz * n[2]).abs
+      return false if plane_distance > 0.05
+
+      total_sq = dx * dx + dy * dy + dz * dz
+      in_plane_distance = Math.sqrt([total_sq - plane_distance * plane_distance, 0.0].max)
+      host_extent = [item.width, item.height].compact.map(&:to_f).max.to_f / 2.0
+      opening_extent = Math.sqrt(info[:area].to_f) / 2.0
+      in_plane_distance <= host_extent + opening_extent
+    end
+
+    def collect_hierarchy(entities, base_path = [])
+      base_ids = base_path.map { |e| e.respond_to?(:entityID) ? e.entityID : 0 }
+      base_persistent_ids = base_path.map { |e| persistent_id(e) }
+      children = collect_hierarchy_children(
+        entities, base_path.length + 1, base_ids, base_persistent_ids
+      )
+      unless base_path.empty?
+        nested_children = children
+        base_path.each_with_index.to_a.reverse_each do |(entity, index)|
+          path_ids = base_ids.first(index + 1)
+          persistent_path_ids = base_persistent_ids.first(index + 1)
+          nested_children = [hierarchy_node_for_entity(
+            entity, index + 1, path_ids, persistent_path_ids, nested_children
+          )]
+        end
+        children = nested_children
+      end
+
       {
         name: '(模型根)',
         entity_id: 0,
+        occurrence_key: '',
+        component_path_ids: [],
+        component_path_persistent_ids: [],
         kind: 'root',
         definition_name: nil,
         depth: 0,
         hidden: false,
-        children: collect_hierarchy_children(entities)
+        children: children
       }
     end
 
-    def collect_hierarchy_children(entities, depth = 1)
+    def collect_hierarchy_children(entities, depth = 1, parent_ids = [], parent_persistent_ids = [])
       nodes = []
       entities.each do |e|
         case e
         when Sketchup::ComponentInstance, Sketchup::Group
           is_hidden  = e.hidden? || !e.visible? || (e.layer && !e.layer.visible?)
-          def_name   = e.is_a?(Sketchup::ComponentInstance) ? (e.definition.name rescue e.name) : nil
+          # 组件用定义名；群组也给内部定义名（如 Group#3，模型内唯一），供「产品信息」列 SKU 关联
+          def_name   = (e.definition.name rescue nil)
+          def_name   = e.name if (def_name.nil? || def_name.empty?) && e.is_a?(Sketchup::ComponentInstance)
           child_ents = definition_entities(e)
-          children   = collect_hierarchy_children(child_ents, depth + 1)
-          fallback   = def_name || '(未命名群组)'
+          path_ids = parent_ids + [e.entityID]
+          persistent_path_ids = parent_persistent_ids + [persistent_id(e)]
+          children = collect_hierarchy_children(child_ents, depth + 1, path_ids, persistent_path_ids)
+          # 群组的内部定义名不做展示 fallback，避免 UI 出现 "Group#3" 这类系统名
+          fallback   = e.is_a?(Sketchup::Group) || def_name.nil? ? '(未命名群组)' : def_name
           node_name  = (!e.name.nil? && !e.name.empty?) ? e.name : fallback
           entity_tag = ((t = read_takeoff_tags(e)) && t[:tag])
-          nodes << {
-            name: node_name,
-            entity_id: e.entityID,
-            kind: e.is_a?(Sketchup::ComponentInstance) ? 'component_instance' : 'group',
-            definition_name: def_name,
-            depth: depth,
-            hidden: is_hidden,
-            children: children,
-            tag: entity_tag
-          }
+          nodes << hierarchy_node_for_entity(e, depth, path_ids, persistent_path_ids, children,
+                                             name: node_name, definition_name: def_name,
+                                             hidden: is_hidden, tag: entity_tag)
         end
       end
       nodes
+    end
+
+    def hierarchy_node_for_entity(entity, depth, path_ids, persistent_path_ids, children,
+                                  name: nil, definition_name: nil, hidden: nil, tag: nil)
+      definition_name ||= (entity.definition.name rescue nil)
+      if name.nil?
+        fallback = entity.is_a?(Sketchup::Group) || definition_name.nil? ? '(未命名群组)' : definition_name
+        name = (!entity.name.nil? && !entity.name.empty?) ? entity.name : fallback
+      end
+      hidden = entity.hidden? || !entity.visible? || (entity.layer && !entity.layer.visible?) if hidden.nil?
+      tag ||= ((takeoff_tags = read_takeoff_tags(entity)) && takeoff_tags[:tag])
+      {
+        name: name,
+        entity_id: entity.entityID,
+        occurrence_key: ScanItem.path_key(path_ids),
+        component_path_ids: path_ids,
+        component_path_persistent_ids: persistent_path_ids,
+        kind: entity.is_a?(Sketchup::ComponentInstance) ? 'component_instance' : 'group',
+        definition_name: definition_name,
+        depth: depth,
+        hidden: hidden,
+        children: children,
+        tag: tag
+      }
     end
   end
 end

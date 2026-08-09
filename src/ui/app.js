@@ -28,9 +28,14 @@ function switchPage(page) {
   document.querySelectorAll('.page-content').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById('page-' + page).style.display = 'block';
   if (page === 'login' && previousPage !== 'login') callSketchUp('get_cloud_state');
-  if (page === 'comp-mapping') callSketchUp('get_component_mappings');
   if (page === 'settings') callSketchUp('get_settings');
   if (page === 'cloud') callSketchUp('get_cloud_state');
+  if (page === 'system') {
+    if (typeof window.renderSystemManagement === 'function') {
+      window.renderSystemManagement(window._cloudState || { status_message: '正在加载系统信息…' });
+    }
+    callSketchUp('get_cloud_state');
+  }
   if (window._workbench) renderCurrentPage();
 }
 
@@ -47,6 +52,7 @@ function browserPreviewCloudState(extra) {
   var signedIn = !!window._browserPreviewSignedIn;
   var state = {
     api_configured: true,
+    plugin_version: 'browser-preview',
     api_environment: 'browser-preview',
     api_base_url: 'http://127.0.0.1:8000',
     auth: {
@@ -96,6 +102,18 @@ function handleBrowserPreview(action, json) {
     browserPreviewCloudState({ status_message: '浏览器预览：已退出登录', force_login: true });
     return;
   }
+  if (action === 'search_projects') {
+    var projectRequest = {};
+    try { projectRequest = JSON.parse(json || '{}'); } catch(e) { projectRequest = {}; }
+    if (typeof window.receiveProjectResults === 'function') {
+      window.receiveProjectResults({
+        req_id: projectRequest.req_id,
+        items: [],
+        error: '浏览器预览不会调用真实项目接口，请在 SketchUp 插件中查询项目'
+      });
+    }
+    return;
+  }
   if (!window._pluginUnlocked) {
     browserPreviewCloudState({ error: { message: '请先登录平台账号后再使用插件功能' }, force_login: true });
     return;
@@ -114,7 +132,7 @@ function showLoading() {
 }
 function hideLoading() {
   document.getElementById('loading-overlay').style.display = 'none';
-  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = !window._pluginUnlocked; });
+  refreshNavState();
 }
 
 function scanAll() {
@@ -130,13 +148,18 @@ function scanSelected() {
 window._workbench = null;
 window._currentPage = 'login';
 window._pluginUnlocked = false;
+window._cloudLoggingOut = false;
+
+// 导航/扫描按钮的可用状态 = 已登录 且 不在退出登录流程中
+function refreshNavState() {
+  var disabled = !window._pluginUnlocked || window._cloudLoggingOut;
+  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = disabled; });
+  document.querySelectorAll('.sb-nav').forEach(function(b) { b.disabled = disabled; });
+}
 
 function setPluginUnlocked(unlocked) {
   window._pluginUnlocked = !!unlocked;
-  document.querySelectorAll('.sb-btn').forEach(function(b) { b.disabled = !window._pluginUnlocked; });
-  document.querySelectorAll('.sb-nav').forEach(function(b) {
-    b.disabled = !window._pluginUnlocked;
-  });
+  refreshNavState();
   if (!window._pluginUnlocked && window._currentPage !== 'login') switchPage('login');
 }
 
@@ -145,7 +168,7 @@ setPluginUnlocked(false);
 window.receiveFaces = function(data) {
   if (!window._workbench) return;
   if (!window._workbench._facesCache) window._workbench._facesCache = {};
-  var cacheKey = data.entity_id + ':' + data.su_material;
+  var cacheKey = occurrencePathKey(data.component_path_ids || [data.entity_id]) + ':' + data.su_material;
   window._workbench._facesCache[cacheKey] = data.faces || [];
   if (window._facesRequested) delete window._facesRequested[cacheKey];
   renderModelView(window._workbench);
@@ -165,22 +188,40 @@ function renderWorkbench(data) {
     renderCurrentPage();
   } catch(e) {
     var container = document.getElementById('page-position');
-    container.innerHTML = '<div class="mv-error">渲染错误: ' + e.message + '</div>';
+    container.innerHTML = '';
+    var errorBox = document.createElement('div');
+    errorBox.className = 'mv-error';
+    errorBox.textContent = '渲染错误: ' + e.message;
+    container.appendChild(errorBox);
     console.error('renderWorkbench error:', e);
   }
 }
 
+window.updateComponentSkus = function updateComponentSkus(componentSkus) {
+  if (!window._workbench) return;
+  window._workbench.component_skus = componentSkus || {};
+  if (window._currentPage === 'position') renderPositionView(window._workbench);
+};
+
 function buildWorkbenchIndexes(data) {
   var h = data.hierarchy;
   var byId = {};
+  var byPath = {};
   if (h) {
-    function walk(node) {
+    function walk(node, parentPath) {
+      var path = Array.isArray(node.component_path_ids)
+        ? node.component_path_ids.slice()
+        : (node.entity_id === 0 ? parentPath.slice() : parentPath.concat([node.entity_id]));
+      node.component_path_ids = path;
+      node.occurrence_key = occurrencePathKey(path);
       byId[node.entity_id] = node;
-      (node.children || []).forEach(walk);
+      byPath[node.occurrence_key] = node;
+      (node.children || []).forEach(function(child) { walk(child, path); });
     }
-    walk(h);
+    walk(h, []);
   }
   data._byEntityId = byId;
+  data._byOccurrenceKey = byPath;
 
   var maxDepth = 0;
   if (h) {
@@ -192,14 +233,38 @@ function buildWorkbenchIndexes(data) {
   }
   data._maxDepth = maxDepth;
 
-  // Index geometry_usages by entity_id
+  // 主索引使用完整出现路径；entity_id 索引仅保留旧状态兼容。
   var usagesByEid = {};
+  var usagesByPath = {};
+  var usageByFaceOccurrence = {};
   (data.geometry_usages || []).forEach(function(u) {
     var eid = u.entity_id;
+    var key = u.occurrence_key || occurrencePathKey(u.component_path_ids || [eid]);
+    u.occurrence_key = key;
     usagesByEid[eid] = usagesByEid[eid] || [];
     usagesByEid[eid].push(u);
+    usagesByPath[key] = usagesByPath[key] || [];
+    usagesByPath[key].push(u);
+    (u.face_refs || []).forEach(function(ref) {
+      usageByFaceOccurrence[ref.face_id + ':' + occurrencePathKey(ref.path_ids || [])] = u;
+    });
   });
   data._usagesByEntityId = usagesByEid;
+  data._usagesByPath = usagesByPath;
+  data._usageByFaceOccurrence = usageByFaceOccurrence;
+
+  // Ruby 侧按组件视图计算出的最终汇总行。页面数值优先使用这份数据，
+  // 推送构建器也复用同一份汇总逻辑，确保算量标签变更后两端一致。
+  var componentRowsByEid = {};
+  var componentRowsByPath = {};
+  (data.component_rows || []).forEach(function(row) {
+    var key = row.occurrence_key || occurrencePathKey(row.component_path_ids || [row.entity_id]);
+    row.occurrence_key = key;
+    componentRowsByEid[row.entity_id] = row;
+    componentRowsByPath[key] = row;
+  });
+  data._componentRowsByEntityId = componentRowsByEid;
+  data._componentRowsByPath = componentRowsByPath;
 }
 
 function renderCurrentPage() {
@@ -215,6 +280,14 @@ function esc(s) {
                   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function escAttr(s) { return esc(s).replace(/'/g, "\\'"); }
+
+function occurrencePathKey(pathIds) {
+  return (pathIds || []).map(function(id) { return parseInt(id, 10) || 0; }).join('/');
+}
+
+function nodeOccurrenceKey(node) {
+  return node && (node.occurrence_key || occurrencePathKey(node.component_path_ids || [node.entity_id]));
+}
 
 function csvEscape(v) {
   var s = String(v == null ? '' : v);
@@ -243,29 +316,20 @@ window.highlightFaceInUI = function(faceId, activePathIds) {
   if (!window._workbench) return;
 
   var data = window._workbench;
-  var geoUsages = data.geometry_usages || [];
-  var targetEntityId = null;
-  var targetUsage = null;
+  var targetPathIds = null;
 
   // 按完整路径匹配面：face_id 相同 + path_ids 相同 = 同一实例中的同一个面
   // 使用 face_refs（紧凑索引），避免依赖懒加载的 faces 数组
   var pathIds = activePathIds || [];
-  for (var i = 0; i < geoUsages.length; i++) {
-    var faceRefs = geoUsages[i].face_refs || [];
-    for (var j = 0; j < faceRefs.length; j++) {
-      if (faceRefs[j].face_id === faceId && arraysEqual(faceRefs[j].path_ids, pathIds)) {
-        targetEntityId = geoUsages[i].entity_id;
-        targetUsage = geoUsages[i];
-        break;
-      }
-    }
-    if (targetEntityId !== null) break;
-  }
+  var targetUsage = (data._usageByFaceOccurrence || {})[
+    faceId + ':' + occurrencePathKey(pathIds)
+  ];
+  if (targetUsage) targetPathIds = targetUsage.component_path_ids || pathIds;
 
-  if (targetEntityId === null) return;
+  if (targetPathIds === null) return;
 
   // 展开从根到目标 entity 路径上的所有祖先节点
-  expandAncestorsToEntity(data.hierarchy, targetEntityId);
+  expandAncestorsToPath(targetPathIds);
 
   // 设置高亮面 key（face_id + 路径）并重绘
   _mv.highlightFaceKey = faceId + ':' + pathIds.join(',');
@@ -286,28 +350,9 @@ window.clearFaceHighlight = function() {
   }
 };
 
-// 沿 hierarchy 树查找从根到 targetEid 的路径，展开所有祖先
-function expandAncestorsToEntity(root, targetEid) {
-  function findPath(node, target, path) {
-    if (node.entity_id === target) {
-      path.push(node.entity_id);
-      return true;
-    }
-    for (var i = 0; i < node.children.length; i++) {
-      if (findPath(node.children[i], target, path)) {
-        path.push(node.entity_id);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  var path = [];
-  findPath(root, targetEid, path);
-  for (var i = 0; i < path.length; i++) {
-    if (path[i] !== 0) {
-      _mv.expandedNodes[path[i]] = true;
-    }
+function expandAncestorsToPath(pathIds) {
+  for (var i = 1; i <= pathIds.length; i++) {
+    _mv.expandedNodes[occurrencePathKey(pathIds.slice(0, i))] = true;
   }
 }
 

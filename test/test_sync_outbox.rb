@@ -28,6 +28,7 @@ class TestSyncOutbox < Minitest::Test
       assert_equal 1, records.size
       assert_equal 'hash-2', records.first['payload_hash']
       assert_equal 'HTTP_500', records.first['error_code']
+      assert_empty Dir.glob(File.join(dir, '*.tmp-*'))
     end
   end
 

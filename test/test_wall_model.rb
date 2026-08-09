@@ -1,6 +1,5 @@
 require_relative 'test_helper'
 require 'src/calculator'
-require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/workbench_presenter'
 
@@ -12,7 +11,6 @@ module SuTakeoff
   # 验证：洞口扣减、薄板去重、踢脚线线材识别仍然正确。
   class TestWallModel < Minitest::Test
     def setup
-      @cm = ComponentMapping.new
       # 踢脚线通过图层规则触发 :length → solid_linear 路由
       # （3.5 档策略自动匹配已随材料映射移除，改由第 2 档图层规则触发）
       @policy = TakeoffPolicy.new(layer_rules: { '踢脚线' => :length })
@@ -208,7 +206,6 @@ module SuTakeoff
         hierarchy: { name: '(root)', entity_id: 0, kind: 'root',
                      definition_name: nil, depth: 0, hidden: false, children: [] },
         colors: {},
-        component_mapping: @cm,
         policy: @policy, tag_defs: {}
       ).build[:geometry_usages]
     end
@@ -234,9 +231,8 @@ module SuTakeoff
       floor = find_usage(usages, LIVING_EID, 'marble_01')
       refute_nil floor
       assert_in_delta 40.0, floor[:qty_area], 0.01
-      # 无显式标签/图层规则时落到几何启发式 → confidence='heuristic'
-      # （材料映射档已移除，原 mapping unit 触发的 'explicit' 不再适用）
-      assert_equal 'heuristic', floor[:confidence]
+      # 普通面按确定性的面积默认值计量，不应显示“待确认”启发警告。
+      assert_equal 'explicit', floor[:confidence]
     end
 
     def test_living_paint_combines_walls_and_ceiling_with_opening_deduction

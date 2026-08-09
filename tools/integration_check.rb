@@ -44,7 +44,6 @@ require 'src/strategies/skip'
 require 'src/length_calculators/base'
 require 'src/strategies/builtin'
 require 'src/strategies/loader'
-require 'src/component_mapping'
 require 'src/takeoff_policy'
 require 'src/calculator'
 require 'src/api/api_error'
@@ -120,7 +119,6 @@ end
 def build_payload(items)
   Api::QuantityPayloadBuilder.new(
     items: items, openings: [],
-    component_mapping: ComponentMapping.new,
     policy: TakeoffPolicy.new,
     binding: fake_binding
   ).build
@@ -131,7 +129,7 @@ def payload_json_bytes(payload)
 end
 
 # ---------------------------------------------------------------- 主流程
-puts "SU Takeoff 云端同步联调脚本"
+puts "SU Takeoff 项目绑定与云端推送联调脚本"
 puts "Base=#{BASE_URL} env=#{ENV_NAME} dry_run=#{DRY_RUN}"
 
 section '构建 payload（离线）'
@@ -196,7 +194,6 @@ outbox = Api::SyncOutbox.new(dir: outbox_dir)
 service = Api::QuantitySyncService.new(
   api_client: client, auth_session: session, outbox: outbox,
   binding: fake_binding,
-  component_mapping: ComponentMapping.new,
   policy: TakeoffPolicy.new,
   persist_success: false
 )

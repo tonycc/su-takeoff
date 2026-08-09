@@ -17,6 +17,12 @@ module SuTakeoff
         @method = method
         @default_unit = default_unit
         @match_rules = match_rules || {}
+        pattern = @match_rules[:definition_name_pattern]
+        @definition_name_pattern = if pattern.nil? || pattern.is_a?(Regexp)
+                                     pattern
+                                   else
+                                     Regexp.new(pattern.to_s)
+                                   end
       end
 
       # 是否匹配此 item / context（用于自动决议）。
@@ -57,9 +63,8 @@ module SuTakeoff
         if (kws = @match_rules[:definition_name_includes])
           return true if kws.any? { |k| name.include?(k) }
         end
-        if (pat = @match_rules[:definition_name_pattern])
-          re = pat.is_a?(Regexp) ? pat : Regexp.new(pat.to_s)
-          return true if name =~ re
+        if @definition_name_pattern
+          return true if name =~ @definition_name_pattern
         end
         false
       end

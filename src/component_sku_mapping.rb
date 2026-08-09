@@ -1,14 +1,22 @@
 require 'json'
 
 module SuTakeoff
-  ComponentSkuRecord = Struct.new(
-    :definition_name, :platform_sku_id, :platform_sku_code, :platform_sku_name,
-    keyword_init: true
-  )
+  component_sku_record_members = [
+    :definition_name,
+    :platform_sku_id, :platform_sku_code, :platform_sku_name,
+    :project_product_id, :product_id, :catalog_code, :product_name, :project_product_code
+  ]
+  if const_defined?(:ComponentSkuRecord, false)
+    unless ComponentSkuRecord.members == component_sku_record_members
+      raise 'ComponentSkuRecord 字段已变化，请重启 SketchUp 以完成开发版更新'
+    end
+  else
+    ComponentSkuRecord = Struct.new(*component_sku_record_members, keyword_init: true)
+  end
 
-  # 组件级 SKU 关联（按组件定义名 definition_name）。
-  # 独立于 ComponentMapping，仅用于选型展示，
-  # 不参与算量决议——选择/更换 SKU 不会改变算量结果。
+  # 组件级项目产品关联（按组件定义名 definition_name）。
+  # 独立于算量数据，仅用于选型展示；旧 platform_sku_* 字段保留兼容历史数据。
+  # 不参与算量决议——选择/更换实际产品不会改变算量结果。
   class ComponentSkuMapping
     def initialize
       @records = {}
@@ -21,7 +29,29 @@ module SuTakeoff
         definition_name: definition_name,
         platform_sku_id: normalize_optional(sku_id),
         platform_sku_code: normalize_optional(sku_code),
-        platform_sku_name: normalize_optional(sku_name)
+        platform_sku_name: normalize_optional(sku_name),
+        project_product_id: nil,
+        product_id: nil,
+        catalog_code: nil,
+        product_name: nil,
+        project_product_code: nil
+      )
+    end
+
+    def set_project_product(definition_name, project_product_id:, product_id:, catalog_code:,
+                            product_name:, project_product_code: nil)
+      return if definition_name.nil? || definition_name.to_s.strip.empty?
+
+      @records[definition_name] = ComponentSkuRecord.new(
+        definition_name: definition_name,
+        platform_sku_id: nil,
+        platform_sku_code: nil,
+        platform_sku_name: nil,
+        project_product_id: normalize_optional(project_product_id),
+        product_id: normalize_optional(product_id),
+        catalog_code: normalize_optional(catalog_code),
+        product_name: normalize_optional(product_name),
+        project_product_code: normalize_optional(project_product_code)
       )
     end
 
@@ -44,13 +74,26 @@ module SuTakeoff
         {
           platform_sku_id: r.platform_sku_id,
           platform_sku_code: r.platform_sku_code,
-          platform_sku_name: r.platform_sku_name
+          platform_sku_name: r.platform_sku_name,
+          project_product_id: r.project_product_id,
+          product_id: r.product_id,
+          catalog_code: r.catalog_code,
+          product_name: r.product_name,
+          project_product_code: r.project_product_code
         }
       }
     end
 
     def save_json(path)
-      File.write(path, JSON.pretty_generate(to_h))
+      temp_path = "#{path}.tmp-#{Process.pid}-#{Thread.current.object_id}"
+      File.open(temp_path, 'wb') do |file|
+        file.write(JSON.pretty_generate(to_h))
+        file.flush
+        file.fsync rescue nil
+      end
+      File.rename(temp_path, path)
+    ensure
+      File.delete(temp_path) if temp_path && File.exist?(temp_path)
     end
 
     def load_json(path)
@@ -70,8 +113,24 @@ module SuTakeoff
     private
 
     def load_from_parsed(data)
+      return unless data.is_a?(Hash)
       data.each do |def_name, h|
-        set(def_name, h['platform_sku_id'], h['platform_sku_code'], h['platform_sku_name'])
+        next unless h.is_a?(Hash)
+        has_project_product = h.is_a?(Hash) && %w[project_product_id product_id catalog_code product_name project_product_code].any? do |key|
+          h.key?(key) && !h[key].to_s.strip.empty?
+        end
+        if has_project_product
+          set_project_product(
+            def_name,
+            project_product_id: h['project_product_id'],
+            product_id: h['product_id'],
+            catalog_code: h['catalog_code'],
+            product_name: h['product_name'],
+            project_product_code: h['project_product_code']
+          )
+        else
+          set(def_name, h['platform_sku_id'], h['platform_sku_code'], h['platform_sku_name'])
+        end
       end
     end
 

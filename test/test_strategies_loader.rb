@@ -63,6 +63,25 @@ module SuTakeoff
       end
     end
 
+    def test_wrong_shape_and_invalid_regexp_are_skipped_without_crashing
+      Tempfile.create(['strategies', '.json']) do |f|
+        f.write(JSON.generate({
+          'wrong_shape' => [],
+          'bad_pattern' => {
+            'base_strategy' => 'solid_linear',
+            'match_rules' => { 'definition_name_pattern' => '[' }
+          }
+        }))
+        f.close
+
+        _, err = capture_io { Strategies::Loader.load_from_file!(f.path) }
+
+        assert_nil Strategies::Registry.get(:wrong_shape)
+        assert_nil Strategies::Registry.get(:bad_pattern)
+        assert_match(/skipped/, err)
+      end
+    end
+
     def test_loaded_variant_uses_base_aggregate_logic
       Tempfile.create(['strategies', '.json']) do |f|
         f.write(JSON.generate({

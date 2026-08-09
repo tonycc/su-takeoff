@@ -91,6 +91,20 @@ class TestAuthSession < Minitest::Test
     assert_equal('PERMISSION_DENIED', session.last_error.code)
   end
 
+  def test_failed_identity_validation_does_not_persist_refresh_token
+    store = SuTakeoff::Api::MemoryCredentialStore.new
+    client = FakeClient.new(
+      login_response: auth_response,
+      me_response: { 'client_id' => 'another-client', 'permissions' => ['quantity:ingest'] }
+    )
+    session = SuTakeoff::Api::AuthSession.new(api_client: client, credential_store: store)
+
+    assert_raises(SuTakeoff::Api::ApiError) do
+      session.login(username: 'user@example.com', password: 'secret')
+    end
+    assert_nil store.read('user@example.com')
+  end
+
   def test_tenant_selection_required_sets_state_without_raising
     error = SuTakeoff::Api::ApiError.new(
       '请选择租户',

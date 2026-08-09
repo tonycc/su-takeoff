@@ -17,12 +17,29 @@ module SuTakeoff
       def self.load_from_file!(path)
         return unless File.exist?(path)
         data = JSON.parse(File.read(path))
+        unless data.is_a?(Hash)
+          warn "[SuTakeoff::Strategies::Loader] root must be an object for #{path}"
+          return
+        end
         data.each do |name, spec|
+          unless spec.is_a?(Hash)
+            warn "[SuTakeoff::Strategies::Loader] skipped #{name.inspect}: spec must be an object"
+            next
+          end
           base = Registry.get(spec['base_strategy']&.to_sym)
           next unless base  # 静默跳过无效引用
-          rules = symbolize_keys(spec['match_rules'] || {})
-          variant = build_variant(base, name.to_sym, rules)
-          Registry.register(variant)
+          raw_rules = spec['match_rules'] || {}
+          unless raw_rules.is_a?(Hash)
+            warn "[SuTakeoff::Strategies::Loader] skipped #{name.inspect}: match_rules must be an object"
+            next
+          end
+          begin
+            rules = symbolize_keys(raw_rules)
+            variant = build_variant(base, name.to_s.to_sym, rules)
+            Registry.register(variant)
+          rescue RegexpError, ArgumentError => e
+            warn "[SuTakeoff::Strategies::Loader] skipped #{name.inspect}: #{e.message}"
+          end
         end
       rescue JSON::ParserError => e
         warn "[SuTakeoff::Strategies::Loader] JSON parse failed for #{path}: #{e.message}"
